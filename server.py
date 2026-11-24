@@ -252,6 +252,36 @@ def article_label(node):
     return number + ('의' + sub if sub else '')
 
 
+def count_law_catalog(data):
+    query = str(data.get('query', '')).strip()
+    if not 2 <= len(query) <= 100:
+        raise ApiError('법령 검색어를 2~100자로 입력하세요.', 400)
+    cursor = data.get('cursor') or {'target': 'law', 'page': 1}
+    if not isinstance(cursor, dict):
+        raise ApiError('검색 위치를 다시 확인하세요.', 400)
+    target, page = cursor.get('target'), cursor.get('page')
+    if target not in (['law', 'admrul'] if data.get('includeAdmin') is True else ['law']) or type(page) is not int or not 1 <= page <= 1000:
+        raise ApiError('검색 위치를 다시 확인하세요.', 400)
+    params = {'query': query, 'search': '1', 'display': '100', 'page': str(page)}
+    if target == 'law':
+        params['nw'] = '1'
+    root = law_request('lawSearch.do', target=target, **params)
+    rows = root.findall('.//' + ('law' if target == 'law' else 'admrul'))
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime('%Y%m%d')
+    count = 0
+    for row in rows:
+        mst = text(row, '법령일련번호' if target == 'law' else '행정규칙일련번호')
+        effective = re.sub(r'\D', '', text(row, '시행일자'))
+        if target == 'law' and text(row, '법령구분명') not in ('법률', '대통령령'):
+            continue
+        if mst.isdigit() and len(effective) == 8 and effective <= today:
+            count += 1
+    total = root.findtext('totalCnt', default='')
+    more = int(total) > page * 100 if total.isdigit() else len(rows) == 100
+    next_cursor = {'target': target, 'page': page + 1} if more else {'target': 'admrul', 'page': 1} if target == 'law' and data.get('includeAdmin') is True else None
+    return {'count': count, 'cursor': next_cursor}
+
+
 def law_article_catalog(data):
     if data.get('target') == 'admrul':
         return admin_document(data)
@@ -364,7 +394,8 @@ def verify_basis(candidate):
         support_task = pool.submit(verify_citation, {'law': '개인정보 보호법', **rule['support']}) if rule.get('support') else None
         pipa = pipa_task.result()
         support = support_task.result() if support_task else None
-    return {**pipa, 'pipa': pipa, 'basisCode': code, 'type': candidate.get('type', 'required'),
+    paragraph = verify_citation({'law': '개인정보 보호법', 'article': rule['article'], 'paragraph': rule['paragraph'], 'clause': ''})
+    return {**pipa, 'pipa': pipa, 'pipaParagraph': paragraph, 'basisCode': code, 'type': candidate.get('type', 'required'),
             'pipaVerified': True, 'support': support, 'supportVerified': not rule.get('support') or bool(support)}
 
 
@@ -387,7 +418,7 @@ def verify_with_basis(candidate):
             basis = basis_task.result()
         if actual.get('kind') not in ('법률', '대통령령'):
             raise ApiError('기본 적용 근거는 법률·시행령에서 선택하세요. 행정규칙·시행규칙은 단독 근거로 적용하지 않습니다.', 422)
-        actual.update({k: basis[k] for k in ('pipa', 'pipaVerified', 'support', 'supportVerified')})
+        actual.update({k: basis[k] for k in ('pipa', 'pipaParagraph', 'pipaVerified', 'support', 'supportVerified')})
     return {**actual, 'basisCode': code, 'type': candidate.get('type', 'required'),
             'reason': str(candidate.get('reason', ''))[:1400]}
 
@@ -587,11 +618,10 @@ def review_application(data, secret):
 
 def apply_reviewed_basis(data, secret):
     items = review_material(data)
-    if not data.get('reviewToken'):
-        raise ApiError('적용 전에 선택한 항목의 AI 검토를 진행하세요.', 409)
     actual = verify_with_basis(data)
-    verify_review_token(secret, data['reviewToken'], review_fingerprint(actual, items))
-    return {**actual, 'reviewConfirmed': True}
+    if data.get('reviewToken'):
+        verify_review_token(secret, data['reviewToken'], review_fingerprint(actual, items))
+    return {**actual, 'reviewConfirmed': bool(data.get('reviewToken'))}
 
 
 def demo_results(context):
@@ -628,7 +658,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == '/api/status':
             return self.respond(200, {'aiConfigured': bool(os.environ.get('OPENROUTER_API_KEY')),
                'lawConfigured': bool(os.environ.get('LAW_API_OC')), 'demoAvailable': self.server.demo,
-               'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'app': 'dongui', 'apiVersion': 4, 'csrfToken': self.server.csrf})
+               'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'app': 'dongui', 'apiVersion': 5, 'csrfToken': self.server.csrf})
         # Explicit allowlist: .env, server code, tests, docs, .git and arbitrary files are never served.
         if path == '/':
             path = '/index.html'
@@ -647,7 +677,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self.connection.settimeout(200)
         path = urllib.parse.urlsplit(self.path).path
-        if path not in ('/api/law/search', '/api/law/verify', '/api/law/catalog', '/api/law/articles', '/api/law/basis', '/api/law/review', '/api/law/apply'):
+        if path not in ('/api/law/search', '/api/law/verify', '/api/law/catalog', '/api/law/count', '/api/law/articles', '/api/law/basis', '/api/law/review', '/api/law/apply'):
             return self.respond(404, {'error': '요청한 API가 없습니다.'})
         # Same-origin browser API, JSON + per-process token; no permissive CORS.
         if self.headers.get('X-CSRF-Token') != self.server.csrf or self.headers.get('Sec-Fetch-Site') == 'cross-site':
@@ -679,6 +709,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = review_application(data, self.server.review_secret)
             elif path.endswith('/apply'):
                 result = apply_reviewed_basis(data, self.server.review_secret)
+            elif path.endswith('/count'):
+                result = count_law_catalog(data)
             elif path.endswith('/catalog'):
                 result = search_law_catalog(data)
             elif path.endswith('/basis'):

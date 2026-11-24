@@ -23,6 +23,11 @@ try:
     assert result['verified'] and result['pipaVerified'] and result['excerpt']
     print('PASS 국가법령정보센터 검색 → 현행법령 식별 → 제15조 제1항 제4호 본문 조회')
     print('확인 시점:',result['verifiedAt'],'시행일:',result['effectiveDate'])
+    assert result['pipaParagraph']['paragraph']=='1' and not result['pipaParagraph']['clause']
+    request={'basisCode':'contract','type':'required','items':[{'id':'test-item-1','name':'성명','purpose':'근로계약 체결 및 계약서 작성','recipient':'','type':'required','context':'collect','classification':'general'}]}
+    skipped=server.apply_reviewed_basis(request,secrets.token_bytes(32))
+    assert skipped['verified'] and not skipped['reviewConfirmed']
+    print('PASS 제15조 제1항 전체 조회 및 AI 없이 공식 원문 확인·적용 경로')
     if args.search or args.review:
         models=json.loads(server.request_bytes('https://openrouter.ai/api/v1/models'))
         model=os.environ.get('OPENROUTER_MODEL',server.MODEL)

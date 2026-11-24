@@ -41,9 +41,23 @@ class LawTests(unittest.TestCase):
         pipa={'law':'개인정보 보호법','article':'15','paragraph':'1','clause':'5','excerpt':'테스트 긴급 요건','verified':True}
         with patch.object(server,'verify_citation',return_value=pipa) as fetch:
             result=server.verify_with_basis({'basisCode':'emergency','type':'required','reason':'테스트 사실관계'})
-        self.assertEqual(fetch.call_count,1)
+        self.assertEqual(fetch.call_count,2)
         self.assertTrue(result['pipaVerified'])
         self.assertEqual(result['law'],'개인정보 보호법')
+    def test_counts_only_current_laws_and_decrees(self):
+        body=SEARCH.replace(b'</LawSearch>', '<law><법령구분명>총리령</법령구분명><법령일련번호>444</법령일련번호><시행일자>20200101</시행일자></law></LawSearch>'.encode())
+        with patch.object(server,'law_request',return_value=server.xml(body)):
+            result=server.count_law_catalog({'query':'시험'})
+        self.assertEqual(result,{'count':2,'cursor':None})
+        for cursor in ['invalid',{'target':'admrul','page':1},{'target':'law','page':True}]:
+            with self.assertRaises(server.ApiError):server.count_law_catalog({'query':'시험','cursor':cursor})
+    def test_full_pipa_paragraph_is_separate_from_selected_clause(self):
+        def citation(data):return {**data,'excerpt':'항 전체' if not data['clause'] else '선택 호','verified':True}
+        with patch.object(server,'verify_citation',side_effect=citation):
+            result=server.verify_basis({'basisCode':'contract'})
+        self.assertEqual(result['pipa']['excerpt'],'선택 호')
+        self.assertEqual(result['pipaParagraph']['excerpt'],'항 전체')
+        self.assertEqual(result['pipaParagraph']['paragraph'],'1')
     def test_paragraph_includes_descendant_clauses_and_points(self):
         body=BODY.replace('</호내용>'.encode(),'</호내용><목><목번호>가.</목번호><목내용>테스트 하위 목</목내용></목>'.encode())
         with patch.object(server,'law_request',side_effect=[server.xml(SEARCH),server.xml(body)]):
@@ -149,7 +163,7 @@ class LawTests(unittest.TestCase):
         self.assertEqual(len(result['rejected']),1)
     def test_api_authoritative_text_replaces_ai_text(self):
         actual={'law':'시험법','kind':'법률','excerpt':'공식 API 테스트 원문','verified':True}
-        with patch.object(server,'verify_citation',side_effect=[actual,{'excerpt':'연결 조항'}]):
+        with patch.object(server,'verify_citation',side_effect=[actual,{'excerpt':'연결 조항'},{'excerpt':'항 전체 원문'}]):
             result=server.verify_with_basis({'basisCode':'statutory','excerpt':'AI가 만든 가짜 원문'})
         self.assertEqual(result['excerpt'],'공식 API 테스트 원문')
         self.assertTrue(result['pipaVerified'])
@@ -183,7 +197,9 @@ class ReviewTests(unittest.TestCase):
                 result=server.review_application(self.data,b'secret')
             self.assertNotIn('token',result['review'])
     def test_apply_requires_valid_prior_review_without_recalling_model(self):
-        with self.assertRaises(server.ApiError):server.apply_reviewed_basis(self.data,b'secret')
+        with patch.object(server,'verify_with_basis',return_value=self.actual),patch.object(server,'ai_application_review') as model:
+            skipped=server.apply_reviewed_basis(self.data,b'secret')
+        self.assertFalse(skipped['reviewConfirmed']);model.assert_not_called()
         fp=server.review_fingerprint(self.actual,self.items)
         token=server.create_review_token(b'secret',fp)
         with patch.object(server,'verify_with_basis',return_value=self.actual),patch.object(server,'ai_application_review') as model:
