@@ -57,7 +57,7 @@ class LawTests(unittest.TestCase):
         with patch.object(server,'law_request',return_value=server.xml(body)) as request:
             results=server.search_law_catalog({'query':'시험','page':1})
         self.assertEqual(len(results['laws']),2)
-        self.assertEqual(request.call_args.kwargs['display'],'5')
+        self.assertEqual(request.call_args.kwargs['display'],'20')
         self.assertEqual(request.call_args.kwargs['target'],'law')
     def test_law_request_cache_reuses_same_query_and_is_credential_scoped(self):
         with server.LAW_CACHE_LOCK:server.LAW_CACHE.clear()
@@ -78,6 +78,36 @@ class LawTests(unittest.TestCase):
         with patch.object(server,'law_request',return_value=server.xml(detail)):
             result=server.law_article_catalog({'law':'테스트규정','mst':'777','target':'admrul'})
         self.assertTrue(result['referenceOnly']);self.assertNotIn('bad()',result['text'])
+
+    def test_catalog_fills_five_eligible_results_and_cursor_retains_remainder(self):
+        def row(index,kind='법률'):
+            return f'<law><법령명한글>시험법 {index}</법령명한글><법령구분명>{kind}</법령구분명><법령일련번호>{100+index}</법령일련번호><시행일자>20200101</시행일자></law>'
+        body=('<LawSearch><totalCnt>8</totalCnt>'+row(0,'부령')+row(1,'부령')+''.join(row(i) for i in range(2,8))+'</LawSearch>').encode()
+        with patch.object(server,'law_request',return_value=server.xml(body)):
+            first=server.search_law_catalog({'query':'시험'})
+            second=server.search_law_catalog({'query':'시험','cursor':first['cursor']})
+        self.assertEqual(len(first['laws']),5)
+        self.assertEqual(len(second['laws']),1)
+        self.assertFalse(second['hasNext'])
+        self.assertEqual(len({l['mst'] for l in first['laws']+second['laws']}),6)
+    def test_catalog_fills_across_raw_pages(self):
+        rejected=''.join(f'<law><법령명한글>제외 {i}</법령명한글><법령구분명>부령</법령구분명><법령일련번호>{i+1}</법령일련번호><시행일자>20200101</시행일자></law>' for i in range(20))
+        accepted=''.join(f'<law><법령명한글>법률 {i}</법령명한글><법령구분명>법률</법령구분명><법령일련번호>{i+101}</법령일련번호><시행일자>20200101</시행일자></law>' for i in range(6))
+        with patch.object(server,'law_request',side_effect=[server.xml(('<LawSearch><totalCnt>26</totalCnt>'+rejected+'</LawSearch>').encode()),server.xml(('<LawSearch><totalCnt>26</totalCnt>'+accepted+'</LawSearch>').encode())]) as call:
+            result=server.search_law_catalog({'query':'법률'})
+        self.assertEqual(len(result['laws']),5);self.assertEqual(call.call_count,2)
+        self.assertEqual(result['cursor'],{'target':'law','page':2,'offset':5})
+    def test_catalog_can_fill_five_across_law_and_opt_in_admin(self):
+        admin='<AdmRulSearch><totalCnt>4</totalCnt>'+''.join(f'<admrul><행정규칙명>행정 {i}</행정규칙명><행정규칙일련번호>{i+500}</행정규칙일련번호><시행일자>20200101</시행일자></admrul>' for i in range(4))+'</AdmRulSearch>'
+        with patch.object(server,'law_request',side_effect=[server.xml(SEARCH),server.xml(admin.encode())]):
+            result=server.search_law_catalog({'query':'시험','includeAdmin':True})
+        self.assertEqual(len(result['laws']),5);self.assertEqual(result['cursor']['target'],'admrul')
+        with self.assertRaises(server.ApiError):server.search_law_catalog({'query':'시험','cursor':result['cursor']})
+    def test_catalog_partial_scan_is_resumable_not_false_empty(self):
+        body='<LawSearch><totalCnt>10000</totalCnt>'+''.join(f'<law><법령명한글>제외 {i}</법령명한글><법령구분명>부령</법령구분명><법령일련번호>{i+1}</법령일련번호><시행일자>20200101</시행일자></law>' for i in range(20))+'</LawSearch>'
+        with patch.object(server,'law_request',return_value=server.xml(body.encode())) as call:
+            result=server.search_law_catalog({'query':'시험'})
+        self.assertTrue(result['incomplete']);self.assertTrue(result['hasNext']);self.assertEqual(call.call_count,8)
 
     def test_bom_env_from_windows_notepad(self):
         import tempfile
@@ -128,6 +158,54 @@ class LawTests(unittest.TestCase):
         with patch.object(urllib.request,'urlopen',side_effect=e):
             with self.assertRaises(server.ApiError) as got:server.request_bytes('https://example.test')
         self.assertNotIn('secret',str(got.exception))
+
+class ReviewTests(unittest.TestCase):
+    def setUp(self):
+        self.items=[{'id':'item-1','name':'성명','purpose':'계약 체결','recipient':'','type':'required','context':'collect','classification':'general'}]
+        self.data={'basisCode':'contract','type':'required','items':self.items}
+        self.actual={'law':'개인정보 보호법','article':'15','paragraph':'1','clause':'4','mst':'123','basisCode':'contract','type':'required','excerpt':'실제 테스트 원문','pipa':{'excerpt':'공식 테스트 기본 근거'},'verified':True,'pipaVerified':True}
+    def test_review_token_binds_source_items_and_expiry(self):
+        secret=b'test-secret';fp=server.review_fingerprint(self.actual,self.items)
+        token=server.create_review_token(secret,fp)
+        server.verify_review_token(secret,token,fp)
+        for changed in [server.review_fingerprint({**self.actual,'excerpt':'변경 원문'},self.items),server.review_fingerprint(self.actual,[{**self.items[0],'purpose':'다른 목적'}])]:
+            with self.assertRaises(server.ApiError):server.verify_review_token(secret,token,changed)
+        with patch.object(server.time,'time',return_value=server.time.time()+301):
+            with self.assertRaises(server.ApiError):server.verify_review_token(secret,token,fp)
+        with self.assertRaises(server.ApiError):server.verify_review_token(b'wrong',token,fp)
+    def test_review_rejects_mismatched_scope_and_identifiers(self):
+        for altered in [{'context':'provide'},{'id':'not valid id'},{'type':'optional'},{'classification':'unknown'}]:
+            with self.assertRaises(server.ApiError):server.review_material({**self.data,'items':[{**self.items[0],**altered}]})
+    def test_review_does_not_grant_token_for_uncertainty_or_rejection(self):
+        for verdict in ['needs_information','not_supported']:
+            review={'items':[{'id':'item-1','verdict':verdict}],'canApply':False}
+            with patch.object(server,'verify_with_basis',return_value=self.actual),patch.object(server,'ai_application_review',return_value=review):
+                result=server.review_application(self.data,b'secret')
+            self.assertNotIn('token',result['review'])
+    def test_apply_requires_valid_prior_review_without_recalling_model(self):
+        with self.assertRaises(server.ApiError):server.apply_reviewed_basis(self.data,b'secret')
+        fp=server.review_fingerprint(self.actual,self.items)
+        token=server.create_review_token(b'secret',fp)
+        with patch.object(server,'verify_with_basis',return_value=self.actual),patch.object(server,'ai_application_review') as model:
+            result=server.apply_reviewed_basis({**self.data,'reviewToken':token},b'secret')
+        self.assertTrue(result['reviewConfirmed']);self.assertEqual(model.call_count,0)
+    def test_model_receives_official_evidence_and_missing_item_is_not_possible(self):
+        response={'choices':[{'message':{'content':json.dumps({'summary':'테스트 요약','items':[]})}}]}
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'only-server-token'}),patch.object(server,'request_bytes',return_value=json.dumps(response).encode()) as call:
+            review=server.ai_application_review(self.actual,self.items)
+        payload=json.loads(call.call_args.args[1]);user=json.loads(payload['messages'][1]['content'])
+        self.assertEqual(user['officialEvidence']['excerpt'],'실제 테스트 원문')
+        self.assertNotIn('only-server-token',call.call_args.args[1].decode())
+        self.assertEqual(review['items'][0]['verdict'],'needs_information');self.assertFalse(review['canApply'])
+    def test_mini_model_does_not_receive_oss_reasoning_parameters(self):
+        response={'choices':[{'message':{'content':json.dumps({'summary':'테스트','items':[{'id':'item-1','verdict':'possible','explanation':'테스트','checks':[]}]})}}]}
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test','OPENROUTER_MODEL':'openai/gpt-4.1-mini'}),patch.object(server,'request_bytes',return_value=json.dumps(response).encode()) as call:
+            result=server.ai_application_review(self.actual,self.items)
+        self.assertTrue(result['canApply']);self.assertNotIn('reasoning',json.loads(call.call_args.args[1]))
+    def test_malformed_review_response_fails_closed(self):
+        response={'choices':[{'message':{'content':'{}'}}]}
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}),patch.object(server,'request_bytes',return_value=json.dumps(response).encode()):
+            with self.assertRaises(server.ApiError):server.ai_application_review(self.actual,self.items)
 
 class HttpTests(unittest.TestCase):
     @classmethod
@@ -196,6 +274,20 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertEqual(len(json.loads(body)['laws']),2)
         self.assertEqual(self.call('/api/law/articles',{'law':'시험법','mst':'123'},csrf=False)[0],403)
+    def test_review_and_apply_http_validate_signed_scope(self):
+        data={'basisCode':'contract','type':'required','items':[{'id':'http-item','name':'성명','purpose':'계약 체결','recipient':'','type':'required','context':'collect','classification':'general'}]}
+        actual={'law':'개인정보 보호법','article':'15','paragraph':'1','clause':'4','mst':'123','basisCode':'contract','type':'required','excerpt':'테스트 원문','pipa':{'excerpt':'테스트 연결 근거'},'verified':True,'pipaVerified':True}
+        review={'summary':'검토 완료','items':[{'id':'http-item','name':'성명','verdict':'possible','explanation':'테스트 검토 의견','checks':[]}],'canApply':True,'model':'test-model'}
+        with patch.object(server,'verify_with_basis',return_value=actual),patch.object(server,'ai_application_review',return_value=review):
+            status,body=self.call('/api/law/review',data)
+            self.assertEqual(status,200)
+            token=json.loads(body)['review']['token']
+            status,result=self.call('/api/law/apply',{**data,'reviewToken':token})
+            self.assertEqual(status,200);self.assertTrue(json.loads(result)['reviewConfirmed'])
+            changed={**data,'items':[{**data['items'][0],'purpose':'다른 처리 목적'}],'reviewToken':token}
+            self.assertEqual(self.call('/api/law/apply',changed)[0],409)
+            self.assertEqual(self.call('/api/law/apply',data,csrf=False)[0],403)
+
     def test_demo_must_be_explicitly_enabled(self):
         self.srv.demo=False
         data={'items':[{'name':'성명','context':'collect','type':'required'}],'demo':True}

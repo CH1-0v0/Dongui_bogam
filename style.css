@@ -135,3 +135,66 @@
 .catalog-result{min-height:64px;flex-shrink:0}
 .law-mode{min-width:140px;max-width:190px}
 @media(max-width:640px){.application-scope .actions>*{width:100%}.law-result{min-width:0}.law-result .check{white-space:normal}.category-items .row{gap:8px}}
+/* Step 3 polish: preserve the existing palette and family, separate reading roles. */
+:root{--step-title-size:24px;--task-title-size:20px;--step-body-size:16px;--step-meta-size:13px;--catalog-row-size:88px;--catalog-status-size:44px}
+.law-search-panel{border-top:1px solid var(--line);padding:26px}
+.law-search-panel h2{font-size:var(--step-title-size);font-weight:800;line-height:1.35;letter-spacing:-.025em;margin:0 0 16px;text-wrap:balance}
+.law-search-panel>p{max-width:72ch;line-height:1.8;font-size:var(--step-body-size);margin:12px 0}
+.law-search-panel .actions{margin-top:22px}
+.ground-category{padding:26px;margin-top:8px}
+.ground-category>h2{font-size:var(--step-title-size);font-weight:800;line-height:1.35;letter-spacing:-.025em;margin:0 0 8px}
+.ground-category .ground-purpose{font-size:var(--step-meta-size);margin:0 0 18px}
+.ground-editor{font-size:var(--step-body-size);line-height:1.75}
+.manual-ground>summary{font-size:22px;line-height:1.4;font-weight:800;padding:8px 0;letter-spacing:-.02em}
+.ground-form{padding-top:24px}
+.ground-editor h4{font-size:var(--task-title-size);line-height:1.4;font-weight:800;letter-spacing:-.02em;margin:0 0 12px;text-wrap:balance}
+.ground-editor h5,.selected-law h5{font-size:17px;font-weight:750;line-height:1.45;margin:0 0 12px}
+.ground-editor p{font-size:var(--step-body-size);line-height:1.8;max-width:72ch;margin:10px 0 16px;text-wrap:pretty}
+.ground-editor .muted,.ground-editor .catalog-hint,.field-caption,.source-citation{font-size:var(--step-meta-size);line-height:1.7;color:var(--muted)}
+.ground-editor .field>span{font-size:14px;font-weight:750;margin-bottom:8px}
+.basis-selection,.law-picker{background:transparent;border:0;border-radius:0;padding:0;margin:32px 0 0}
+.application-scope,.ai-review-panel{margin-top:32px}
+.review-confirmations{border-top:1px solid var(--line);padding-top:22px;margin-top:28px}
+.review-confirmations .check{padding:10px 0;line-height:1.7}
+.application-scope fieldset{border:1px solid var(--line);padding:16px;border-radius:8px;margin:20px 0}
+.application-scope .scope-option{min-height:44px;padding:9px 0;gap:12px;align-items:center}
+.application-scope .scope-option b{font-size:var(--step-body-size);font-weight:600}
+.application-scope .scope-option input{margin:0}
+.law-excerpt{border:1px solid var(--line);border-radius:4px;background:var(--soft);font-size:var(--step-body-size);line-height:1.85;margin:16px 0;padding:16px;max-height:320px}
+.candidate-block{border:0;border-top:1px solid var(--line);border-radius:0;padding:18px 0;margin-top:16px;background:transparent}
+.candidate-block>summary{display:list-item;cursor:pointer;font-size:18px;font-weight:750;line-height:1.5;min-height:48px;padding:8px 0}
+.candidate-block>summary .pill{display:inline-block;font-size:12px;vertical-align:middle;margin:6px 0 4px 10px;white-space:normal;font-weight:600}
+.candidate-title{letter-spacing:-.02em}
+.candidate-body{padding:12px 0 4px}
+.candidate-body>.actions{margin-top:20px}
+.candidate-instruction{background:var(--wash);border-radius:6px;padding:14px 16px;font-size:14px;line-height:1.8}
+.category-items .row{font-size:16px}
+.category-items .pill{white-space:normal}
+.catalog-search-box{margin-top:20px}
+.catalog-search-box .check{white-space:normal}
+.catalog-search-box .catalog-hint{margin:12px 0}
+.catalog-window{height:calc(var(--catalog-row-size)*5 + var(--catalog-status-size) + 2px);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:16px;background:var(--white);contain:layout}
+.catalog-results{display:block;height:calc(var(--catalog-row-size)*5);max-height:none;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;margin:0;padding:0}
+.catalog-result{display:flex;flex-direction:column;justify-content:center;gap:4px;width:100%;height:var(--catalog-row-size);min-height:var(--catalog-row-size);border:0;border-bottom:1px solid var(--line);border-radius:0;padding:10px 16px;text-align:left;overflow:hidden;background:var(--white);font-weight:600}
+.catalog-result strong{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:15px;line-height:1.4}
+.catalog-result small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;width:100%;font-size:12px;line-height:1.5}
+.catalog-sentinel{height:1px;min-height:1px}
+.catalog-feedback{height:var(--catalog-status-size);display:flex;align-items:center;justify-content:center;gap:8px;overflow:auto;border-top:1px solid var(--line);padding:0 10px;background:var(--soft);color:var(--muted);font-size:12px;line-height:1.4}
+.catalog-feedback button{font-size:12px;min-height:44px;padding:4px 8px;flex-shrink:0}
+.selected-law{margin-top:28px}
+.selected-law .field-caption{margin-bottom:4px}
+.ai-review-panel>button{margin:4px 0 12px}
+.ai-review-result{border-block:1px solid var(--line);padding:22px 0;margin:16px 0}
+.ai-review-result>ul{list-style:none;padding:0;margin:16px 0}
+.ai-review-result>ul>li{padding:16px 0;border-top:1px solid var(--line)}
+.ai-review-result>ul>li>div{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.ai-review-result .pill{white-space:normal}
+.ai-review-result li p{margin:8px 0}
+.ai-review-result li ul{padding-left:20px;font-size:14px;color:var(--muted)}
+.ground-editor input,.ground-editor textarea{caret-color:var(--blue)}
+.ground-editor ::selection,.ground-category ::selection{background:var(--wash);color:var(--ink)}
+.catalog-results{scrollbar-color:var(--muted) var(--soft);scrollbar-width:thin}
+.source-disclosure summary{font-size:14px;min-height:44px;cursor:pointer}
+@media(max-width:640px){:root{--catalog-row-size:96px}.law-search-panel,.ground-category{padding:20px}.law-search-panel h2,.ground-category>h2{font-size:22px}.ground-editor h4{font-size:19px}.manual-ground>summary{font-size:20px}.candidate-block>summary{font-size:17px}.catalog-result{padding-inline:12px}.candidate-block>summary .pill{margin-left:0}.review-confirmations .check{white-space:normal}.ground-editor .actions>*{width:100%}}
+.ground-editor p.muted{font-size:var(--step-body-size);line-height:1.8}
+.ground-editor p.ground-purpose,.ground-editor p.field-caption,.ground-editor p.review-meta{font-size:var(--step-meta-size);line-height:1.7}
