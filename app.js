@@ -122,25 +122,67 @@ const articleNumber = value => value.trim().replace(/\s/g,'').replace(/^제/,'')
 const subNumber = (value,unit) => value.trim().replace(/\s/g,'').replace(/^제/,'').replace(new RegExp(unit+'$'),'');
 const cite = draft => [draft.law.trim(), draft.article?'제'+draft.article.replace(/^(\d+)(?:의(\d+))?$/,(_,n,sub)=>n+'조'+(sub?'의'+sub:'')):'',draft.paragraph?'제'+draft.paragraph+'항':'',draft.clause?'제'+draft.clause+'호':''].filter(Boolean).join(' ');
 const unresolvedRnn = () => entries().filter(e=>rnn(e.i.name)&&!LawBasis.notice(e.i.bases,lawContext(e),'rnn'));
+// Group presentation only; keep each adoption's scope and confirmations intact.
+const groundDisplayKey = b => JSON.stringify([
+ b.basisCode, b.law.replace(/\s/g,''), b.article, b.paragraph, b.clause,
+ b.excerpt||'', b.verified===true, b.pipaVerified===true, b.mst||'',
+ b.effectiveDate||'', b.conditionsConfirmed===true, b.authorityConfirmed===true, b.specific===true
+]);
+function groupGroundRows(list){
+ const groups=new Map();
+ for(const entry of list){
+  const key=JSON.stringify([...new Set((entry.i.bases||[]).map(groundDisplayKey))].sort());
+  if(!groups.has(key))groups.set(key,[]);
+  groups.get(key).push(entry);
+ }
+ return [...groups.values()];
+}
+function groundPurpose(list){
+ const purposes=[...new Set(list.map(({g})=>g.purpose.trim()).filter(Boolean))];
+ const recipients=[...new Set(list.map(({g})=>g.recipient?.trim()).filter(Boolean))];
+ return `<p class="ground-purpose muted">${purposes.map(safe).join(' / ')}${recipients.length?' · 제공받는 자: '+recipients.map(safe).join(', '):''}</p>`;
+}
+function groupedGroundDetails(){
+ const groups=new Map();
+ for(const basis of state.grounds){
+  const key=groundDisplayKey(basis);
+  if(!groups.has(key))groups.set(key,[]);
+  groups.get(key).push(basis);
+ }
+ if(!groups.size)return '';
+ return `<section class="panel adopted-grounds"><h2>채택한 처리 근거</h2>${[...groups.values()].map(records=>{
+  const b=records[0];
+  const ids=[...new Set(records.flatMap(record=>record.ids))];
+  const scope=ids.map(id=>{const entry=entries().find(e=>e.i.id===id);return entry?groundTypes[groundType(entry)]+' · '+entry.i.name:'';}).filter(Boolean);
+  return `<details class="basis"><summary>${safe(LawBasis.rules[b.basisCode]?.label||'처리 근거')} · ${safe(b.cite)} · 적용 ${ids.length}개</summary><p><strong>${safe(LawBasis.rules[b.basisCode]?.pipa||'')}</strong></p><p>근거 조항: ${safe(b.cite)}</p><p class="muted">${b.verified?'공식 원문 확인':'원문 미확인'} · ${LawBasis.rules[b.basisCode]?.effect==='consent'?'동의서 유지':'연결 근거와 항목별 요건에 따라 반영'}</p><p>${safe(b.excerpt)}</p><p><strong>적용 항목</strong> ${scope.map(safe).join(', ')}</p>${records.map(record=>`<div class="basis-scope"><p><strong>${safe(groundTypes[record.type])}</strong> · ${record.ids.map(id=>safe(getItem(id)?.name)).join(', ')}</p>${record.reason?`<p><strong>적용 이유</strong> ${safe(record.reason)}</p>`:''}<div class="actions"><button data-edit-ground="${record.id}" aria-label="${safe(groundTypes[record.type]+' '+record.ids.map(id=>getItem(id)?.name).join(', '))} 근거 수정">적용 범위 및 근거 수정</button><button data-remove-ground="${record.id}" aria-label="${safe(groundTypes[record.type]+' '+record.ids.map(id=>getItem(id)?.name).join(', '))} 근거 채택 취소">채택 취소</button></div></div>`).join('')}</details>`;
+ }).join('')}</section>`;
+}
 function grounds(){
  const draft=state.groundDraft;
  const missing=entries().filter(e=>!LawBasis.notice(e.i.bases,lawContext(e),lawClassification(e.i)));
  return `${lawSearchPanel()}<div class="info"><div><strong>처리 근거와 적용 범위 지정</strong><p>동의를 받는 항목은 근거를 채택하지 않아도 됩니다. 동의 없이 처리하는 경우에는 연결 조항과 개별 법령의 적용 요건을 확인하세요.</p></div></div>
  <div class="actions"><button class="primary" data-add-ground>＋ 근거 추가</button><button data-search>${state.search?'참고 조문 숨기기':'참고 조문 보기'}</button><a href="https://www.law.go.kr/" target="_blank" rel="noopener">국가법령정보센터에서 검색 ↗</a></div>
- ${draft?`<section class="panel ground-editor"><h2>${draft.editId?'근거 및 적용 범위 수정':'근거 직접 입력'}</h2><label class="field"><span>처리 유형${requiredMark}</span><select data-ground-type required>${Object.entries(groundTypes).map(([k,label])=>`<option value="${k}" ${draft.type===k?'selected':''}>${label}</option>`).join('')}</select></label><div class="law-fields">${field('법령명','groundDraft.law',draft.law,'법령명',false,true)}${field('조','groundDraft.article',draft.article,'예: 24의2',false,true)}${field('항 (해당 시)','groundDraft.paragraph',draft.paragraph,'예: 1')}${field('호 (해당 시)','groundDraft.clause',draft.clause,'예: 1')}</div><div class="stack">${field('조문 내용 (선택)','groundDraft.excerpt',draft.excerpt,'확인한 조문 내용을 입력하세요.',true)}${field('이 항목에 적용되는 이유 (선택)','groundDraft.reason',draft.reason,'처리 목적과 조문의 적용 요건을 확인한 내용을 입력하세요.',true)}</div>${basisEditor(draft)}<fieldset><legend>적용할 항목${requiredMark}</legend>${groundEntries(draft.type).length?groundEntries(draft.type).map(({key,g,i})=>`<label class="scope-option"><input type="checkbox" data-scope="${i.id}" ${draft.ids.includes(i.id)?'checked':''}><span><b>${safe(i.name)}</b><small>${groupNames[key]} · ${categoryNames[kind(i)]} · ${safe(g.purpose)}${g.recipient?' · '+safe(g.recipient):''}</small></span></label>`).join(''):'<p class="muted">이 유형의 등록 항목이 없습니다.</p>'}</fieldset>
+ ${draft?`<section class="panel ground-editor"><h2>${draft.editId?'근거 및 적용 범위 수정':'근거 직접 입력'}</h2><label class="field"><span>처리 유형${requiredMark}</span><select data-ground-type required>${Object.entries(groundTypes).map(([k,label])=>`<option value="${k}" ${draft.type===k?'selected':''}>${label}</option>`).join('')}</select></label><div class="law-fields">${field('법령명','groundDraft.law',draft.law,'법령명',false,true)}${field('조','groundDraft.article',draft.article,'예: 24의2',false,true)}${field('항 (해당 시)','groundDraft.paragraph',draft.paragraph,'예: 1')}${field('호 (해당 시)','groundDraft.clause',draft.clause,'예: 1')}</div><div class="stack">${field('조문 내용 (선택)','groundDraft.excerpt',draft.excerpt,'확인한 조문 내용을 입력하세요.',true)}${field('이 항목에 적용되는 이유 (선택)','groundDraft.reason',draft.reason,'처리 목적과 조문의 적용 요건을 확인한 내용을 입력하세요.',true)}</div>${basisEditor(draft)}<fieldset><legend>적용할 항목${requiredMark}</legend>${groundPurpose(groundEntries(draft.type))}${groundEntries(draft.type).length?groundEntries(draft.type).map(({key,g,i})=>`<label class="scope-option"><input type="checkbox" data-scope="${i.id}" ${draft.ids.includes(i.id)?'checked':''}><span><b>${safe(i.name)}</b><small>${groupNames[key]} · ${categoryNames[kind(i)]}${g.recipient?' · '+safe(g.recipient):''}</small></span></label>`).join(''):'<p class="muted">이 유형의 등록 항목이 없습니다.</p>'}</fieldset>
  ${draft.basisCode==='residentLaw'&&draft.ids.some(key=>rnn(getItem(key)?.name||''))?`<div class="info warn">${checkbox('주민등록번호의 구체적인 처리 근거와 적용 요건을 확인했습니다.','data-specific',draft.specific,true)}</div>`:''}
  <p class="notice" id="ground-status" role="status">${safe(message)}</p><div class="actions"><button class="primary" data-adopt-ground>근거 채택</button><button data-cancel-ground>취소</button></div></section>`:''}
  ${Object.entries(groundTypes).map(([type,label])=>{
   const list=groundEntries(type);
   if(!list.length)return '';
-  const saved=state.grounds.filter(b=>b.type===type);
-  return `<section class="panel"><h2>${label}</h2>${list.map(({key,g,i})=>{
-   const section=key==='provide'?(g.outside?18:17):key==='extra'?18:15;
-   const additional=rnn(i.name)?'24조의2':kind(i)==='unique'?'24조':kind(i)==='sensitive'?'23조':'';
-   return `<div class="row"><div class="grow"><b>${safe(i.name)}</b><small>${safe(g.purpose)}${g.recipient?' · '+safe(g.recipient):''}</small>${state.search?`<small>참고 조문 <a href="${reference}/제${section}조" target="_blank" rel="noopener">제${section}조 ↗</a>${additional?` · <a href="${reference}/제${additional}" target="_blank" rel="noopener">제${additional} ↗</a>`:''}</small>`:''}</div><span class="pill ${i.bases?.length?'':'pending'}">${i.bases?.length?'채택 '+i.bases.length+'건':'동의 진행 가능'}</span></div>`;
-  }).join('')}${saved.map(b=>`<details class="basis"><summary>${safe(LawBasis.rules[b.basisCode]?.label||'처리 근거')} · 적용 ${b.ids.length}개</summary><p><strong>${safe(LawBasis.rules[b.basisCode]?.pipa||'')}</strong></p><p>근거 조항: ${safe(b.cite)}</p><p class="muted">${b.verified?'공식 원문 확인':'원문 미확인'} · ${LawBasis.rules[b.basisCode]?.effect==='consent'?'동의서 유지':'연결 근거와 항목별 요건에 따라 반영'}</p><p>${safe(b.excerpt)}</p><p><strong>적용 이유</strong> ${safe(b.reason)}</p><p><strong>적용 항목</strong> ${b.ids.map(key=>safe(getItem(key)?.name)).join(', ')}</p><div class="actions"><button data-edit-ground="${b.id}">적용 범위 및 근거 수정</button><button data-remove-ground="${b.id}">채택 취소</button></div></details>`).join('')}</section>`;
+  return `<section class="panel ground-category" data-ground-category="${type}"><h2>${label}</h2>${groundPurpose(list)}${groupGroundRows(list).map(rows=>{
+   const bases=[...new Map((rows[0].i.bases||[]).map(b=>[groundDisplayKey(b),b])).values()];
+   const references=new Set();
+   for(const {key,g,i} of rows){
+    references.add('제'+(key==='provide'?(g.outside?18:17):key==='extra'?18:15)+'조');
+    if(rnn(i.name))references.add('제24조의2');else if(kind(i)==='unique')references.add('제24조');else if(kind(i)==='sensitive')references.add('제23조');
+   }
+   return `<div class="row ground-items"><div class="grow"><b>${rows.map(({i})=>safe(i.name)).join(', ')}</b>${bases.length?`<small>${bases.map(b=>safe(b.cite)).join(' / ')}</small>`:''}${state.search?`<small>참고 조문 ${[...references].map(section=>`<a href="${reference}/${section}" target="_blank" rel="noopener">${section} ↗</a>`).join(' · ')}</small>`:''}</div><span class="pill ${bases.length?'':'pending'}">${bases.length?'채택 '+bases.length+'건':'동의 진행 가능'}</span></div>`;
+  }).join('')}</section>`;
  }).join('')}
- ${missing.length?`<section class="panel"><h2>동의 절차로 진행할 항목 <span class="pill pending">${missing.length}개</span></h2><ul class="unconfirmed">${missing.map(entry=>`<li><strong>${safe(entry.i.name)}</strong> · ${groundTypes[groundType(entry)]} · ${safe(entry.g.purpose)}${entry.g.recipient?' · '+safe(entry.g.recipient):''}</li>`).join('')}</ul></section>`:''}
+ ${groupedGroundDetails()}
+ ${missing.length?`<section class="panel"><h2>동의 절차로 진행할 항목 <span class="pill pending">${missing.length}개</span></h2><ul class="unconfirmed">${Object.entries(groundTypes).map(([type,label])=>{
+  const list=missing.filter(entry=>groundType(entry)===type);
+  return list.length?`<li><strong>${label}</strong>${groundPurpose(list)}<span>${list.map(({i})=>safe(i.name)).join(', ')}</span></li>`:'';
+ }).join('')}</ul></section>`:''}
  ${unresolvedRnn().length?`<div class="info warn"><div><strong id="rrn-block">주민등록번호 처리 근거 확인이 필요합니다</strong><p>${unresolvedRnn().map(e=>groupNames[e.key]+' · '+safe(e.i.name)).join(', ')}. 수집·제공 근거와 제24조의2의 별도 처리 허용 근거를 모두 확인해 채택하거나 2단계에서 항목을 삭제하세요.</p></div></div>`:''}`;
 }
 function syncGrounds(){

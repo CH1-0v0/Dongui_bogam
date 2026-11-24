@@ -95,3 +95,11 @@
 .rejected-laws{margin-top:16px;color:var(--warn)}
 .law-search-panel .pill{white-space:normal}
 @media(max-width:640px){.law-search-controls>*{width:100%}.law-result{padding:14px}.basis-selection{padding:12px}.law-result .panelhead{align-items:flex-start}.law-search-panel>.panelhead{flex-wrap:wrap}}
+
+.ground-category h2{margin-bottom:4px}
+.ground-purpose{font-size:13px;margin:0 0 12px;overflow-wrap:anywhere}
+.ground-items .grow{min-width:0;overflow-wrap:anywhere}
+.basis-scope{border-top:1px solid var(--line);padding:12px 0}
+.basis-scope:last-child{padding-bottom:0}
+.unconfirmed .ground-purpose{margin-bottom:2px}
+.unconfirmed li+li{margin-top:12px}
