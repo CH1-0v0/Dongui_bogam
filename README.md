@@ -32,3 +32,5 @@ UI와 PDF·HWPX 회귀 검증은 Playwright와 Chromium이 설치된 개발 환�
 입력·분류 화면은 짧은 스크롤 선택창과 드래그 이동을 제공합니다. 2단계는 모든 처리 유형을 펼쳐 표시하며, 4단계는 상·하단 완성 버튼과 고지사항 전용 안내를 제공합니다. [전체 화면 변경 안내](docs/editor-flow.md)를 참고하세요.
 
 첨부 안내서 반영: 처리 상황별 법령 등록, 주민등록번호 동의 제외, 동의와 하단 고지 분리, 표 편집·저장, 동의 구분별 최종 체크, 제목 기반 파일 저장을 제공합니다. [안내서 반영 기준과 검증](docs/guideline-application.md)을 참고하세요.
+
+Cloudflare 운영 배포는 Python 로컬 서버와 분리된 Workers 백엔드를 사용합니다. [무료 플랜 배포·Wrangler 로그인·Secrets 설정](docs/cloudflare.md)을 참고하세요.

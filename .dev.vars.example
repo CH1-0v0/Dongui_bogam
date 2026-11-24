@@ -1,0 +1,3 @@
+# Local Workers emulator only. Never put keys in wrangler.jsonc or dist/.
+OPENROUTER_API_KEY=
+LAW_API_OC=

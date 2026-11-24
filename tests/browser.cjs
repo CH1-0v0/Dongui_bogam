@@ -11,6 +11,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   page.on('pageerror',e=>errors.push(e.message));await fs.mkdir('.test-output',{recursive:true});
   await page.route('**/api/privacy/classify',r=>r.fulfill({json:{items:r.request().postDataJSON().items.map(i=>({...i,verdict:'high',reason:'테스트: 건강 상태 등 사생활 정보가 드러날 가능성 검토'}))}}));
   const stage3=async()=>{
+   const ready=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/status'&&r.ok());
    await page.goto(base);
    await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');
    await page.locator('.quick-create-form [type=submit]').click();
@@ -25,7 +26,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
    await page.locator('[data-path="groups.provide.period"]').fill('교육 종료 후 30일');
    await page.locator('[data-item-preset]').last().selectOption('성명');
    await page.locator('[data-next]').click();await page.locator('[data-next]').click();
-   await page.waitForSelector('[data-law-mode] option[value=demo]',{state:'attached'});
+   await ready;await page.locator('[data-ai-law]').waitFor();
   };
 
   const proof=code=>{const rule=rules[code];const pipa={law:'개인정보 보호법',article:rule.article,paragraph:rule.paragraph,clause:rule.clause,cite:rule.pipa,excerpt:'테스트: 공식 기본 조항의 적용 요건',verified:true};return {...pipa,basisCode:code,pipa,pipaParagraph:{excerpt:'테스트: 제15조 제1항 전체 · 제1호부터 제7호까지'},paragraphSegments:[{text:'테스트: 제1항 전체',clause:'',label:'①'},...Array.from({length:7},(_,n)=>({text:'테스트 호 원문 '+(n+1),clause:String(n+1),label:(n+1)+'.'}))],articleExcerpt:'테스트: 제15조 전체 원문 · 제1항과 하위 호 포함',pipaVerified:true,supportVerified:true,support:rule.support?{cite:'개인정보 보호법 제15조 제1항 제5호',excerpt:'테스트: 목적 내 제공의 수집 요건'}:null};};
