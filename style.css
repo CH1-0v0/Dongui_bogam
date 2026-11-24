@@ -113,3 +113,7 @@
 .law-picker-selects select{width:100%;min-width:0}
 .picked-citation{margin-top:16px}
 @media(max-width:640px){.law-picker-selects{grid-template-columns:minmax(0,1fr)}}
+.workspace>.stack,.ground-editor,.ground-editor fieldset,.law-picker .field{min-width:0}
+.ground-editor .check{white-space:normal;align-items:flex-start}
+.ground-editor .check input,.ground-editor .scope-option input{flex-shrink:0}
+.law-picker .law-search-controls .field{min-width:0}

@@ -56,6 +56,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
  console.log('PASS official search result → article/paragraph/clause selection without text entry');
  await page.screenshot({path:'.test-output/step3-law-picker.png',fullPage:true});
  await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:'.test-output/picker-mobile.png',fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await page.setViewportSize({width:1440,height:1100});
  // Return to original adopted basis; edits are not saved on failure.
