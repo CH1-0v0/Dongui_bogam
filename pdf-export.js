@@ -90,16 +90,17 @@ export async function createPdf(body,tableGrid){
   const heading=element.tHead?.rows[0];
   const widths=Array.from(heading.cells,cell=>{
    const text=nodeText(cell);
-   return text==='구분'?.55:text==='개인정보 항목'?1.25:1;
+   return ['구분','처리 방식'].includes(text)?.55:text==='개인정보 항목'?1.25:1;
   });
   const total=widths.reduce((sum,width)=>sum+width,0);
   const columns=widths.map(width=>contentWidth*width/total);
   const padding=5, leading=16;
-  const prepare=(row,header=false)=>row.map(({cell},index)=>{
+  const prepare=(row,header=false)=>row.map((entry,index)=>{
+   const cell=entry.cell;
    const emphasized=!header&&(cell.tagName==='TH'||cell.querySelector('strong'));
    const font=header||emphasized?bold:regular;
    const size=emphasized?11.5:10.5;
-   return {font,size,color:emphasized?blue:ink,lines:wrapText(nodeText(cell),font,size,columns[index]-2*padding)};
+   return {entry,font,size,color:emphasized?blue:ink,lines:wrapText(nodeText(cell),font,size,columns[index]-2*padding)};
   });
   const count=cells=>Math.max(...cells.map(cell=>cell.lines.length));
   const height=n=>2*padding+n*leading;
@@ -124,36 +125,49 @@ export async function createPdf(body,tableGrid){
   }
   function repeatHead(){drawRow(head,0,count(head),true);}
   const rows=grid.slice(1).map(row=>prepare(row));
-  const firstHeight=rows.length?height(count(rows[0])):0;
-  const firstPair=grid[1]?.some(entry=>entry.span===2)?height(count(rows[1])):0;
-  const rowsOnFirstPage=headHeight+firstHeight+firstPair<=pageHeight-2*margin?firstHeight+firstPair:height(1);
-  room(headHeight+rowsOnFirstPage);
-  repeatHead();
-  for(let index=0;index<rows.length;index++){
-   const cells=rows[index], lines=count(cells);
-   const merged=grid[index+1].flatMap((entry,column)=>entry.start===index+1&&entry.span===2?[column]:[]);
-   if(merged.length){
-    const next=rows[index+1], second=count(next);
-    const combined=height(lines)+height(second);
-    if(combined+headHeight<=pageHeight-2*margin){
-     if(y-combined<margin){nextPage();repeatHead();}
-     drawRow(cells,0,lines,false,merged,1,combined);
-     drawRow(next,0,second,false,merged,2,combined);
-     index++;
-     continue;
+  // Lay out each logical row once. Spanning cells share one text cursor across
+  // rows and page fragments, so common purposes and periods are never repeated.
+  const rowLines=rows.map(row=>Math.max(1,...row.map(cell=>cell.entry.span===1?cell.lines.length:0)));
+  rows.forEach((row,index)=>row.forEach(cell=>{
+   if(cell.entry.start!==index+1||cell.entry.span===1)return;
+   const last=Math.min(rows.length-1,index+cell.entry.span-1);
+   const available=rowLines.slice(index,last+1).reduce((sum,n)=>sum+n,0);
+   if(cell.lines.length>available)rowLines[last]+=cell.lines.length-available;
+  }));
+  room(headHeight+height(1));repeatHead();
+  const cursors=new Map();let fragments=[],budget=y-margin;
+  function flush(){
+   if(!fragments.length)return;
+   const top=y;
+   for(let column=0;column<columns.length;column++){
+    const x=margin+columns.slice(0,column).reduce((sum,n)=>sum+n,0);
+    let start=0,offset=0;
+    while(start<fragments.length){
+     const cell=rows[fragments[start].row][column];let end=start+1;
+     while(end<fragments.length&&rows[fragments[end].row][column].entry.cell===cell.entry.cell)end++;
+     const cellHeight=fragments.slice(start,end).reduce((sum,f)=>sum+f.height,0);
+     page.drawRectangle({x,y:top-offset-cellHeight,width:columns[column],height:cellHeight,borderWidth:.5,borderColor:border});
+     const cursor=cursors.get(cell.entry.cell)||0;
+     const capacity=Math.max(0,Math.floor((cellHeight-2*padding)/leading));
+     const visible=cell.lines.slice(cursor,cursor+capacity);
+     const center=(cellHeight-height(visible.length))/2;
+     visible.forEach((line,n)=>draw(line,x+padding,top-offset-padding-center-cell.size-n*leading,cell.font,cell.size,cell.color,columns[column]-2*padding,'center'));
+     cursors.set(cell.entry.cell,cursor+visible.length);
+     offset+=cellHeight;start=end;
     }
    }
-   if(y-height(lines)<margin&&height(lines)+headHeight<=pageHeight-2*margin){
-    nextPage();repeatHead();
-   }
-   for(let start=0;start<lines;){
-    const available=Math.floor((y-margin-2*padding)/leading);
-    if(available<1){nextPage();repeatHead();continue;}
-    const chunk=Math.min(lines-start,available);
-    drawRow(cells,start,chunk);
-    start+=chunk;
+   y-=fragments.reduce((sum,f)=>sum+f.height,0);fragments=[];
+  }
+  for(let row=0;row<rows.length;row++){
+   let remaining=rowLines[row];
+   while(remaining){
+    const available=Math.floor((budget-2*padding)/leading);
+    if(available<1){flush();nextPage();repeatHead();budget=y-margin;continue;}
+    const lines=Math.min(remaining,available),part={row,height:height(lines)};
+    fragments.push(part);budget-=part.height;remaining-=lines;
    }
   }
+  flush();
   y-=10;
  }
 
@@ -167,7 +181,7 @@ export async function createPdf(body,tableGrid){
    if(node.matches('h1'))paragraph(nodeText(node),{font:bold,size:17,color:blue,align:'center',after:12,keep:20});
    else if(node.matches('h3'))paragraph(nodeText(node),{font:bold,size:13,color:blue,after:5,keep:58});
    else if(node.matches('table'))table(node);
-   else if(node.matches('.doc-agency'))paragraph(nodeText(node),{font:bold,size:13,align:'center'});
+   else if(node.matches('.doc-agency'))paragraph(nodeText(node),{font:bold,size:15,align:'center'});
    else if(node.closest('.sign'))paragraph(nodeText(node),{align:'right'});
    else if(node.matches('.doc-marketing'))paragraph(nodeText(node),{font:bold,size:12,color:blue});
    else if(node.matches('.doc-note'))paragraph(nodeText(node).replace(/^※\s*/,''),{prefix:'※'});

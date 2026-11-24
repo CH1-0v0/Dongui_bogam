@@ -317,7 +317,7 @@ def law_article_catalog(data):
     return {'law': text(row, '법령명한글'), 'mst': mst, 'effectiveDate': text(row, '시행일자'), 'articles': articles, 'sourceUrl': 'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=' + mst}
 
 
-def extract_article(root, article, paragraph='', clause=''):
+def article_node(root, article, paragraph='', clause=''):
     major, _, sub = article.partition('의')
     matches = [n for n in root.findall('.//조문단위')
                if text(n, '조문여부') == '조문' and text(n, '조문번호').lstrip('0') == major.lstrip('0')
@@ -338,10 +338,31 @@ def extract_article(root, article, paragraph='', clause=''):
         if len(candidates) != 1:
             raise ApiError('요청한 호가 없거나 항 지정이 필요합니다.', 422)
         node = candidates[0]
-    excerpt = node_excerpt(node)
+    return node
+
+
+def extract_article(root, article, paragraph='', clause=''):
+    excerpt = node_excerpt(article_node(root, article, paragraph, clause))
     if not excerpt:
         raise ApiError('요청한 조문의 본문을 확인하지 못했습니다.', 422)
     return excerpt
+
+
+def paragraph_segments(node):
+    segments = []
+    def visit(part, clause='', label=''):
+        if part.tag == '호':
+            clause = leading_number(text(part, '호번호'))
+        if part.tag in ('항', '호', '목'):
+            label = text(part, {'항': '항번호', '호': '호번호', '목': '목번호'}[part.tag])
+        if part.tag in ('조문내용', '항내용', '호내용', '목내용'):
+            value = ''.join(part.itertext()).strip()
+            if value:
+                segments.append({'text': value, 'clause': clause, 'label': label})
+        for child in part:
+            visit(child, clause, label)
+    visit(node)
+    return segments
 
 
 def leading_number(value):
@@ -375,7 +396,9 @@ def verify_citation(candidate):
     if clause:
         cite += f' 제{clause}호'
     return {'law': text(row, '법령명한글'), 'article': article, 'paragraph': paragraph, 'clause': clause,
-            'cite': cite, 'excerpt': excerpt, 'articleExcerpt': extract_article(root, article), 'verified': True, 'mst': mst,
+            'cite': cite, 'excerpt': excerpt, 'articleExcerpt': extract_article(root, article),
+            'paragraphExcerpt': extract_article(root, article, paragraph) if paragraph else '',
+            'paragraphSegments': paragraph_segments(article_node(root, article, paragraph)) if paragraph else [], 'verified': True, 'mst': mst,
             'kind': text(row, '법령구분명'), 'effectiveDate': text(row, '시행일자'), 'verifiedAt': dt.datetime.now(dt.timezone.utc).isoformat(),
             'sourceUrl': 'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=' + mst}
 
@@ -534,7 +557,8 @@ def classify_privacy_items(data):
 건강 상태를 드러내는 상담·진단·복약 등은 실제로 건강 상태가 드러나는지 검토한다. 모든 상담·사진을 무조건 민감정보로 분류하지 마라.
 항목명이 실제로 무엇을 수집하는지 모르면 uncertain으로 하고 없는 사실을 만들지 마라.
 법률상 민감정보 확정 판단이나 숫자 확률을 제시하지 마라. 최종 판단은 담당자가 한다.
-입력 id마다 JSON만 반환: {"items":[{"id":"입력 id","verdict":"high|general|uncertain","reason":"짧은 한국어 설명"}]}"""
+입력 id마다 JSON만 반환: {"items":[{"id":"입력 id","verdict":"high|general|uncertain","reason":"짧은 한국어 설명","included":["건강"]}]}
+included는 실제 포함 가능성이 높은 유형만 최대 2개 선택: 건강, 사상·신념, 정치적 견해, 가입·탈퇴, 성생활, 유전, 범죄경력, 생체인식, 인종·민족, 사생활. 없으면 빈 배열."""
     payload = {'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'temperature': 0.1, 'max_tokens': 1800,
                'response_format': {'type': 'json_object'}, 'provider': {'data_collection': 'deny', 'sort': 'latency'},
                'messages': [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': json.dumps({
@@ -555,7 +579,9 @@ def classify_privacy_items(data):
                 raise ValueError()
             indexed[row['id']] = row
         return {'items': [{'id': value, 'name': item['name'], 'verdict': indexed.get(value, {}).get('verdict', 'uncertain'),
-                           'reason': str(indexed.get(value, {}).get('reason', '항목의 구체적인 의미를 담당자가 확인하세요.'))[:400]}
+                           'reason': str(indexed.get(value, {}).get('reason', '항목의 구체적인 의미를 담당자가 확인하세요.'))[:400],
+                           'included': [kind for kind in indexed.get(value, {}).get('included', []) if isinstance(kind, str) and kind in ('건강', '사상·신념', '정치적 견해', '가입·탈퇴', '성생활', '유전', '범죄경력', '생체인식', '인종·민족', '사생활')][:2]
+                           if isinstance(indexed.get(value, {}).get('included', []), list) else []}
                           for value, item in zip(ids, items)]}
     except (ValueError, TypeError, KeyError, IndexError, AttributeError):
         raise ApiError('민감정보 분류 응답을 확인하지 못했습니다.', 502) from None
@@ -712,7 +738,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == '/api/status':
             return self.respond(200, {'aiConfigured': bool(os.environ.get('OPENROUTER_API_KEY')),
                'lawConfigured': bool(os.environ.get('LAW_API_OC')), 'demoAvailable': self.server.demo,
-               'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'app': 'dongui', 'apiVersion': 6, 'csrfToken': self.server.csrf})
+               'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'app': 'dongui', 'apiVersion': 7, 'csrfToken': self.server.csrf})
         # Explicit allowlist: .env, server code, tests, docs, .git and arbitrary files are never served.
         if path == '/':
             path = '/index.html'

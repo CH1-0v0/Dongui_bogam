@@ -20,8 +20,16 @@ class LawTests(unittest.TestCase):
         with patch.object(server, 'law_request', side_effect=[server.xml(SEARCH),server.xml(BODY)]):
             v=server.verify_citation({'law':'시험법','article':'10','paragraph':'1','clause':'1'})
         self.assertEqual(v['excerpt'],'테스트 호')
+        self.assertEqual(v['paragraphExcerpt'],'테스트 항\n테스트 호')
+        self.assertEqual([part['clause'] for part in v['paragraphSegments']],['','1'])
         self.assertEqual(v['mst'],'123')
         self.assertNotIn('OC=', v['sourceUrl'])
+    def test_paragraph_segments_identify_same_text_in_different_clauses(self):
+        root=server.xml(BODY.replace('</호></항>'.encode(),'<목><목번호>가.</목번호><목내용>테스트 목</목내용></목></호><호><호번호>2.</호번호><호내용>테스트 호</호내용></호></항>'.encode()))
+        segments=server.paragraph_segments(server.article_node(root,'10','1'))
+        self.assertEqual([part['clause'] for part in segments],['','1','1','2'])
+        self.assertEqual([part['label'] for part in segments],['①','1.','가.','2.'])
+        self.assertEqual(segments[1]['text'],segments[3]['text'])
     def test_missing_article_paragraph_clause_rejected(self):
         for args in [('11','',''),('10','2',''),('10','1','99')]:
             with self.assertRaises(server.ApiError):server.extract_article(server.xml(BODY),*args)
