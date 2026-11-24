@@ -66,3 +66,7 @@ TEST_BASE_URL=http://127.0.0.1:8787 node tests/guideline-flow.cjs
 - 공개 서비스에 로그인·기관별 접근 제한이 필요한 경우 별도 설계가 필요합니다. 현재 화면은 공개 도구이며 소수 사용자 시험부터 시작하세요.
 
 확인되지 않은 상태를 배포 완료나 실제 API 성공으로 보고하지 않습니다. 계정 인증·Secrets 입력·실제 배포·공개 URL 검증이 모두 끝나야 운영 배포 완료입니다.
+
+## Workers 런타임 회귀 검증
+
+`npm run test:cloudflare`에는 Node 기반 정책 검증과 실제 workerd 엔진의 `tests/worker-runtime.cjs`가 포함됩니다. 런타임 검증은 네이티브 fetch를 사용하고 외부 응답만 합성 데이터로 대체합니다. Workers에서 fetch를 객체 메서드로 호출할 때의 Illegal invocation, 지원하지 않는 redirect 옵션, 다른 주소로의 인증정보 전달 방지를 검사합니다. 실서비스의 API 인증 성공을 의미하지는 않습니다.

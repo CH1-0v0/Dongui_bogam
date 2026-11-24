@@ -54,8 +54,16 @@ export class LegalApi {
  constructor(env,fetcher=fetch){this.env=env;this.fetcher=fetcher;this.memo=new Map();this.calls=0;}
  async upstream(url,options={},timeout=10000){
   if(++this.calls>40)fail('조회 범위가 넓습니다. 항목이나 검색 범위를 줄여 주세요.',429);
-  let response;try{response=await this.fetcher(url,{...options,redirect:'error',signal:AbortSignal.timeout(timeout)});}catch{fail('외부 API에 연결하지 못했습니다. 잠시 후 다시 시도하세요.',502);}
-  if(!response.ok){if([401,403].includes(response.status))fail('외부 API 인증 또는 접근이 거부되었습니다. 서버의 키·OC·이용 권한을 확인하세요.',502);if(response.status===402)fail('OpenRouter 사용 잔액을 확인하세요.',502);if(response.status===429)fail('외부 API 호출 한도에 도달했습니다. 잠시 후 다시 시도하세요.',429);fail('외부 API 요청이 실패했습니다. 잠시 후 다시 시도하세요.',502);}return readLimited(response);
+  const service=new URL(url).hostname==='openrouter.ai'?'AI 서비스':'국가법령정보센터';
+  // Workers' native fetch requires an unbound call. It supports only manual/follow.
+  // Never follow upstream redirects carrying OC or Authorization credentials.
+  const send=this.fetcher;let response;
+  try{response=await send(url,{...options,redirect:'manual',signal:AbortSignal.timeout(timeout)});}catch(error){
+   if(['AbortError','TimeoutError'].includes(error?.name))fail(service+' 응답 시간이 초과되었습니다. 잠시 후 다시 시도하세요.',504);
+   fail(service+'에 연결하지 못했습니다. 잠시 후 다시 시도하세요.',502);
+  }
+  if(response.status>=300&&response.status<400)fail(service+'가 다른 주소로 연결을 요청하여 중단했습니다. 서버의 API 주소를 확인하세요.',502);
+  if(!response.ok){if([401,403].includes(response.status))fail(service+' 인증 또는 접근이 거부되었습니다. 서버의 키·이용 권한을 확인하세요.',502);if(response.status===402)fail('AI 서비스 사용 잔액을 확인하세요.',502);if(response.status===429)fail(service+' 호출 한도에 도달했습니다. 잠시 후 다시 시도하세요.',429);fail(service+' 요청이 실패했습니다. 잠시 후 다시 시도하세요.',502);}return readLimited(response);
  }
  async law(endpoint,params={}){
   const oc=this.env.LAW_API_OC;if(!oc)fail('법령 검색을 위해 서버에 LAW_API_OC를 설정해 주세요.',503);
