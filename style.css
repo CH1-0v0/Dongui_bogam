@@ -412,3 +412,7 @@
 .item-row[data-personal-kind="general"] .item-hint{color:var(--muted)}
 .item-row[data-personal-kind="sensitive"] .item-hint{color:var(--warn);font-weight:750}
 .item-row[data-personal-kind="unique"] .item-hint{color:var(--blue-dark);font-weight:750}
+
+.item-option-group[data-group-name="직접 입력"]{background:var(--soft);color:var(--ink);border-top:2px solid var(--line)}
+.item-options [data-value="custom"]{font-weight:750;color:var(--blue-dark)}
+.item-classification{display:block}

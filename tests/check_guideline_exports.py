@@ -22,6 +22,8 @@ title=next(i for i,p in enumerate(children) if text(p)=='작성지침 반영 검
 assert not text(children[title+1]);assert not text(children[title+3])
 guardian=next(i for i,p in enumerate(children) if text(p)=='만 14세 미만 아동의 법정대리인 동의')
 assert not text(children[guardian-1])
+agency=next(i for i,p in enumerate(children) if text(p)=='지침 검증 기관 귀중')
+assert not text(children[agency-1])
 all_text=text(body);assert '☞' in all_text and '정보주체:' in all_text and '법정대리인:' in all_text
 relationship=next(p for p in body.findall('.//p:p',ns) if text(p).startswith('아동과의 관계:'))
 white=[r for r in relationship.findall('p:run',ns) if styles[r.get('charPrIDRef')].get('textColor')=='#FFFFFF']

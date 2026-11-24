@@ -171,7 +171,7 @@ function itemNameHelp(item){
  const suggestions=exact?[standard]:similarItemNames(item.name);
  if(!suggestions.length)return safe(hint(item));
  const label=exact?'권장 표기':'비슷한 항목명 · 적용할 이름을 선택하세요';
- return `<span>${label}</span>${suggestions.map(name=>`<button type="button" data-item-suggestion="${safe(name)}" aria-label="${safe(name)} 적용">${safe(name)}</button>`).join('')}`;
+ return `<span class="item-classification">${safe(hint(item))}</span><span>${label}</span>${suggestions.map(name=>`<button type="button" data-item-suggestion="${safe(name)}" aria-label="${safe(name)} 적용">${safe(name)}</button>`).join('')}`;
 }
 const requiredMark = '<span class="required-mark" aria-hidden="true">*</span>';
 const field = (label,path,value,placeholder='',area=false,required=false) => {
@@ -225,7 +225,7 @@ const isManualItemName = item => item.manualName || Boolean(item.name && !itemPr
 const dragHandle=(item,key)=>`<span class="drag-handle" role="button" tabindex="0" draggable="true" data-drag-item="${item.id}" data-drag-group="${key}" aria-label="${safe(item.name||'빈 항목')} 이동" aria-description="위아래 화살표로 순서 변경, 분류 화면에서는 좌우 화살표로 분류 변경">⠿</span>`;
 function itemNameControl(item,index){
  const manual=isManualItemName(item),selected=manual?'custom':item.name;
- const options=itemPresetGroups.flatMap(([label,names])=>[{label},...names.map(name=>({name,value:name}))]).concat({name:'직접 입력',value:'custom'});
+ const options=itemPresetGroups.flatMap(([label,names])=>[{label},...names.map(name=>({name,value:name}))]).concat({label:'직접 입력'},{name:'직접 입력',value:'custom'});
  return `<div class="field item-name"><label class="item-name-label" for="item-trigger-${item.id}"><span class="item-number">${index+1}</span> 개인정보 항목명${requiredMark}</label><div class="item-input-line ${manual?'manual-input-line':''}"><div class="item-picker"><select class="native-item-choice" id="item-choice-${item.id}" data-item-preset="${item.id}" tabindex="-1" aria-hidden="true" required><option value="" ${selected?'':'selected'}>항목을 선택하세요</option>${options.filter(o=>o.value).map(o=>`<option value="${safe(o.value)}" ${selected===o.value?'selected':''}>${safe(o.name)}</option>`).join('')}</select><button id="item-trigger-${item.id}" type="button" data-item-menu="${item.id}" role="combobox" aria-label="${index+1} 개인정보 항목명" aria-expanded="false" aria-controls="item-options-${item.id}" aria-haspopup="listbox">${safe(manual?'직접 입력':item.name||'항목을 선택하세요')} <span aria-hidden="true">⌄</span></button><div id="item-options-${item.id}" class="item-options" role="listbox" aria-label="개인정보 항목" hidden>${options.map(o=>o.label?`<div class="item-option-group" data-group-name="${safe(o.label)}" role="presentation">${safe(o.label)}</div>`:`<button type="button" role="option" data-select-item="${item.id}" data-value="${safe(o.value)}" aria-selected="${selected===o.value}">${safe(o.name)}</button>`).join('')}</div></div>${manual?`<input type="text" aria-label="${index+1} 개인정보 항목명 직접 입력" autocomplete="off" data-name="${item.id}" value="${safe(item.name)}" required>`:''}</div></div>`;
 }
 function basics(){
@@ -647,7 +647,7 @@ function documentHTML(editable=false){
  const consentGroups=new Map(),noticeGroups=new Map();
  for(const row of rows){const consent=row.basis==='consent',groups=consent?consentGroups:noticeGroups;const key=consent?[row.key,row.classification,row.classification==='general'?row.required:''].join('.'):[row.key,Boolean(row.g.outside)].join('.');if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);}
  const title=state.title.trim()||suggestedTitle(),intro=state.intro.trim()||defaultIntro();
- return `<section class="doc"><h1>${safe(title)}</h1><p class="doc-intro">${safe(intro)}</p>${[...consentGroups.values()].map(group=>categoryTable(group,editable)).join('')}${consentGroups.size?signatureBlock():''}${noticeGroups.size?`<section class="notice-section"><h3 class="doc-notice-heading">고지사항 · 별도 동의가 필요하지 않은 처리</h3>${[...noticeGroups.values()].map(group=>noticeTable(group,editable)).join('')}</section>`:''}<p class="doc-agency"><strong>${safe(state.agency||'기관명 미입력')} 귀중</strong></p></section>`;
+ return `<section class="doc"><h1>${safe(title)}</h1><p class="doc-intro">${safe(intro)}</p>${[...consentGroups.values()].map(group=>categoryTable(group,editable)).join('')}${consentGroups.size?signatureBlock():''}${noticeGroups.size?`<section class="notice-section"><h3 class="doc-notice-heading">고지사항</h3>${[...noticeGroups.values()].map(group=>noticeTable(group,editable)).join('')}</section>`:''}<p class="doc-agency"><strong>${safe(state.agency||'기관명 미입력')} 귀중</strong></p></section>`;
 }
 function output(){
  const rows=hasConsent()?refusalSections():[];
@@ -656,7 +656,7 @@ function output(){
  ${hasConsent()?`<fieldset class="panel child-choice"><legend>만 14세 미만 아동 대상 여부${requiredMark}</legend><p class="muted">아동 대상이면 동의서에 법정대리인 동의·서명란을 추가합니다.</p><div class="actions"><label class="check"><input type="radio" name="child" required data-child value="yes" ${state.child?'checked':''}> 대상</label><label class="check"><input type="radio" name="child" required data-child value="no" ${state.child===false?'checked':''}> 대상 아님</label></div></fieldset>`:''}
  <section class="panel stack"><h2>동의 거부 시 불이익</h2>${rows.length?'<p class="muted">동의를 거부하거나 정보를 제공하지 않았을 때의 영향을 적어 주세요.</p>':''}${rows.length?rows.map(s=>field(sectionTitle(s)+(s.classification==='rnn'?' · 번호 미제공 시 안내':''),'refusals.'+s.k.replaceAll('.',':'),state.refusals[s.k],'해당하는 불이익 또는 안내 내용을 입력하세요.',true,true)).join(''):'<p class="not-applicable">동의를 받아 개인정보를 수집하지 않기 때문에 해당사항 없습니다.</p>'}</section>
 </div>
- <section class="panel preview-panel"><div class="panelhead"><h2>A4 문서 미리보기</h2><button data-toggle-document-edit aria-pressed="${documentEditing}">${documentEditing?'저장하기':'표 내용 직접 수정'}</button></div><div class="actions export"><button data-page-preview ${docs?'':'disabled'}>쪽 미리보기</button><button class="primary" data-finish ${docs?'':'disabled'}>완성하기</button></div><p class="notice" id="output-status" role="status"></p><div id="preview-docs">${docs||'<p>문서에 표시할 항목이 없습니다.</p>'}</div></section></div>`;
+ <section class="panel preview-panel"><div class="panelhead"><h2>A4 문서 미리보기</h2><button data-toggle-document-edit aria-pressed="${documentEditing}">${documentEditing?'저장하기':'표 내용 직접 수정'}</button></div><div class="actions export"><button data-page-preview ${docs?'':'disabled'}>쪽 미리보기</button><button class="primary" data-finish ${docs?'':'disabled'}>완성하기 →</button></div><p class="notice" id="output-status" role="status"></p><div id="preview-docs">${docs||'<p>문서에 표시할 항목이 없습니다.</p>'}</div></section></div>`;
 }
 function validateDraft(){
  const missingRefusal=hasConsent()?refusalSections().find(s=>!state.refusals[s.k]?.trim()):null;
@@ -741,7 +741,7 @@ function render(){
  const all=entries();
  const issues=all.filter(({i})=>needsItemReview(i));
  const missing=all.filter(({g})=>!g.purpose.trim()||!g.period.trim()).length;
- app.innerHTML=`<div class="trail"><button data-go="0">홈</button> / 문서 작성</div><div class="title"><h1>${labels[step-1]}</h1><p>${descriptions[step-1]}</p></div><nav class="stepper" aria-label="작성 단계">${labels.map((name,n)=>`<button data-go="${n+1}" ${step===n+1?'aria-current="step"':''} ${n+1>reached||(n===3&&unresolvedRnn().length)?'disabled':''}><span class="stepnum">${String(n+1).padStart(2,'0')}</span>${name}</button>`).join('')}</nav><div class="workspace ${step===4?'wide-output':''}"><div class="stack">${body}<div class="notice" id="message" role="status">${safe(step===3&&state.groundDraft?'':message)}</div><div class="bar"><button data-go="${step-1}">← ${step===1?'홈으로':'이전 단계'}</button>${step<4?`<button class="primary" data-next ${step===3&&unresolvedRnn().length?'disabled aria-describedby="rrn-block"':''}>${step===2?'분류 확정 후 다음':step===3?'문서 작성으로':'다음 단계'} →</button>`:step===4?'<button class="primary" data-finish>완성하기</button>':''}</div></div>${step===4?'':`<aside class="side"><h2>${step===1?'입력 점검':'검토 현황'}</h2><span class="pill">등록 항목 <span id="count">${all.length}</span>개</span><hr><p id="risk">${riskHTML(issues,missing)}</p><p class="muted">분류 제안과 법령 근거는 담당자가 직접 확인합니다.</p><button data-guide>이용 안내</button></aside>`}</div>`;
+ app.innerHTML=`<div class="trail"><button data-go="0">홈</button> / 문서 작성</div><div class="title"><h1>${labels[step-1]}</h1><p>${descriptions[step-1]}</p></div><nav class="stepper" aria-label="작성 단계">${labels.map((name,n)=>`<button data-go="${n+1}" ${step===n+1?'aria-current="step"':''} ${n+1>reached||(n===3&&unresolvedRnn().length)?'disabled':''}><span class="stepnum">${String(n+1).padStart(2,'0')}</span>${name}</button>`).join('')}</nav><div class="workspace ${step===4?'wide-output':''}"><div class="stack">${body}<div class="notice" id="message" role="status">${safe(step===3&&state.groundDraft?'':message)}</div><div class="bar"><button data-go="${step-1}">← ${step===1?'홈으로':'이전 단계'}</button>${step<4?`<button class="primary" data-next ${step===3&&unresolvedRnn().length?'disabled aria-describedby="rrn-block"':''}>${step===2?'분류 확정 후 다음':step===3?'문서 작성으로':'다음 단계'} →</button>`:step===4?'<button class="primary" data-finish>완성하기 →</button>':''}</div></div>${step===4?'':`<aside class="side"><h2>${step===1?'입력 점검':'검토 현황'}</h2><span class="pill">등록 항목 <span id="count">${all.length}</span>개</span><hr><p id="risk">${riskHTML(issues,missing)}</p><p class="muted">분류 제안과 법령 근거는 담당자가 직접 확인합니다.</p><button data-guide>이용 안내</button></aside>`}</div>`;
  const selectAll=document.querySelector('[data-scope-all]');if(selectAll){const checks=[...document.querySelectorAll('[data-scope]')];selectAll.indeterminate=checks.some(c=>c.checked)&&checks.some(c=>!c.checked);}
  if(step===1&&basicsChecked)showBasicsIssues();
 }
@@ -815,7 +815,7 @@ const quickTemplates = [
  {
   title:'강사료·자문료 지급 동의서',
   purpose:'강사료·자문료 지급 및 입금 계좌 확인',
-  items:['성명','은행명','계좌번호','예금주명'],
+  items:['성명','주민등록번호','은행명','계좌번호','예금주명'],
   note:'지급 증빙에 적용되는 기관의 회계·기록관리 기준에 맞춰 기간을 입력하세요. 원천징수나 지급명세서 제출에 주민등록번호가 필요한 경우 적용 법령과 처리 근거를 확인하세요.'
  },
  {
@@ -1389,7 +1389,7 @@ async function createHwpx(body){
   return `<hp:p id="${nextId()}" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:tbl id="${nextId()}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="0" rowCnt="1" colCnt="2" cellSpacing="0" borderFillIDRef="1" noAdjust="0"><hp:sz width="42520" widthRelTo="ABSOLUTE" height="1800" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:tr>${cells}</hp:tr></hp:tbl></hp:run></hp:p>`;
  };
  const paragraphs=documents.flatMap(doc=>{let previous=null;return [...doc.querySelectorAll('h1,h3,table,p')].flatMap(node=>{
-   const gap=(node.matches('h3,.guardian-heading,.sign > p:first-child')&&previous&&!previous.matches('.doc-intro'))?[paragraph('',0,0)]:[];previous=node;
+   const gap=(node.matches('h3,.guardian-heading,.sign > p:first-child,.doc-agency')&&previous&&!previous.matches('.doc-intro'))?[paragraph('',0,0)]:[];previous=node;
    const finish=content=>[...gap,...(Array.isArray(content)?content:[content]),...(node.matches('h1,.doc-intro')?[paragraph('',0,0)]:[])];
    if(node.matches('table'))return finish(hwpxTable(node,paragraph,nextId,preview,cellRenderer));
    if(node.matches('.doc-choice')){
