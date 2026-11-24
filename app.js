@@ -101,26 +101,67 @@ function similarItemNames(name){
  return [...scores].sort((a,b)=>a[1]-b[1]||a[0].localeCompare(b[0],'ko')).slice(0,3).map(([standard])=>standard);
 }
 const rnn = name => /주민\s*등록\s*번호|주민번호/.test(name);
+const statutorySensitiveNames=new Set(['종교','사상','신념','사상·신념','성생활','정치적 견해','노동조합 가입','노동조합 가입·탈퇴','정당 가입','정당 가입·탈퇴','건강정보','건강 정보','진단명','병력','복약정보','유전정보','유전자검사 결과','범죄경력','범죄경력자료','생체인식정보','인종','민족','정당 가입 여부','노동조합 가입 여부','건강 상태','정치적 성향','인종 정보','민족 정보','범죄경력 여부','지문 인증정보','안면 인식정보'].map(itemNameKey));
 function signal(name){
  name=standardItemName(name);
- if(rnn(name)||/여권\s*번호|운전면허\s*번호|외국인등록\s*번호/.test(name)) return 'unique';
- if(/종교|사상|신념|성생활|성 생활|정치적 견해|노동조합 가입|정당 가입|범죄경력|유전정보|건강정보/.test(name)) return 'sensitive';
- if(/병력|진단|질병|장애|상담|생체|인종|민족|복약|심리/.test(name)) return 'possible';
+ if(rnn(name)||/여권\s*번호|운전면허\s*번호|외국인등록\s*번호/.test(name))return 'unique';
+ if(statutorySensitiveNames.has(itemNameKey(name)))return 'sensitive';
+ if(/종교|사상|신념|성생활|정치|노동조합|정당|건강|유전|범죄|병력|진단|질병|장애|상담|생체|인종|민족|복약|심리/.test(name))return 'possible';
  return 'general';
 }
-function suggested(i){ const value=signal(i.name);return value==='possible'?'sensitive':value; }
-const kind = i => i.kind || suggested(i);
-const needsItemReview = i => signal(i.name)!=='general'||!knownItemName(i.name);
+const sensitivityFingerprint=i=>JSON.stringify([i.name.trim(),entries().find(e=>e.i===i)?.g.purpose||'']);
+const currentSensitivity=i=>i.sensitivity?.fingerprint===sensitivityFingerprint(i)?i.sensitivity:null;
+function suggested(i){
+ const value=signal(i.name);if(value==='sensitive'||value==='unique')return value;
+ const result=currentSensitivity(i);
+ if(result?.verdict==='high')return 'sensitive';
+ if(result?.verdict==='general')return 'general';
+ return value==='possible'?'sensitive':'general';
+}
+const kind=i=>i.kind||suggested(i);
+const needsItemReview=i=>signal(i.name)!=='general'||!knownItemName(i.name)||currentSensitivity(i)?.verdict==='high';
 function hint(i){
- const standard = standardItemName(i.name);
+ const standard=standardItemName(i.name);
  if(standard!==i.name.trim())return '권장 표기 · '+standard;
- const type=signal(i.name);
- return ({
-  unique:rnn(standard)?'주민등록번호 · 별도 처리 근거 확인':'고유식별정보',
-  sensitive:'민감정보',
-  possible:'민감정보 가능성 높음',
-  general:knownItemName(i.name)?'일반 개인정보':'사전에 없는 항목명 · 의미와 분류 확인'
- })[type];
+ const type=signal(i.name),result=currentSensitivity(i);
+ if(type==='sensitive')return '민감정보';
+ if(type==='unique')return rnn(standard)?'주민등록번호 · 별도 처리 근거 확인':'고유식별정보';
+ if(result?.status==='loading')return '민감정보 여부 확인 중…';
+ if(result?.verdict==='high')return '민감정보일 가능성 높음 · '+result.reason;
+ if(result?.verdict==='general')return '일반 개인정보 · '+result.reason;
+ if(result?.verdict==='uncertain')return '민감정보 여부 확인 필요 · '+result.reason;
+ if(result?.status==='error')return '민감정보 API 확인 실패 · 담당자가 분류를 확인하세요.';
+ return type==='possible'?'민감정보 여부 확인 필요 · API 미확인':knownItemName(i.name)?'일반 개인정보':'항목명·민감정보 여부 확인 필요';
+}
+let sensitivityTimer,sensitivityFlight=null;
+function scheduleSensitivity(){
+ clearTimeout(sensitivityTimer);sensitivityTimer=setTimeout(()=>{if(step===1)checkSensitivity();},1200);
+}
+function refreshSensitivityHints(){
+ if(step===1){for(const {i} of entries()){const node=document.getElementById('hint-'+i.id);if(node)node.innerHTML=itemNameHelp(i);}refreshRisk();}
+ if(step===2)render();
+ const status=document.querySelector('#sensitivity-status');if(status){const failed=entries().filter(({i})=>currentSensitivity(i)?.status==='error').length;status.innerHTML=sensitivityFlight?'민감정보 여부를 확인하고 있습니다…':failed?`API로 확인하지 못한 항목 ${failed}개 <button data-retry-classification>다시 확인</button>`:'';}
+}
+async function checkSensitivity(force=false){
+ clearTimeout(sensitivityTimer);
+ if(sensitivityFlight){await sensitivityFlight;return checkSensitivity(force);}
+ const pending=entries().filter(({i})=>!['sensitive','unique'].includes(signal(i.name))&&!knownItemName(i.name)&&i.name.trim().length>=2&&(!currentSensitivity(i)||force&&currentSensitivity(i).status==='error')).slice(0,20);
+ if(!pending.length)return;
+ const draftState=state;
+ const batch=pending.map(({i,g})=>({i,fingerprint:sensitivityFingerprint(i),id:i.id,name:i.name,purpose:g.purpose}));
+ for(const item of batch)item.i.sensitivity={fingerprint:item.fingerprint,status:'loading'};
+ sensitivityFlight=(async()=>{
+  try{
+   const result=await lawRequest('/api/privacy/classify',{items:batch.map(({id,name,purpose})=>({id,name,purpose}))});
+   for(const item of batch){
+    if(state!==draftState||getItem(item.id)!==item.i||sensitivityFingerprint(item.i)!==item.fingerprint)continue;
+    const row=result.items.find(row=>row.id===item.id);
+    item.i.sensitivity={fingerprint:item.fingerprint,status:'done',verdict:row?.verdict||'uncertain',reason:row?.reason||'구체적인 의미를 확인하세요.'};
+   }
+  }catch{for(const item of batch)if(state===draftState&&getItem(item.id)===item.i&&sensitivityFingerprint(item.i)===item.fingerprint)item.i.sensitivity={fingerprint:item.fingerprint,status:'error'};}
+ })();
+ refreshSensitivityHints();await sensitivityFlight;sensitivityFlight=null;refreshSensitivityHints();
+ if(state===draftState&&(step===1||step===2))await checkSensitivity();
 }
 function itemNameHelp(item){
  if(!item.name.trim())return '';
@@ -200,7 +241,7 @@ function basics(){
   const title=key==='provide'?'제공받는 자의 ':'';
   const hasRequiredControls=canSetRequired(key);
   return `<section class="panel"><div class="panelhead"><h2>${groupNames[key]}</h2>${checkbox(groupNames[key]+' 사용',`data-enable="${key}"`,g.enabled)}</div>${g.enabled?`<div class="pair">${key==='provide'?field('제공받는 자','groups.provide.recipient',g.recipient,'기관 또는 법인명',false,true)+checkbox('수집 목적 외 제공','data-outside',g.outside):''}${field(title+'이용 목적',`groups.${key}.purpose`,g.purpose,'예: 프로그램 신청 관리',false,true)}${field(title+'보유 및 이용 기간',`groups.${key}.period`,g.period,'예: 사업 종료 후 1년',false,true)}</div>${key==='collect'?`<fieldset class="optional-details"><legend>선택 항목의 이용 조건</legend><div class="pair">${field('선택 항목 이용 목적','groups.collect.optionalPurpose',g.optionalPurpose,'이용 목적과 같으면 공백')}${field('선택 항목 보유 및 이용 기간','groups.collect.optionalPeriod',g.optionalPeriod,'보유 및 이용 기간과 같으면 공백')}</div></fieldset>`:''}${hasRequiredControls? `<div class="actions bulk-required" role="group" aria-label="${groupNames[key]} 전체 항목 필수 여부"><button data-bulk-required="${key}" value="required" ${g.items.length?'':'disabled'}>모두 필수</button><button data-bulk-required="${key}" value="optional" ${g.items.length?'':'disabled'}>모두 선택</button></div>`:''}<div class="item-list">${g.items.length?'':`<p class="muted">개인정보 항목${requiredMark}</p>`}${g.items.map((i,n)=>`<div class="item-row">${itemNameControl(i,n)}<div class="item-controls">${hasRequiredControls?requiredSwitch(i,'항목 '+(n+1)):key==='marketing'?'<span class="pill">선택</span>':''}<div class="order"><button type="button" data-move="${i.id}:-1" aria-label="항목 ${n+1} 위로 이동" ${n?'':'disabled'}><span class="move-chevron" aria-hidden="true"></span></button><button type="button" data-move="${i.id}:1" aria-label="항목 ${n+1} 아래로 이동" ${n<g.items.length-1?'':'disabled'}><span class="move-chevron down" aria-hidden="true"></span></button></div><button class="danger" data-delete="${i.id}" aria-label="항목 ${n+1} 삭제">삭제</button></div><div class="notice item-hint" id="hint-${i.id}">${itemNameHelp(i)}</div></div>`).join('')}</div><div class="actions"><button data-add="${key}">＋ 항목 추가</button>${key==='collect'?'<p class="muted">필요한 항목명만 추가하세요. 실제 이름이나 전화번호는 입력하지 마세요.</p>':''}</div>`:'<p class="muted">필요한 처리 유형만 선택하세요.</p>'}</section>`;
- }).join('');
+ }).join('')+`<p class="muted">민감정보일 가능성이 높은 항목은 다음 단계에서 우선 민감정보로 분류합니다.</p><p id="sensitivity-status" class="notice" role="status"></p>`;
 }
 const requiredSwitch = (item,label) => `<label class="required-switch"><input type="checkbox" role="switch" aria-label="${safe(label)} 필수 여부" data-required="${item.id}" ${item.required?'checked':''}><span class="required-track" aria-hidden="true"></span><span aria-hidden="true">${item.required?'필수':'선택'}</span></label>`;
 const classificationGroups=['required','optional','sensitive','unique'];
@@ -213,7 +254,7 @@ function classify(){
  return `<section class="panel"><div class="tabs" aria-label="처리 구분">${Object.entries(names).map(([k,label])=>`<button data-tab="${k}" aria-pressed="${tab===k}">${label} <span class="pill">${entries().filter(e=>e.key===k).length}</span></button>`).join('')}</div>${!active?'<p class="muted">1단계에서 사용을 선택하면 이 유형의 항목을 검토할 수 있습니다.</p>':!relevant.length?'<p class="muted">검토할 항목이 없습니다.</p>':`<div class="class-grid">${columns.map(k=>{
   const items=relevant.filter(entry=>entryClass(entry)===k);
   if(!items.length)return '';
-  return `<section class="class-card"><h2>${categoryNames[k]} <span class="pill">${items.length}</span></h2>${items.map(({i})=>`<div class="class-item"><b>${safe(i.name)}</b><small class="notice">${hint(i)}</small><div class="actions">${['general','possible'].includes(signal(i.name))?`<select aria-label="${safe(i.name)} 분류" data-kind="${i.id}"><option value="general" ${kind(i)==='general'?'selected':''}>일반 개인정보</option><option value="sensitive" ${kind(i)==='sensitive'?'selected':''}>민감정보</option></select>`:'<span class="pill">분류 고정</span>'}<button class="danger" data-delete="${i.id}" aria-label="${safe(i.name)} 삭제">삭제</button>${['required','optional'].includes(k)&&tab!=='marketing'?requiredSwitch(i,i.name):''}</div></div>`).join('')}</section>`;
+  return `<section class="class-card"><h2>${categoryNames[k]} <span class="pill">${items.length}</span></h2>${items.map(({i})=>`<div class="class-item"><b>${safe(i.name)}</b><small class="notice">${safe(hint(i))}</small><div class="actions">${['general','possible'].includes(signal(i.name))?`<select aria-label="${safe(i.name)} 분류" data-kind="${i.id}"><option value="general" ${kind(i)==='general'?'selected':''}>일반 개인정보</option><option value="sensitive" ${kind(i)==='sensitive'?'selected':''}>민감정보</option></select>`:'<span class="pill">분류 고정</span>'}<button class="danger" data-delete="${i.id}" aria-label="${safe(i.name)} 삭제">삭제</button>${['required','optional'].includes(k)&&tab!=='marketing'?requiredSwitch(i,i.name):''}</div></div>`).join('')}</section>`;
  }).join('')}</div>`}</section>`;
 }
 const reference = 'https://www.law.go.kr/법령/개인정보보호법';
@@ -251,17 +292,17 @@ async function readApiStatus(){
  let response;try{response=await fetch('/api/status',{signal:AbortSignal.timeout(10000),cache:'no-store'});}catch(error){throw new Error(apiErrorMessage(error));}
  if(!response.ok)throw new Error('server.py가 실행 중인지 확인하세요.');
  let result;try{result=await response.json();}catch{throw new Error('서버가 올바르게 응답하지 않습니다. server.py로 실행한 주소를 확인하세요.');}
- if(result.app!=='dongui'||result.apiVersion!==5)throw new Error('이전 버전 서버가 실행 중입니다. Ctrl+C로 종료하고 최신 폴더에서 python server.py를 다시 실행하세요.');
+ if(result.app!=='dongui'||result.apiVersion!==6)throw new Error('이전 버전 서버가 실행 중입니다. Ctrl+C로 종료하고 최신 폴더에서 python server.py를 다시 실행하세요.');
  apiStatus=result;return result;
 }
 async function lawRequest(path,data){
  await readApiStatus();let response;
- try{response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':apiStatus.csrfToken},body:JSON.stringify(data),signal:AbortSignal.timeout(path.endsWith('/search')?75000:path.endsWith('/review')?65000:45000)});}catch(error){throw new Error(apiErrorMessage(error));}
+ try{response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':apiStatus.csrfToken},body:JSON.stringify(data),signal:AbortSignal.timeout(path.endsWith('/search')?75000:path.endsWith('/review')?65000:path.endsWith('/classify')?40000:45000)});}catch(error){throw new Error(apiErrorMessage(error));}
  let result;try{result=await response.json();}catch{throw new Error('응답을 읽지 못했습니다. server.py 터미널의 API 로그를 확인하세요.');}
  if(!response.ok){const error=new Error(result.error||'요청에 실패했습니다.');error.status=response.status;throw error;}return result;
 }
 function lawSearchPanel(){
- return `<section class="panel law-search-panel"><div class="panelhead"><div><h2>개인정보별로 적용할 근거를 선택하세요</h2></div></div><p>AI가 제안한 근거는 아래 개인정보 유형별로 표시됩니다. <strong>법령을 선택하고 항목을 체크한 뒤, 담당자 확인 후 적용하세요. AI 검토는 필요할 때 진행할 수 있습니다.</strong> 별도 근거를 적용하지 않은 일반 항목은 동의서로 진행합니다. 주민등록번호 등 별도 허용 요건이 있는 정보는 추가 확인이 필요합니다.</p><p class="muted">실제 개인정보는 입력하지 마세요. 조문의 존재와 업무에 적용할 수 있는지는 별도로 검토해야 합니다.</p><div class="actions"><button class="primary" data-ai-law ${lawSearch.busy?'disabled':''}>${lawSearch.busy?'AI가 근거를 찾고 있습니다…':'AI로 적용 근거 찾기'}</button><button data-add-ground>＋ 법령·처리 근거 직접 추가</button>${apiStatus?.demoAvailable?`<label class="field law-mode"><span>검색 방식</span><select data-law-mode ${lawSearch.busy?'disabled':''}><option value="live" ${lawSearch.mode==='live'?'selected':''}>실제 검색</option><option value="demo" ${lawSearch.mode==='demo'?'selected':''}>화면 시연</option></select></label>`:''}</div><p class="notice" role="status">${lawSearch.busy?'AI 응답 뒤 공식 조문을 확인합니다. 오래 기다리지 않도록 요청 시간을 제한했습니다.':'필요한 항목에만 법령 근거를 적용하세요.'}</p>${lawSearch.mode==='demo'?'<p class="notice">시연 법령은 실제 원문을 확인하지 않아 적용할 수 없습니다.</p>':''}${lawSearch.error?`<div class="info warn" role="alert">${safe(lawSearch.error)}</div>`:''}${lawSearch.note?`<p class="muted">${safe(lawSearch.note)}</p>`:''}${lawSearch.rejected.length?`<details><summary>적용 법령에서 제외된 근거 ${lawSearch.rejected.length}건</summary>${lawSearch.rejected.map(r=>`<p>${safe(r.law)} · ${safe(r.message)}</p>`).join('')}</details>`:''}</section>`;
+ return `<section class="panel law-search-panel"><div class="panelhead"><div><h2>개인정보별로 적용할 근거를 선택하세요</h2></div></div><p>AI가 제안한 근거는 아래 개인정보 유형별로 표시됩니다. <strong>법령을 선택하고 항목을 체크한 뒤, 담당자 확인 후 적용하세요. 직접 추가한 근거는 필요할 때 AI 검토를 진행할 수 있습니다.</strong> 별도 근거를 적용하지 않은 일반 항목은 동의서로 진행합니다. 주민등록번호 등 별도 허용 요건이 있는 정보는 추가 확인이 필요합니다.</p><p class="muted">실제 개인정보는 입력하지 마세요. 조문의 존재와 업무에 적용할 수 있는지는 별도로 검토해야 합니다.</p><div class="actions"><button class="primary" data-ai-law ${lawSearch.busy?'disabled':''}>${lawSearch.busy?'AI가 근거를 찾고 있습니다…':'AI로 적용 근거 찾기'}</button><button data-add-ground>＋ 법령·처리 근거 직접 추가</button>${apiStatus?.demoAvailable?`<label class="field law-mode"><span>검색 방식</span><select data-law-mode ${lawSearch.busy?'disabled':''}><option value="live" ${lawSearch.mode==='live'?'selected':''}>실제 검색</option><option value="demo" ${lawSearch.mode==='demo'?'selected':''}>화면 시연</option></select></label>`:''}</div><p class="notice" role="status">${lawSearch.busy?'AI 응답 뒤 공식 조문을 확인합니다. 오래 기다리지 않도록 요청 시간을 제한했습니다.':'필요한 항목에만 법령 근거를 적용하세요.'}</p>${lawSearch.mode==='demo'?'<p class="notice">시연 법령은 실제 원문을 확인하지 않아 적용할 수 없습니다.</p>':''}${lawSearch.error?`<div class="info warn" role="alert">${safe(lawSearch.error)}</div>`:''}${lawSearch.note?`<p class="muted">${safe(lawSearch.note)}</p>`:''}${lawSearch.rejected.length?`<details><summary>적용 법령에서 제외된 근거 ${lawSearch.rejected.length}건</summary>${lawSearch.rejected.map(r=>`<p>${safe(r.law)} · ${safe(r.message)}</p>`).join('')}</details>`:''}</section>`;
 }
 const candidateKey=(candidate,index)=>candidate?._key||lawSearch.version+':'+index;
 const candidateIdentity=c=>JSON.stringify([c.type,c.basisCode,c.law,c.article,c.paragraph,c.clause,c.mst,c.excerpt]);
@@ -396,16 +437,17 @@ function reviewSnapshot(draft){return JSON.stringify({basisCode:draft.basisCode,
 function citationRequest(draft){return {type:draft.type,basisCode:draft.basisCode,law:draft.law,article:draft.article,paragraph:draft.paragraph,clause:draft.clause,mst:draft.mst,target:draft.target||'law'};}
 function hasCurrentReview(draft){return Boolean(draft.aiReview?.canApply&&draft.aiReview.token&&draft.reviewContext===reviewSnapshot(draft));}
 function reviewPanel(draft){
+ if(draft.candidateKey)return '';
  const review=draft.aiReview;
  const labels={possible:'검토상 적용 가능',needs_information:'추가 확인 필요',not_supported:'적용 권장하지 않음'};
- return `<section class="ai-review-panel"><h4>④ AI 검토(필요 시 진행)</h4><p>선택한 항목의 처리 목적과 공식 조문을 대조합니다. 적용 여부를 보증하는 법률 판단은 아니며, 담당자의 최종 확인이 필요합니다.</p><button class="optional-review" data-ai-review ${lawActionBusy?'disabled':''}>${aiReviewBusy?'<span class="review-spinner" aria-hidden="true"></span> AI 검토 중…':review?'선택 항목 다시 AI 검토':'선택 항목 AI 검토'}</button>${draft.reviewError?`<p class="notice" role="alert">${safe(draft.reviewError)}</p>`:''}${review?`<div class="ai-review-result"><h5>AI 검토 결과</h5><p>${safe(review.summary)}</p><ul>${review.items.map(item=>`<li><div><strong>${safe(item.name)}</strong><span class="pill ${item.verdict==='possible'?'':'pending'}">${labels[item.verdict]||'추가 확인 필요'}</span></div><p>${safe(item.explanation)}</p>${item.checks?.length?`<ul>${item.checks.map(check=>`<li>${safe(check)}</li>`).join('')}</ul>`:''}</li>`).join('')}</ul>${!review.canApply?'<p class="notice">추가 확인이 필요한 항목은 체크를 해제하거나 1단계의 처리 목적·선택한 근거를 보완한 뒤 다시 검토하세요. AI 의견을 참고하여 담당자가 적용 여부를 결정하세요.</p>':'<p class="muted">검토 후 항목이나 근거를 바꾸면 기존 AI 검토 결과는 초기화됩니다. 아래 요건 확인 후 적용하세요.</p>'}</div>`:''}</section>`;
+ return `<section class="ai-review-panel"><h4>④ AI 검토(필요 시 진행)</h4><p>선택한 항목의 처리 목적과 공식 조문을 대조합니다. 적용 여부를 보증하는 법률 판단은 아니며, 담당자의 최종 확인이 필요합니다.</p><button class="optional-review" data-ai-review ${lawActionBusy?'disabled':''}>${aiReviewBusy?'<span class="review-spinner" aria-hidden="true"></span> AI 검토 중…':review?'선택 항목 다시 AI 검토':'선택 항목 AI 검토'}</button>${draft.reviewError?`<p class="notice" role="alert">${safe(draft.reviewError)}</p>`:''}${review?`<div class="ai-review-result"><h5>AI 검토 결과</h5><p>${safe(review.summary)}</p><ul>${review.items.map(item=>`<li><div><strong>${safe(item.name)}</strong><span class="pill ${item.verdict==='possible'?'':'pending'}">${labels[item.verdict]||'추가 확인 필요'}</span></div><p>${safe(item.explanation)}</p>${item.checks?.length?`<ul>${item.checks.map(check=>`<li>${safe(check)}</li>`).join('')}</ul>`:''}</li>`).join('')}</ul>${!review.canApply?'<p class="notice">AI 의견은 참고사항입니다. 적용을 권장하지 않는 의견이어도 담당자가 법령과 적용 요건을 확인한 후 등록할 수 있습니다.</p>':'<p class="muted">검토 후 항목이나 근거를 바꾸면 기존 AI 검토 결과는 초기화됩니다. 아래 요건 확인 후 적용하세요.</p>'}</div>`:''}</section>`;
 }
 function draftScope(draft){
  const rule=LawBasis.rules[draft.basisCode];if(!rule)return '';
- return `<section class="application-scope"><h4>③ 적용할 개인정보 항목 선택</h4><p>적용할 항목만 체크하세요. 체크하지 않은 항목에는 적용하지 않습니다.</p><fieldset><legend>${safe(groundTypes[draft.type])}</legend>${`<label class="scope-select-all"><input type="checkbox" data-scope-all ${applicableEntries(draft).length&&applicableEntries(draft).every(({i})=>draft.ids.includes(i.id))?'checked':''}>항목명 · 전체 선택</label>`}${applicableEntries(draft).map(({i})=>`<label class="scope-option"><input type="checkbox" data-scope="${i.id}" ${draft.ids.includes(i.id)?'checked':''}><span><b>${safe(i.name)}</b></span></label>`).join('')}</fieldset>${reviewPanel(draft)}<div class="review-confirmations"><h5>담당자 확인</h5>${checkbox(rule.conditionsText||'선택한 근거의 요건과 이 업무의 처리 목적·범위를 확인했습니다.','data-law-conditions',draft.conditionsConfirmed)}${rule.needsLaw?checkbox('이 개별 법령 조문이 선택 항목의 수집·이용·제공을 구체적으로 요구하거나 허용하는지 확인했습니다.','data-law-authority',draft.authorityConfirmed):''}${draft.basisCode==='residentLaw'?checkbox('주민등록번호의 구체적인 처리 허용 요건을 확인했습니다.','data-specific',draft.specific):''}</div><p class="notice" id="ground-status" role="status">${safe(message)}</p><div class="actions"><button class="primary" data-adopt-ground ${lawActionBusy?'disabled':''}>${lawActionBusy?'확인 중…':'검토한 항목에 이 근거 적용'}</button><button data-cancel-ground>적용하지 않고 닫기</button></div></section>`;
+ return `<section class="application-scope"><h4>${draft.candidateKey?'':'③ '}적용할 개인정보 항목 선택</h4><p>적용할 항목만 체크하세요. 체크하지 않은 항목에는 적용하지 않습니다.</p><fieldset><legend>${safe(groundTypes[draft.type])}</legend>${`<label class="scope-select-all"><input type="checkbox" data-scope-all ${applicableEntries(draft).length&&applicableEntries(draft).every(({i})=>draft.ids.includes(i.id))?'checked':''}>항목명 · 전체 선택</label>`}${applicableEntries(draft).map(({i})=>`<label class="scope-option"><input type="checkbox" data-scope="${i.id}" ${draft.ids.includes(i.id)?'checked':''}><span><b>${safe(i.name)}</b></span></label>`).join('')}</fieldset>${reviewPanel(draft)}<div class="review-confirmations"><h5>담당자 확인</h5>${checkbox(rule.conditionsText||'선택한 근거의 요건과 이 업무의 처리 목적·범위를 확인했습니다.','data-law-conditions',draft.conditionsConfirmed)}${rule.needsLaw?checkbox('이 개별 법령 조문이 선택 항목의 수집·이용·제공을 구체적으로 요구하거나 허용하는지 확인했습니다.','data-law-authority',draft.authorityConfirmed):''}${draft.basisCode==='residentLaw'?checkbox('주민등록번호의 구체적인 처리 허용 요건을 확인했습니다.','data-specific',draft.specific):''}</div><p class="notice" id="ground-status" role="status">${safe(message)}</p><div class="actions"><button class="primary" data-adopt-ground ${lawActionBusy?'disabled':''}>${lawActionBusy?'확인 중…':'검토한 항목에 이 근거 적용'}</button><button data-cancel-ground>적용하지 않고 닫기</button></div></section>`;
 }
 async function reviewGround(){
- const draft=state.groundDraft,rule=LawBasis.rules[draft?.basisCode];if(!draft||!rule||lawActionBusy)return;
+ const draft=state.groundDraft,rule=LawBasis.rules[draft?.basisCode];if(!draft||!rule||lawActionBusy||draft.candidateKey)return;
  if(!draft.ids.length){feedback('AI가 검토할 개인정보 항목을 먼저 체크하세요.');return;}
  if(rule.needsLaw&&(!draft.law||!draft.article||LawBasis.isPipa(draft.law)||draft.target==='admrul')){feedback('이 업무의 구체적인 법률·시행령 조문을 먼저 선택하세요.');return;}
  clearAiReview(draft);const snapshot=reviewSnapshot(draft);lawActionBusy=true;aiReviewBusy=true;message='공식 조문과 선택 항목을 AI가 검토하고 있습니다.';render();
@@ -413,11 +455,18 @@ async function reviewGround(){
   const result=await lawRequest('/api/law/review',{...citationRequest(draft),items:selectedReviewItems(draft)});
   if(state.groundDraft!==draft||reviewSnapshot(draft)!==snapshot){message='검토 중 항목이나 근거가 바뀌었습니다. 변경한 내용으로 다시 검토하세요.';return;}
   Object.assign(draft,result.candidate);draft.aiReview=result.review;draft.reviewContext=reviewSnapshot(draft);
-  message=result.review.canApply?'AI 검토 결과와 법령의 요건을 확인한 뒤 적용하세요.':'추가 확인이 필요한 부분을 보완한 뒤 다시 검토하세요.';
+  message='AI 의견을 참고하여 담당자가 최종 판단하세요. 검토 의견과 관계없이 요건 확인 후 적용할 수 있습니다.';
  }catch(error){if(state.groundDraft===draft){draft.reviewError=apiErrorMessage(error);message='';}}
  finally{aiReviewBusy=false;lawActionBusy=false;if(step===3)render();}
 }
+function candidateSource(record){
+ const isPipa=LawBasis.isPipa(record.law);
+ const rule=LawBasis.rules[record.basisCode];
+ const fullText=record.articleExcerpt||record.pipaParagraph?.excerpt||record.excerpt;
+ return `${!isPipa?`${rule?.pipa!==record.cite?`<p class="source-citation">${safe(rule?.pipa)}</p>`:''}<p><strong>${safe(record.cite||cite(record))}</strong></p><p>${safe(record.reason)}</p>`:''}<details class="source-disclosure"><summary>전문 보기</summary><blockquote class="law-excerpt">${safe(fullText)}</blockquote><a href="${safe(sourceLink(record.sourceUrl))}" target="_blank" rel="noopener noreferrer">법령 원문 보기 ↗</a></details>${['legitimate','provisionLegitimate'].includes(record.basisCode)?'<p class="legitimate-warning" role="note">정당한 이익이 정보주체의 권리보다 명백히 우선한다는 점은 개인정보처리자가 직접 입증해야 합니다.</p>':''}`;
+}
 function groundEditor(draft,inline=false){
+ if(inline&&draft.candidateKey)return `<div class="candidate-editor ground-editor">${candidateSource(draft)}${draftScope(draft)}</div>`;
  const content=`<label class="field"><span class="privacy-type-label">개인정보 유형</span><select data-ground-type ${lawActionBusy?'disabled':''}>${Object.entries(groundTypes).filter(([type])=>type!=='optional'&&groundEntries(type).length).map(([type,label])=>`<option value="${type}" ${draft.type===type?'selected':''}>${label}</option>`).join('')}</select></label>${basisEditor(draft)}${LawBasis.rules[draft.basisCode]?.needsLaw?lawPickerPanel(draft):''}${draftScope(draft)}${!draft.basisCode?`<p class="notice" role="status">${safe(message)}</p>`:''}`;
  if(inline)return `<div class="candidate-editor ground-editor">${content}</div>`;
  return `<details class="panel ground-editor manual-ground" ${editorOpen?'open':''}><summary>법령·처리 근거 추가</summary><div class="ground-form">${content}</div></details>`;
@@ -427,14 +476,18 @@ function categoryGrounds(type,label){
  const saved=state.grounds.filter(b=>b.type===type&&!lawSearch.candidates.some((c,n)=>b.candidateKey===candidateKey(c,n)));
  const grouped=new Map();for(const b of saved){const key=groundDisplayKey(b);if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(b);}
  const candidates=lawSearch.candidates.map((c,n)=>({c,n,key:candidateKey(c,n)})).filter(({c,n,key})=>c.type===type);
- const rules=[...new Set(draftOptions({type}).map(([,r])=>r.pipa))];
- return `<section class="panel ground-category" data-ground-category="${type}"><h2>${label}</h2>${groundPurpose(list)}<details class="category-law-guide"><summary>이 유형에서 검토할 개인정보 보호법 조항</summary><p>${rules.map(safe).join(' / ')}</p></details><div class="category-items">${list.map(e=>`<div class="row"><b>${safe(e.i.name)}</b><span class="pill ${LawBasis.notice(e.i.bases,lawContext(e),lawClassification(e.i))?'':'pending'}">${LawBasis.notice(e.i.bases,lawContext(e),lawClassification(e.i))?'적용 완료 · 고지사항':'동의서 유지'}</span></div>`).join('')}</div>${[...grouped.values()].map(records=>{const b=records[0],ids=[...new Set(records.flatMap(r=>r.ids))];return `<details class="basis applied-basis"><summary>적용한 근거 · ${safe(LawBasis.rules[b.basisCode]?.label||'처리 근거')} · ${ids.map(id=>safe(getItem(id)?.name)).join(', ')}</summary><p>${safe(LawBasis.rules[b.basisCode]?.pipa)}</p><p>${safe(b.cite)}</p><blockquote class="law-excerpt">${safe(b.excerpt)}</blockquote>${records.map(r=>`<p>적용 항목: ${r.ids.map(id=>safe(getItem(id)?.name)).join(', ')}</p><div class="actions"><button data-edit-ground="${r.id}">적용 항목·근거 수정</button><button data-remove-ground="${r.id}">이 근거 적용 취소</button></div>`).join('')}</details>`;}).join('')}${candidates.length?`<details class="law-options-group" data-law-group="${type}" ${lawSearch.groupOpen?.[type]===false?'':'open'}><summary>검토할 법령 ${candidates.length}개</summary><div class="law-options-children">`:''}${candidates.filter(({n})=>!lawSearch.hidden?.includes(n)).map(({c,n,key},index)=>{
+ const activeKeys=new Set(state.grounds.filter(b=>b.type===type&&b.candidateKey).map(b=>b.candidateKey));
+ if(state.groundDraft?.type===type&&state.groundDraft.candidateKey)activeKeys.add(state.groundDraft.candidateKey);
+ const available=candidates.filter(({n})=>!lawSearch.hidden?.includes(n));
+ const visible=available.filter(({key})=>!activeKeys.size||activeKeys.has(key)||lawSearch.showAlternatives?.[type]);
+ const alternativeCount=available.length-visible.length;
+ return `<section class="panel ground-category" data-ground-category="${type}"><h2>${label}</h2>${groundPurpose(list)}<div class="category-items">${list.map(e=>`<div class="row"><b>${safe(e.i.name)}</b><span class="pill ${LawBasis.notice(e.i.bases,lawContext(e),lawClassification(e.i))?'':'pending'}">${LawBasis.notice(e.i.bases,lawContext(e),lawClassification(e.i))?'적용 완료 · 고지사항':'동의서 유지'}</span></div>`).join('')}</div>${[...grouped.values()].map(records=>{const b=records[0],ids=[...new Set(records.flatMap(r=>r.ids))];return `<details class="basis applied-basis"><summary>적용한 근거 · ${safe(LawBasis.rules[b.basisCode]?.label||'처리 근거')} · ${ids.map(id=>safe(getItem(id)?.name)).join(', ')}</summary><p>${safe(LawBasis.rules[b.basisCode]?.pipa)}</p><p>${safe(b.cite)}</p><blockquote class="law-excerpt">${safe(b.excerpt)}</blockquote>${records.map(r=>`<p>적용 항목: ${r.ids.map(id=>safe(getItem(id)?.name)).join(', ')}</p><div class="actions"><button data-edit-ground="${r.id}">적용 항목·근거 수정</button><button data-remove-ground="${r.id}">이 근거 적용 취소</button></div>`).join('')}</details>`;}).join('')}${candidates.length?`<details class="law-options-group" data-law-group="${type}" ${lawSearch.groupOpen?.[type]===false?'':'open'}><summary>검토할 법령 ${visible.length}개</summary><div class="law-options-children">`:''}${visible.map(({c,n,key})=>{
  const selected=state.groundDraft?.candidateKey===key;
  const applied=state.grounds.find(b=>b.candidateKey===key);
  const folded=lawSearch.dismissed?.includes(n);
  const isOpen=lawSearch.candidateOpen?.[n]??(!applied&&!folded);
- return `<details class="law-result candidate-block" data-candidate="${n}" ${isOpen?'open':''}><summary><span class="candidate-title">${safe(c.law||'개인정보 보호법')} · ${safe(LawBasis.rules[c.basisCode]?.label||'처리 근거')}</span><span class="pill ${applied?'':folded?'pending':''}">${applied?'적용됨 · '+applied.ids.map(id=>safe(getItem(id)?.name)).join(', '):folded?'선택 안함 · 다시 선택 가능':c.verified?'조문 확인됨 · 적용 전':'미검증 시연'}</span></summary><div class="candidate-body">${selected?groundEditor(state.groundDraft,true):`${LawBasis.rules[c.basisCode]?.pipa!==(applied?.cite||c.cite)?`<p class="source-citation">${safe(LawBasis.rules[c.basisCode]?.pipa)}</p>`:''}<p><strong>${safe(applied?.cite||c.cite)}</strong></p><p>${safe(c.reason)}</p><details class="source-disclosure"><summary>근거 조문 내용 보기</summary><blockquote class="law-excerpt">${safe(applied?.excerpt||c.excerpt)}</blockquote><a href="${safe(sourceLink(c.sourceUrl))}" target="_blank" rel="noopener noreferrer">법령 원문 보기 ↗</a></details>${applied?`<p>적용 항목: ${applied.ids.map(id=>safe(getItem(id)?.name)).join(', ')}</p>`:''}<div class="actions"><button data-use-law="${n}" ${lawActionBusy?'disabled':''}>${applied?'적용 항목·근거 다시 검토':'이 법령의 적용 항목 선택'}</button><button data-dismiss-law="${n}">이 법령 선택 안함</button>${applied?`<button data-remove-ground="${applied.id}">이 근거 적용 취소</button>`:''}</div>`}</div></details>`;
- }).join('')}${candidates.length?'</div></details>':''}</section>`;
+ return `<details class="law-result candidate-block" data-candidate="${n}" ${isOpen?'open':''}><summary><span class="candidate-title">${LawBasis.isPipa(c.law)?safe(c.cite||cite(c)):`${safe(c.law)} · ${safe(LawBasis.rules[c.basisCode]?.label||'처리 근거')}`}</span><span class="pill ${applied?'':folded?'pending':''}">${applied?'적용됨 · '+applied.ids.map(id=>safe(getItem(id)?.name)).join(', '):folded?'선택 안함 · 다시 선택 가능':c.verified?'조문 확인됨 · 적용 전':'미검증 시연'}</span></summary><div class="candidate-body">${selected?groundEditor(state.groundDraft,true):`${candidateSource(applied||c)}${applied?`<p>적용 항목: ${applied.ids.map(id=>safe(getItem(id)?.name)).join(', ')}</p>`:''}<div class="actions"><button data-use-law="${n}" ${lawActionBusy?'disabled':''}>${applied?'적용 항목·근거 다시 검토':'이 법령의 적용 항목 선택'}</button><button data-dismiss-law="${n}">이 법령 선택 안함</button>${applied?`<button data-remove-ground="${applied.id}">이 근거 적용 취소</button>`:''}</div>`}</div></details>`;
+ }).join('')}${candidates.length?`</div>${alternativeCount?`<button class="other-laws" data-show-laws="${type}">다른 법령 보기 (${alternativeCount}개)</button>`:''}</details>`:''}</section>`;
 }
 function grounds(){
  const draft=state.groundDraft;
@@ -453,7 +506,7 @@ function saveGround(){
  if(!draft.conditionsConfirmed){feedback('법령의 적용 요건을 확인하세요.');return;}
  if(draft.basisCode==='residentLaw'&&!draft.specific){feedback('주민등록번호의 구체적 처리 허용 요건을 확인하세요.');return;}
  const saved={...draft,ids,id:draft.editId||id(),cite:cite(draft),specific:draft.basisCode==='residentLaw'&&draft.specific};
- if(draft.candidateKey){const n=lawSearch.candidates.findIndex((c,index)=>candidateKey(c,index)===draft.candidateKey);lawSearch.candidateOpen??={};if(n>=0)lawSearch.candidateOpen[n]=false;if(lawSearch.drafts)delete lawSearch.drafts[draft.candidateKey];}
+ if(draft.candidateKey){lawSearch.showAlternatives??={};lawSearch.showAlternatives[draft.type]=false;const n=lawSearch.candidates.findIndex((c,index)=>candidateKey(c,index)===draft.candidateKey);lawSearch.candidateOpen??={};if(n>=0)lawSearch.candidateOpen[n]=false;if(lawSearch.drafts)delete lawSearch.drafts[draft.candidateKey];}
  state.grounds=[...state.grounds.filter(b=>b.id!==saved.id),saved];state.groundDraft=null;editorOpen=false;state.edits={};syncGrounds();message='선택한 항목에 근거를 적용했습니다.';render();
 }
 async function applyGround(){
@@ -655,7 +708,7 @@ function render(){
  const all=entries();
  const issues=all.filter(({i})=>needsItemReview(i));
  const missing=all.filter(({g})=>!g.purpose.trim()||!g.period.trim()).length;
- app.innerHTML=`<div class="trail"><button data-go="0">홈</button> / 문서 작성</div><div class="title"><h1>${labels[step-1]}</h1><p>${descriptions[step-1]}</p></div><nav class="stepper" aria-label="작성 단계">${labels.map((name,n)=>`<button data-go="${n+1}" ${step===n+1?'aria-current="step"':''} ${n+1>reached||(n===3&&unresolvedRnn().length)?'disabled':''}><span class="stepnum">${String(n+1).padStart(2,'0')}</span>${name}</button>`).join('')}</nav><div class="workspace ${step===4?'wide-output':''}"><div class="stack">${body}<div class="notice" id="message" role="status">${safe(step===3&&state.groundDraft?'':message)}</div><div class="bar"><button data-go="${step-1}">← ${step===1?'홈으로':'이전 단계'}</button>${step<4?`<button class="primary" data-next ${step===3&&unresolvedRnn().length?'disabled aria-describedby="rrn-block"':''}>${step===2?'분류 확정 후 다음':step===3?'문서 작성으로':'다음 단계'} →</button>`:''}</div></div>${step===4?'':`<aside class="side"><h2>${step===1?'입력 점검':'검토 현황'}</h2><span class="pill">등록 항목 <span id="count">${all.length}</span>개</span><hr><p id="risk">${riskHTML(issues,missing)}</p><p class="muted">예시 규칙에 따른 제안입니다. 분류와 근거는 담당자가 직접 확인합니다.</p><button data-guide>이용 안내</button></aside>`}</div>`;
+ app.innerHTML=`<div class="trail"><button data-go="0">홈</button> / 문서 작성</div><div class="title"><h1>${labels[step-1]}</h1><p>${descriptions[step-1]}</p></div><nav class="stepper" aria-label="작성 단계">${labels.map((name,n)=>`<button data-go="${n+1}" ${step===n+1?'aria-current="step"':''} ${n+1>reached||(n===3&&unresolvedRnn().length)?'disabled':''}><span class="stepnum">${String(n+1).padStart(2,'0')}</span>${name}</button>`).join('')}</nav><div class="workspace ${step===4?'wide-output':''}"><div class="stack">${body}<div class="notice" id="message" role="status">${safe(step===3&&state.groundDraft?'':message)}</div><div class="bar"><button data-go="${step-1}">← ${step===1?'홈으로':'이전 단계'}</button>${step<4?`<button class="primary" data-next ${step===3&&unresolvedRnn().length?'disabled aria-describedby="rrn-block"':''}>${step===2?'분류 확정 후 다음':step===3?'문서 작성으로':'다음 단계'} →</button>`:''}</div></div>${step===4?'':`<aside class="side"><h2>${step===1?'입력 점검':'검토 현황'}</h2><span class="pill">등록 항목 <span id="count">${all.length}</span>개</span><hr><p id="risk">${riskHTML(issues,missing)}</p><p class="muted">분류 제안과 법령 근거는 담당자가 직접 확인합니다.</p><button data-guide>이용 안내</button></aside>`}</div>`;
  const selectAll=document.querySelector('[data-scope-all]');if(selectAll){const checks=[...document.querySelectorAll('[data-scope]')];selectAll.indeterminate=checks.some(c=>c.checked)&&checks.some(c=>!c.checked);}
  if(step===1&&basicsChecked)showBasicsIssues();
 }
@@ -670,7 +723,7 @@ function contextualRisk({g,i}){
 }
 function riskHTML(issues,missing){
  const risks=entries().map(e=>({entry:e,reason:contextualRisk(e)})).filter(x=>x.reason);
- return `<strong>과다 수집 가능성 ${risks.length}건</strong>${risks.length?risks.map(({entry,reason})=>`<span class="risk-entry"><b>${safe(entry.i.name)}</b><small>${safe(entry.g.purpose)} · ${groupNames[entry.key]}</small>${reason}</span>`).join(''):'<br>예시 점검 규칙에 걸린 항목이 없습니다.'}<br><br><strong>분류 확인 항목 ${issues.length}개</strong>${issues.map(({i})=>`<br>${safe(i.name)} · ${hint(i)}`).join('')}<br><strong>목적·기간 확인 항목 ${missing}개</strong>`;
+ return `<strong>과다 수집 가능성 ${risks.length}건</strong>${risks.length?risks.map(({entry,reason})=>`<span class="risk-entry"><b>${safe(entry.i.name)}</b><small>${safe(entry.g.purpose)} · ${groupNames[entry.key]}</small>${reason}</span>`).join(''):'<br>예시 점검 규칙에 걸린 항목이 없습니다.'}<br><br><strong>분류 확인 항목 ${issues.length}개</strong>${issues.map(({i})=>`<br>${safe(i.name)} · ${safe(hint(i))}`).join('')}<br><strong>목적·기간 확인 항목 ${missing}개</strong>`;
 }
 function refreshRisk(){
  const all=entries(), count=document.querySelector('#count');
@@ -678,10 +731,10 @@ function refreshRisk(){
  count.textContent=all.length;
  document.querySelector('#risk').innerHTML=riskHTML(all.filter(({i})=>needsItemReview(i)),all.filter(({g})=>!g.purpose.trim()||!g.period.trim()).length);
 }
-function go(n){
+async function go(n){
  if(n===5&&(step!==4||!finalDocument))return;
  if(n!==5)finalDocument=null;
- if(step===1&&n>1&&!validateBasics())return;
+ if(step===1&&n>1){if(!validateBasics())return;const previous=state;await checkSensitivity();if(state!==previous||step!==1)return;}
  if(n===4&&unresolvedRnn().length){feedback('주민등록번호의 수집·제공 근거와 제24조의2의 구체적 처리 허용 근거를 모두 확인해 주세요.');return;}
  if(n===2&&!state.groups[tab].enabled)tab=Object.keys(state.groups).find(k=>state.groups[k].enabled)||'collect';
  if(n===1){
@@ -691,6 +744,7 @@ function go(n){
  }
  basicsChecked=false;
  step=n;reached=Math.max(reached,Math.min(n,4));message='';render();window.scrollTo(0,0);
+ if(n===1)scheduleSensitivity();
  if(n===3&&!apiStatus)readApiStatus().then(()=>{if(step===3)render();}).catch(error=>{lawSearch.error=apiErrorMessage(error);if(step===3)render();});
  if(n){const h=app.querySelector('.title h1');h.tabIndex=-1;h.focus({preventScroll:true});}
 }
@@ -701,7 +755,7 @@ function feedback(text){
 }
 function invalidateItems(items){
  const keys=new Set(items.map(i=>i.id));
- lawSearch.version++;lawSearch.busy=false;lawSearch.candidates=[];lawSearch.note='입력 내용이 바뀌었습니다. 법령을 다시 검색하세요.';
+ lawSearch={busy:false,candidates:[],error:'',note:'입력 내용이 바뀌었습니다. 법령을 다시 검색하세요.',mode:lawSearch.mode,rejected:[],version:lawSearch.version+1};
  state.grounds=state.grounds.map(b=>({...b,ids:b.ids.filter(key=>!keys.has(key))})).filter(b=>b.ids.length);
  if(state.groundDraft)state.groundDraft=null;
  state.edits={};reached=Math.min(reached,step);
@@ -821,7 +875,7 @@ function commitItemName(input,name=standardItemName(input.value)){
   item.name=name;delete item.kind;invalidateItems([item]);
  }
  if(previous!==name)showItemNameNotice(previous,name);
- updateItemNameHelp(item);
+ updateItemNameHelp(item);scheduleSensitivity();
  if(itemPresetNames.has(name)){
   const picker=input.parentElement.querySelector('[data-item-preset]');
   delete item.manualName;
@@ -842,7 +896,7 @@ function setPath(path,value){
  const object=parts.slice(0,-1).reduce((o,k)=>o[k],state);
  if(object[parts.at(-1)]===value)return;
  object[parts.at(-1)]=value;
- if(parts[0]==='groups')invalidateItems(object.items);
+ if(parts[0]==='groups'){invalidateItems(object.items);if(parts.at(-1).includes('Purpose')||parts.at(-1)==='purpose')scheduleSensitivity();}
  if(parts[0]==='groundDraft'&&['law','article','paragraph','clause','excerpt'].includes(parts.at(-1))){resetLawVerification(state.groundDraft);const editor=document.querySelector('.basis-selection');if(editor)editor.outerHTML=basisEditor(state.groundDraft);}
 }
 document.addEventListener('input',e=>{
@@ -852,7 +906,7 @@ document.addEventListener('input',e=>{
  if(d.name){
   const i=getItem(d.name);
   i.name=el.value;delete i.kind;invalidateItems([i]);
-  updateItemNameHelp(i);
+  updateItemNameHelp(i);scheduleSensitivity();
  }
  if(d.edit){
   state.edits[d.edit]=el.innerText;
@@ -978,8 +1032,9 @@ function validateBasics(){
 document.addEventListener('click',e=>{
  const summary=e.target.closest('.manual-ground>summary,.candidate-block>summary');
  if(summary){if(summary.parentElement.matches('.manual-ground'))editorOpen=!summary.parentElement.open;else{lawSearch.candidateOpen??={};lawSearch.candidateOpen[Number(summary.parentElement.dataset.candidate)]=!summary.parentElement.open;}}
- const group=e.target.closest('.law-options-group>summary');if(group){const type=group.parentElement.dataset.lawGroup;lawSearch.groupOpen??={};lawSearch.groupOpen[type]=!group.parentElement.open;if(!group.parentElement.open){e.preventDefault();lawSearch.hidden=(lawSearch.hidden||[]).filter(n=>lawSearch.candidates[n]?.type!==type);render();} }
+ const group=e.target.closest('.law-options-group>summary');if(group){const type=group.parentElement.dataset.lawGroup;lawSearch.groupOpen??={};lawSearch.groupOpen[type]=!group.parentElement.open;if(!group.parentElement.open){e.preventDefault();lawSearch.showAlternatives??={};lawSearch.showAlternatives[type]=true;lawSearch.hidden=(lawSearch.hidden||[]).filter(n=>lawSearch.candidates[n]?.type!==type);render();} }
  const b=e.target.closest('button');if(!b)return;const d=b.dataset;
+ if('retryClassification' in d)checkSensitivity(true);
  if('guide' in d)document.querySelector('#guide').showModal();
  if('start' in d)go(1);
  if(d.itemSuggestion){
@@ -1031,13 +1086,14 @@ document.addEventListener('click',e=>{
   if(state.groundDraft?.candidateKey===key){lawSearch.drafts??={};lawSearch.drafts[key]=structuredClone(state.groundDraft);state.groundDraft=null;}
   render();
  }
+ if('showLaws' in d){lawSearch.showAlternatives??={};lawSearch.showAlternatives[d.showLaws]=true;render();}
  if('useLaw' in d){
   if(state.groundDraft?.candidateKey){lawSearch.drafts??={};lawSearch.drafts[state.groundDraft.candidateKey]=structuredClone(state.groundDraft);}
   const n=Number(d.useLaw),candidate=lawSearch.candidates[n],key=candidate?candidateKey(candidate,n):'';
   const applied=state.grounds.find(b=>b.candidateKey===key),pending=lawSearch.drafts?.[key];
-  if(candidate){freshLawPicker();lawSearch.candidateOpen??={};lawSearch.candidateOpen[n]=true;
+  if(candidate){lawSearch.showAlternatives??={};lawSearch.showAlternatives[candidate.type]=false;freshLawPicker();lawSearch.candidateOpen??={};lawSearch.candidateOpen[n]=true;
    state.groundDraft=applied?{...applied,ids:[...applied.ids],editId:applied.id}:pending?structuredClone(pending):{...groundInitial(candidate.type),...candidate,ids:[],specific:false,conditionsConfirmed:false,authorityConfirmed:false,candidateKey:key};
-   message='적용할 항목과 요건을 확인하세요. AI 검토는 선택사항입니다.';render();document.querySelector('.candidate-editor')?.scrollIntoView({behavior:'smooth'});
+   message='적용할 항목과 법령의 요건을 확인한 후 적용하세요.';render();document.querySelector('.candidate-editor')?.scrollIntoView({behavior:'smooth'});
   }
  }
  if('search' in d){state.search=!state.search;render();document.querySelector('[data-search]').focus();}

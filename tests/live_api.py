@@ -11,9 +11,10 @@ import server
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--search', action='store_true', help='OpenRouter에 실제 검색 1회를 요청합니다 (사용료 발생 가능)')
 parser.add_argument('--review', action='store_true', help='선택한 항목의 적용 전 AI 검토를 실제 요청합니다 (사용료 발생 가능)')
+parser.add_argument('--classify', action='store_true', help='항목명 민감정보 가능성 검토를 실제 요청합니다 (사용료 발생 가능)')
 args=parser.parse_args()
 server.load_env(Path(os.environ.get('APP_ENV_FILE',server.ROOT/'.env')))
-required=['LAW_API_OC']+(['OPENROUTER_API_KEY'] if args.search or args.review else [])
+required=['LAW_API_OC']+(['OPENROUTER_API_KEY'] if args.search or args.review or args.classify else [])
 missing=[name for name in required if not os.environ.get(name)]
 if missing:
     print('미실행: 서버 전용 환경 파일에 다음 변수를 설정하세요: '+', '.join(missing))
@@ -28,11 +29,15 @@ try:
     skipped=server.apply_reviewed_basis(request,secrets.token_bytes(32))
     assert skipped['verified'] and not skipped['reviewConfirmed']
     print('PASS 제15조 제1항 전체 조회 및 AI 없이 공식 원문 확인·적용 경로')
-    if args.search or args.review:
+    if args.search or args.review or args.classify:
         models=json.loads(server.request_bytes('https://openrouter.ai/api/v1/models'))
         model=os.environ.get('OPENROUTER_MODEL',server.MODEL)
         if not any(m.get('id')==model for m in models['data']):
             raise server.ApiError('설정 모델이 OpenRouter 모델 목록에 없습니다. 모델 ID를 확인하세요.')
+    if args.classify:
+        classified=server.classify_privacy_items({'items':[{'id':'test-class-1','name':'건강관리 상담 기록','purpose':'건강관리 상담 및 이력 관리'}]})
+        assert len(classified['items'])==1
+        print('PASS 공식 기준 조문 대조 및 민감정보 API 분류 응답:',classified['items'][0]['verdict'])
     if args.search:
         result=server.search({'items':[{'name':'성명','purpose':'근로계약 체결 및 법정 근로자 명부 작성','recipient':'','type':'required','context':'collect','classification':'general'}]})
         if not result['candidates']:

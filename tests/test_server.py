@@ -196,6 +196,15 @@ class ReviewTests(unittest.TestCase):
             with patch.object(server,'verify_with_basis',return_value=self.actual),patch.object(server,'ai_application_review',return_value=review):
                 result=server.review_application(self.data,b'secret')
             self.assertNotIn('token',result['review'])
+    def test_negative_ai_opinion_does_not_block_human_application(self):
+        for verdict in ['needs_information','not_supported']:
+            opinion={'items':[{'id':'item-1','verdict':verdict}],'canApply':False}
+            with patch.object(server,'verify_with_basis',return_value=self.actual) as verify,patch.object(server,'ai_application_review',return_value=opinion) as ai:
+                result=server.review_application(self.data,b'secret')
+                self.assertFalse(result['review']['canApply'])
+                applied=server.apply_reviewed_basis(self.data,b'secret')
+            self.assertTrue(applied['verified']);self.assertFalse(applied['reviewConfirmed'])
+            self.assertEqual(verify.call_count,2);self.assertEqual(ai.call_count,1)
     def test_apply_requires_valid_prior_review_without_recalling_model(self):
         with patch.object(server,'verify_with_basis',return_value=self.actual),patch.object(server,'ai_application_review') as model:
             skipped=server.apply_reviewed_basis(self.data,b'secret')
@@ -223,6 +232,37 @@ class ReviewTests(unittest.TestCase):
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}),patch.object(server,'request_bytes',return_value=json.dumps(response).encode()):
             with self.assertRaises(server.ApiError):server.ai_application_review(self.actual,self.items)
 
+class ClassificationTests(unittest.TestCase):
+    def setUp(self):
+        self.data={'items':[{'id':'item-1','name':'상담 이력','purpose':'건강 상담'}]}
+        self.source={'cite':'테스트 공식 조문','excerpt':'테스트: 민감정보 기준 원문'}
+    def response(self,rows):
+        return json.dumps({'choices':[{'message':{'content':json.dumps({'items':rows})}}]}).encode()
+    def test_classification_uses_official_sources_and_returns_qualitative_verdict(self):
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'private-test','LAW_API_OC':'private-oc'}),patch.object(server,'verify_citation',return_value=self.source) as verify,patch.object(server,'request_bytes',return_value=self.response([{'id':'item-1','verdict':'high','reason':'사생활 노출 우려'}])) as call:
+            result=server.classify_privacy_items(self.data)
+        self.assertEqual(result['items'][0]['verdict'],'high')
+        self.assertEqual(verify.call_count,2)
+        payload=json.loads(call.call_args.args[1]);context=json.loads(payload['messages'][1]['content'])
+        self.assertEqual(len(context['officialEvidence']),2)
+        self.assertEqual(context['items'][0]['name'],'상담 이력')
+        self.assertNotIn('private-test',call.call_args.args[1].decode())
+        self.assertNotIn('probability',result['items'][0])
+    def test_missing_rows_are_uncertain_and_invalid_verdicts_fail(self):
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test','LAW_API_OC':'test'}),patch.object(server,'verify_citation',return_value=self.source),patch.object(server,'request_bytes',return_value=self.response([])):
+            self.assertEqual(server.classify_privacy_items(self.data)['items'][0]['verdict'],'uncertain')
+        for rows in [[{'id':'item-1','verdict':'definite'}],[{'id':'wrong-id','verdict':'high'}],[None]]:
+            with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test','LAW_API_OC':'test'}),patch.object(server,'verify_citation',return_value=self.source),patch.object(server,'request_bytes',return_value=self.response(rows)):
+                with self.assertRaises(server.ApiError):server.classify_privacy_items(self.data)
+    def test_private_values_bad_ids_and_missing_keys_do_not_call_model(self):
+        for data in [{'items':[{'id':'item-1','name':'010-1234-5678'}]},{'items':[{'id':'bad id','name':'상담'}]}]:
+            with patch.object(server,'request_bytes') as call:
+                with self.assertRaises(server.ApiError):server.classify_privacy_items(data)
+                call.assert_not_called()
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'','LAW_API_OC':''}),patch.object(server,'request_bytes') as call:
+            with self.assertRaises(server.ApiError):server.classify_privacy_items(self.data)
+            call.assert_not_called()
+
 class HttpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -249,6 +289,7 @@ class HttpTests(unittest.TestCase):
         self.assertTrue(json.loads(data)['aiConfigured'])
         self.assertEqual(self.call('/app.js')[0],200)
     def test_csrf_and_cross_origin_rejected(self):
+        self.assertEqual(self.call('/api/privacy/classify',{'items':[]},csrf=False)[0],403)
         self.assertEqual(self.call('/api/law/search',{'items':[]},csrf=False)[0],403)
         self.assertEqual(self.call('/api/law/search',{'items':[]},origin='https://other.example')[0],403)
     def test_missing_api_configuration_is_explicit(self):

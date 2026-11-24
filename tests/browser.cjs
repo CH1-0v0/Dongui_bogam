@@ -9,6 +9,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
  try{
   const page=await browser.newPage({viewport:{width:1440,height:1100},acceptDownloads:true});const errors=[];
   page.on('pageerror',e=>errors.push(e.message));await fs.mkdir('.test-output',{recursive:true});
+  await page.route('**/api/privacy/classify',r=>r.fulfill({json:{items:r.request().postDataJSON().items.map(i=>({...i,verdict:'high',reason:'테스트: 건강 상태 등 사생활 정보가 드러날 가능성 검토'}))}}));
   const stage3=async()=>{
    await page.goto(base);
    await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');
@@ -27,21 +28,22 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
    await page.waitForSelector('[data-law-mode] option[value=demo]',{state:'attached'});
   };
 
-  const proof=code=>{const rule=rules[code];const pipa={law:'개인정보 보호법',article:rule.article,paragraph:rule.paragraph,clause:rule.clause,cite:rule.pipa,excerpt:'테스트: 공식 기본 조항의 적용 요건',verified:true};return {...pipa,basisCode:code,pipa,pipaParagraph:{excerpt:'테스트: 제15조 제1항 전체 · 제1호부터 제7호까지'},pipaVerified:true,supportVerified:true,support:rule.support?{cite:'개인정보 보호법 제15조 제1항 제5호',excerpt:'테스트: 목적 내 제공의 수집 요건'}:null};};
-  const candidate=(basisCode,type='required')=>({...proof(basisCode),type,law:rules[basisCode].needsLaw?'시험법':'개인정보 보호법',article:rules[basisCode].needsLaw?'10':rules[basisCode].article,paragraph:'1',clause:rules[basisCode].needsLaw?'':rules[basisCode].clause,cite:rules[basisCode].needsLaw?'시험법 제10조 제1항':rules[basisCode].pipa,excerpt:'테스트 근거 원문',reason:'테스트: 해당 업무에 필요한 처리인지 검토합니다.',itemReviews:[{name:'성명',suggested:true,reason:'테스트: 업무상 본인 확인 필요성 검토'}],sourceUrl:'https://www.law.go.kr/',kind:'법률'});
+  const proof=code=>{const rule=rules[code];const pipa={law:'개인정보 보호법',article:rule.article,paragraph:rule.paragraph,clause:rule.clause,cite:rule.pipa,excerpt:'테스트: 공식 기본 조항의 적용 요건',verified:true};return {...pipa,basisCode:code,pipa,pipaParagraph:{excerpt:'테스트: 제15조 제1항 전체 · 제1호부터 제7호까지'},articleExcerpt:'테스트: 제15조 전체 원문 · 제1항과 하위 호 포함',pipaVerified:true,supportVerified:true,support:rule.support?{cite:'개인정보 보호법 제15조 제1항 제5호',excerpt:'테스트: 목적 내 제공의 수집 요건'}:null};};
+  const candidate=(basisCode,type='required')=>({...proof(basisCode),type,law:rules[basisCode].needsLaw?'시험법':'개인정보 보호법',article:rules[basisCode].needsLaw?'10':rules[basisCode].article,articleExcerpt:rules[basisCode].needsLaw?'테스트: 시험법 제10조 전체 원문':proof(basisCode).articleExcerpt,paragraph:'1',clause:rules[basisCode].needsLaw?'':rules[basisCode].clause,cite:rules[basisCode].needsLaw?'시험법 제10조 제1항':rules[basisCode].pipa,excerpt:'테스트 근거 원문',reason:'테스트: 해당 업무에 필요한 처리인지 검토합니다.',itemReviews:[{name:'성명',suggested:true,reason:'테스트: 업무상 본인 확인 필요성 검토'}],sourceUrl:'https://www.law.go.kr/',kind:'법률'});
   await stage3();await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();assert.match(await page.getByRole('alert').innerText(),/LAW_API_OC|AI 연결 설정/);
   console.log('PASS API failure is explicit, without pretending results are empty');
   await page.route('**/api/law/search',r=>r.fulfill({json:{candidates:[candidate('statutory'),candidate('contract'),candidate('provisionEmergency','provide')],rejected:[],note:'테스트 가상 응답'}}));
   await page.route('**/api/law/basis',r=>r.fulfill({json:proof(r.request().postDataJSON().basisCode)}));
+  let lastApply;
   let verifyCalls=0,reviewCalls=0,applyCalls=0,reviewMode='possible',reviewRelease;
  await page.route('**/api/law/review',async r=>{
   reviewCalls++;const data=r.request().postDataJSON();
   if(reviewMode==='error')return r.fulfill({status:502,json:{error:'테스트: AI 검토 응답을 받지 못했습니다.'}});
   if(reviewMode==='deferred')await new Promise(resolve=>reviewRelease=resolve);
-  const verdict=reviewMode==='needs_information'?'needs_information':'possible';
+  const verdict=['needs_information','not_supported'].includes(reviewMode)?reviewMode:'possible';
   return r.fulfill({json:{candidate:rules[data.basisCode].needsLaw?{...candidate(data.basisCode,data.type),...data,verified:true,pipaVerified:true,supportVerified:true}:{...proof(data.basisCode),type:data.type},review:{summary:'테스트: 선택 항목을 공식 조문과 대조했습니다.',items:data.items.map(i=>({id:i.id,name:i.name,verdict,explanation:'테스트: 입력된 처리 목적과 근거의 요건을 확인하세요.',checks:['해당 업무의 대상인지 확인']})),canApply:verdict==='possible',token:verdict==='possible'?'browser-only-test-token':undefined,model:'test-model',checkedAt:'2026-11-24T01:00:00Z'}}});
  });
- await page.route('**/api/law/apply',r=>{applyCalls++;const data=r.request().postDataJSON();return r.fulfill({json:{...data,verified:true,pipaVerified:true,supportVerified:true,reviewConfirmed:true}});});
+ await page.route('**/api/law/apply',r=>{applyCalls++;const data=r.request().postDataJSON();lastApply=data;return r.fulfill({json:{...data,verified:true,pipaVerified:true,supportVerified:true,reviewConfirmed:Boolean(data.reviewToken)}});});
   await page.route('**/api/law/verify',r=>{verifyCalls++;const data=r.request().postDataJSON();const actual=rules[data.basisCode].needsLaw?{...data,verified:true,pipaVerified:true,supportVerified:true,excerpt:'테스트: 개별 법령 원문',kind:'법률',cite:'시험법 제10조 제1항'}:{...proof(data.basisCode)};return r.fulfill({json:actual});});
   await page.locator('[data-ai-law]').click();await page.locator('[data-use-law="0"]').waitFor();
   assert.equal(await page.locator('.law-search-panel .law-result').count(),0);
@@ -53,20 +55,25 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   await page.locator('[data-use-law="0"]').click();
   assert.equal(await page.locator('[data-scope]:checked').count(),0);
   assert.equal(await page.locator('[data-adopt-ground]').isDisabled(),false);
-  await page.locator('[data-ai-review]').click();assert.match(await page.locator('#ground-status').innerText(),/체크/);
+  assert.equal(await page.locator('.ai-review-panel,[data-ai-review],.category-law-guide').count(),0);
+  assert.equal(await page.locator('[data-candidate="1"]').count(),0);
   await page.locator('[data-scope]').first().check();
   assert.equal(await page.locator('.scope-option').first().innerText(),'성명');
   assert.equal(await page.locator('[data-path="groundDraft.reason"]').count(),0);
-  await page.locator('[data-ai-review]').click();await page.locator('.ai-review-result').waitFor();
-  assert.equal(reviewCalls,1);assert.equal(applyCalls,0);
-  await page.locator('[data-candidate="0"]').screenshot({path:'.test-output/polish-ai-review.png'});
-  await page.locator('[data-scope]').nth(1).check();assert.equal(await page.locator('[data-adopt-ground]').isDisabled(),false);assert.equal(await page.locator('.ai-review-result').count(),0);
-  await page.locator('[data-scope]').nth(1).uncheck();await page.locator('[data-ai-review]').click();await page.locator('.ai-review-result').waitFor();
+  assert.equal(reviewCalls,0);assert.equal(applyCalls,0);
+  await page.locator('[data-candidate="0"]').screenshot({path:'.test-output/ai-law-choice.png'});
   await page.locator('[data-law-conditions]').check();await page.locator('[data-law-authority]').check();await page.locator('[data-adopt-ground]').click();
   await page.waitForFunction(()=>document.querySelector('[data-candidate="0"] summary').innerText.includes('적용됨'));
   assert.equal(await page.locator('[data-candidate="0"]').count(),1);assert.equal(await page.locator('[data-candidate="0"]').getAttribute('open'),null);
   assert.match(await page.locator('[data-ground-category="required"] .category-items .row').first().innerText(),/고지사항/);
   assert.match(await page.locator('[data-ground-category="required"] .category-items .row').nth(1).innerText(),/동의서 유지/);
+  assert.equal(reviewCalls,0);assert.equal(lastApply.reviewToken,undefined);
+  assert.equal(await page.locator('[data-candidate="1"]').count(),0);
+  await page.locator('[data-show-laws=required]').click();
+  assert.match(await page.locator('[data-candidate="1"] .candidate-title').innerText(),/개인정보 보호법 제15조 제1항 제4호/);
+  assert.equal(await page.locator('[data-candidate="1"] .candidate-body>p').count(),0);
+  await page.locator('[data-candidate="1"] .source-disclosure>summary').click();
+  assert.match(await page.locator('[data-candidate="1"] .law-excerpt').innerText(),/전체 원문/);
   await page.locator('[data-dismiss-law="1"]').click();assert.equal(await page.locator('[data-candidate="1"]').count(),0);await page.locator('[data-law-group=required]>summary').click();await page.locator('[data-law-group=required]>summary').click();assert.equal(await page.locator('[data-candidate="1"]').count(),1);
   await page.locator('[data-candidate="1"]>summary').click();await page.locator('[data-use-law="1"]').waitFor();
   await page.locator('[data-candidate="1"]>summary').click();
@@ -159,6 +166,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   await page.locator('[data-cancel-ground]').click();
   await page.locator('[data-add-ground]').click();await page.locator('[data-basis-code]').selectOption('contract');await page.waitForFunction(()=>!document.querySelector('[data-basis-code]').disabled);await page.locator('[data-scope]').first().check();
   reviewMode='needs_information';await page.locator('[data-ai-review]').click();await page.locator('.ai-review-result').waitFor();assert.match(await page.locator('.ai-review-result').innerText(),/추가 확인 필요/);assert.equal(await page.locator('[data-adopt-ground]').isDisabled(),false);
+  await page.locator('.manual-ground').screenshot({path:'.test-output/polish-ai-review.png'});
   reviewMode='error';await page.locator('[data-ai-review]').click();await page.getByRole('alert').waitFor();assert.equal(await page.locator('.ai-review-result').count(),0);assert.equal(await page.locator('[data-adopt-ground]').isDisabled(),false);
   reviewMode='deferred';await page.locator('[data-ai-review]').click();await page.waitForFunction(()=>document.querySelector('[data-ai-review]').disabled);
   assert.equal(await page.locator('.review-spinner').count(),1);
@@ -174,6 +182,23 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   await page.locator('[data-finish]').click();
   for(const format of ['pdf','hwpx']){const pending=page.waitForEvent('download');await page.locator(`[data-${format}]`).click();const download=await pending;await download.saveAs(`.test-output/output.${format}`);assert.ok((await fs.stat(`.test-output/output.${format}`)).size>1000);}
   console.log('PASS explicit application reaches step 4 and both PDF/HWPX export');
+  for(const verdict of ['needs_information','not_supported']){
+   await stage3();await page.locator('[data-add-ground]').click();await page.locator('[data-basis-code]').selectOption(verdict==='not_supported'?'statutory':'contract');
+   await page.waitForFunction(()=>!document.querySelector('[data-basis-code]').disabled);
+   if(verdict==='not_supported'){
+    await page.locator('[data-law-query]').fill('시험');await page.locator('[data-catalog-search]').click();await page.waitForFunction(()=>!document.querySelector('[data-catalog-search]').disabled);
+    await page.locator('[data-catalog-law="0"]').click();await page.locator('[data-pick-article]').selectOption('10');await page.locator('[data-pick-paragraph]').selectOption('1');
+   }
+   await page.locator('[data-scope]').first().check();
+   reviewMode=verdict;await page.locator('[data-ai-review]').click();await page.locator('.ai-review-result').waitFor();
+   assert.match(await page.locator('.ai-review-result').innerText(),/담당자가.*등록할 수 있습니다/);
+   const callsBeforeApply=reviewCalls;await page.locator('[data-law-conditions]').check();
+   if(verdict==='not_supported')await page.locator('[data-law-authority]').check();
+   await page.locator('[data-adopt-ground]').click();
+   await page.waitForSelector('.applied-basis',{state:'attached'});assert.equal(reviewCalls,callsBeforeApply);assert.equal(lastApply.reviewToken,undefined);
+   await page.locator('[data-next]').click();assert.equal(await page.locator('.doc-notice').count(),1);
+  }
+  console.log('PASS manual application succeeds after uncertain and negative AI opinions without a second AI call');
   await stage3();await page.locator('[data-add-ground]').click();await page.locator('[data-basis-code]').selectOption('legitimate');await page.waitForFunction(()=>!document.querySelector('[data-basis-code]').disabled);assert.match(await page.locator('.legitimate-warning').innerText(),/직접 입증/);await page.locator('.pipa-original>summary').click();assert.match(await page.locator('.pipa-original blockquote').innerText(),/제1항 전체/);
   await page.locator('[data-scope-all]').check();const beforeSkip=reviewCalls;await page.locator('[data-law-conditions]').check();await page.locator('[data-adopt-ground]').click();await page.waitForSelector('[data-edit-ground]',{state:'attached'});assert.equal(reviewCalls,beforeSkip);
   await page.locator('[data-add-ground]').click();await page.locator('[data-basis-code]').selectOption('statutory');await page.waitForFunction(()=>!document.querySelector('[data-basis-code]').disabled);

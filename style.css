@@ -358,3 +358,4 @@
 .ground-editor .basis-selection,.ground-editor .law-picker,.ground-editor .application-scope{margin-top:20px}
 .catalog-search-box .catalog-hint{margin:6px 0 10px}
 @media(max-width:640px){.ground-editor .field>.privacy-type-label{font-size:23px}}
+.law-options-group>.other-laws{margin:0 16px 12px;min-height:44px;padding:8px 14px}
