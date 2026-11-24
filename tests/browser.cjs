@@ -9,7 +9,24 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
  try{
   const page=await browser.newPage({viewport:{width:1440,height:1100},acceptDownloads:true});const errors=[];
   page.on('pageerror',e=>errors.push(e.message));await fs.mkdir('.test-output',{recursive:true});
-  const stage3=async()=>{await page.goto(base);await page.locator('[data-sample]').click();await page.locator('[data-next]').click();await page.locator('[data-next]').click();await page.waitForSelector('[data-law-mode] option[value=demo]',{state:'attached'});};
+  const stage3=async()=>{
+   await page.goto(base);
+   await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');
+   await page.locator('.quick-create-form [type=submit]').click();
+   await page.locator('[data-path=agency]').fill('가온시 평생학습관');
+   await page.locator('[data-bulk-required=collect][value=required]').click();
+   await page.locator('[data-add=collect]').click();await page.locator('[data-item-preset]').nth(2).selectOption('이메일 주소');
+   await page.locator('[data-add=collect]').click();await page.locator('[data-item-preset]').nth(3).selectOption('custom');
+   await page.locator('[data-name]').fill('건강상담 기록');
+   await page.locator('[data-enable=provide]').check();
+   await page.locator('[data-path="groups.provide.recipient"]').fill('가온시 교육지원센터');
+   await page.locator('[data-path="groups.provide.purpose"]').fill('참가자 출석 관리');
+   await page.locator('[data-path="groups.provide.period"]').fill('교육 종료 후 30일');
+   await page.locator('[data-item-preset]').last().selectOption('성명');
+   await page.locator('[data-next]').click();await page.locator('[data-next]').click();
+   await page.waitForSelector('[data-law-mode] option[value=demo]',{state:'attached'});
+  };
+
   const proof=code=>{const rule=rules[code];const pipa={law:'개인정보 보호법',article:rule.article,paragraph:rule.paragraph,clause:rule.clause,cite:rule.pipa,excerpt:'테스트: 공식 기본 조항의 적용 요건',verified:true};return {...pipa,basisCode:code,pipa,pipaParagraph:{excerpt:'테스트: 제15조 제1항 전체 · 제1호부터 제7호까지'},pipaVerified:true,supportVerified:true,support:rule.support?{cite:'개인정보 보호법 제15조 제1항 제5호',excerpt:'테스트: 목적 내 제공의 수집 요건'}:null};};
   const candidate=(basisCode,type='required')=>({...proof(basisCode),type,law:rules[basisCode].needsLaw?'시험법':'개인정보 보호법',article:rules[basisCode].needsLaw?'10':rules[basisCode].article,paragraph:'1',clause:rules[basisCode].needsLaw?'':rules[basisCode].clause,cite:rules[basisCode].needsLaw?'시험법 제10조 제1항':rules[basisCode].pipa,excerpt:'테스트 근거 원문',reason:'테스트: 해당 업무에 필요한 처리인지 검토합니다.',itemReviews:[{name:'성명',suggested:true,reason:'테스트: 업무상 본인 확인 필요성 검토'}],sourceUrl:'https://www.law.go.kr/',kind:'법률'});
   await stage3();await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();assert.match(await page.getByRole('alert').innerText(),/LAW_API_OC|AI 연결 설정/);
@@ -162,6 +179,14 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   await page.locator('[data-add-ground]').click();await page.locator('[data-basis-code]').selectOption('statutory');await page.waitForFunction(()=>!document.querySelector('[data-basis-code]').disabled);
   await page.route('**/api/law/catalog',r=>r.fulfill({json:{laws:[{law:'작은 시험법',mst:'123',kind:'법률',department:'시험',effectiveDate:'20200101'}],cursor:null,hasNext:false}}));await page.locator('[data-law-query]').fill('시험');await page.locator('[data-catalog-search]').click();await page.waitForFunction(()=>document.querySelector('.catalog-results').getAttribute('aria-busy')==='false');assert.equal(await page.locator('[data-catalog-law]').count(),1);assert.match(await page.locator('.catalog-feedback').innerText(),/전체 1건/);assert.equal(await page.locator('.catalog-results').evaluate(e=>e.clientHeight),64);
   console.log('PASS full paragraph, legitimate-interest warning, select-all, application without AI, and compact single result');
+  await page.locator('[data-ai-law]').click();await page.waitForSelector('[data-candidate]');
+  await page.locator('#homeNav').click();await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');
+  page.once('dialog',dialog=>dialog.accept());await page.locator('.quick-create-form [type=submit]').click();
+  await page.locator('[data-path=agency]').fill('새 문서 기관');await page.locator('[data-bulk-required=collect][value=required]').click();
+  await page.locator('[data-next]').click();await page.locator('[data-next]').click();
+  assert.equal(await page.locator('[data-candidate],.applied-basis,.manual-ground').count(),0);
+  await page.locator('[data-next]').click();assert.equal(await page.locator('.doc-notice').count(),0);
+  console.log('PASS latest main quick templates, item selectors and fresh-document law review reset');
   await stage3();await page.route('**/api/status',r=>r.abort('connectionrefused'));await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();assert.match(await page.getByRole('alert').innerText(),/로컬 API 서버와 연결/);
   assert.deepEqual(errors,[]);console.log('Browser acceptance checks passed, including optional AI review and stable loading layout');
  }finally{await browser.close();}
