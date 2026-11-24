@@ -1,10 +1,15 @@
 const app = document.querySelector('#app');
 const labels = ['기본 내용 작성','항목 분류 검토','법적 근거 탐색','문서 작성 및 미리보기'];
-const descriptions = ['수집·이용 목적과 개인정보 항목을 입력합니다.','분류 제안을 확인하고 담당자가 확정합니다.','항목별로 법적 근거를 검토하고 채택합니다.','A4 초안을 검토한 뒤 완성하기를 누르세요.'];
+const descriptions = ['기관명, 이용 목적, 보유기간과 개인정보 항목을 입력합니다.','개인정보 항목의 분류와 필수 여부를 확인합니다.','업무에 적용할 처리 근거를 찾아 확인합니다.','동의서 초안을 검토하고 A4 문서로 출력합니다.'];
 const groupNames = { collect:'개인정보 수집·이용', extra:'목적 외 이용', provide:'제3자 제공', marketing:'마케팅' };
 const categoryNames = { required:'일반 개인정보 (필수)', optional:'일반 개인정보 (선택)', general:'일반 개인정보', sensitive:'민감정보', unique:'고유식별정보' };
 const group = enabled => ({enabled,purpose:'',period:'',optionalPurpose:'',optionalPeriod:'',recipient:'',outside:false,items:[]});
-let state = {agency:'',groups:{collect:group(true),extra:group(false),provide:group(false),marketing:group(false)},refusals:{},title:'',child:null,edits:{},search:false,groundDraft:null,grounds:[],intro:''};
+const newDraft = () => ({agency:'',groups:{collect:group(true),extra:group(false),provide:group(false),marketing:group(false)},refusals:{},title:'',child:null,edits:{},search:false,groundDraft:null,grounds:[],intro:''});
+let state = newDraft();
+function hasDraftChanges(){
+ const ignoreEmptyRows=(key,value)=>key==='items'?value.filter(item=>item.name.trim()||item.required||item.manualName):value;
+ return JSON.stringify(state,ignoreEmptyRows)!==JSON.stringify(newDraft());
+}
 let step=0, reached=0, tab='collect', message='', chat='';
 let basicsChecked=false;
 let finalDocument=null;
@@ -13,8 +18,91 @@ const id = () => crypto.randomUUID();
 const itemGroup = (key,g,i) => key==='collect'&&!i.required?{...g,purpose:g.optionalPurpose?.trim()||g.purpose,period:g.optionalPeriod?.trim()||g.period}:g;
 const entries = () => Object.entries(state.groups).flatMap(([key,g])=>g.enabled?g.items.filter(i=>i.name.trim()).map(i=>({key,g:itemGroup(key,g,i),i})):[]);
 const getItem = key => Object.values(state.groups).flatMap(g=>g.items).find(i=>i.id===key);
+const itemNameKey = name => name.normalize('NFKC').toLowerCase().replace(/[\s·._-]+/g,'');
+const itemNames = new Map(
+ [
+  ['성명','이름','성함'],
+  ['휴대전화번호','휴대폰번호','핸드폰번호','휴대전화 연락처','휴대폰 연락처','모바일 전화번호','셀폰 번호'],
+  ['전화번호','전화 연락처'],
+  ['연락처','연락 가능한 번호'],
+  ['유선전화번호','유선번호','일반전화번호','고정전화번호'],
+  ['자택 전화번호','집 전화번호'],
+  ['직장 전화번호','회사 전화번호','직장 유선전화'],
+  ['업무용 연락처','업무 연락처'],
+  ['팩스번호','FAX 번호'],
+  ['이메일 주소','이메일','메일주소','전자우편주소','e-mail 주소'],
+  ['주소','우편 주소'],
+  ['상세주소','주소 상세'],
+  ['우편번호','우편 코드','ZIP 코드'],
+  ['자택 주소','집 주소'],
+  ['배송지 주소','배송 주소','배송지'],
+  ['직장 주소','회사 주소'],
+  ['생년월일','출생일'],
+  ['성별'],
+  ['연령','나이'],
+  ['국적'],
+  ['소속','소속명'],
+  ['소속 업체명','소속 회사명','소속 기업명'],
+  ['부서명','소속 부서','부서 이름'],
+  ['직위'],
+  ['직급'],
+  ['사번','사원번호','직원번호','임직원 번호'],
+  ['학번','학생번호'],
+  ['학교명','학교 이름'],
+  ['학년'],
+  ['반 번호','학급 번호'],
+  ['회원번호','회원 식별번호','회원 고유번호'],
+  ['계정 아이디','로그인 아이디','로그인 ID','계정 ID'],
+  ['닉네임','별명'],
+  ['IP 주소','IP','아이피 주소'],
+  ['접속 시간','접속 시각'],
+  ['기기 식별자','단말기 식별자','기기 ID','단말기 ID'],
+  ['설문 응답 내용','설문 응답','설문 답변','설문 답변 내용'],
+  ['개인을 식별할 수 있는 사진·영상'],
+  ['출입 기록','출입 이력','출입 내역'],
+  ['출입증 번호','출입증 식별번호'],
+  ['차량번호','차량 등록번호','자동차 등록번호','자동차 번호'],
+  ['은행명','은행 이름'],
+  ['계좌번호','은행 계좌번호'],
+  ['예금주명','예금주 이름','예금주 성명'],
+  ['주민등록번호','주민번호'],
+  ['외국인등록번호','외국인 등록 번호'],
+  ['여권번호','여권 번호','여권 식별번호'],
+  ['운전면허번호','운전면허증 번호'],
+  ['건강정보']
+ ].flatMap(([canonical,...aliases])=>[canonical,...aliases].map(name=>[itemNameKey(name),canonical]))
+);
+const standardItemName = name => itemNames.get(itemNameKey(name)) || name.trim();
+const knownItemName = name => itemNames.has(itemNameKey(name));
+function itemNameDistance(left,right){
+ let row=Array.from({length:right.length+1},(_,index)=>index);
+ for(let i=1;i<=left.length;i++){
+  const next=[i];
+  for(let j=1;j<=right.length;j++){
+   next[j]=Math.min(row[j]+1,next[j-1]+1,row[j-1]+Number(left[i-1]!==right[j-1]));
+  }
+  row=next;
+ }
+ return row[right.length];
+}
+function similarItemNames(name){
+ const key=itemNameKey(name);
+ if(key.length<2||key.length>40||itemNames.has(key))return [];
+ const scores=new Map();
+ for(const [alias,standard] of itemNames){
+  const short=key.length<=3;
+  const limit=key.length>=8?2:1;
+  if(short?alias.length!==key.length:Math.abs(alias.length-key.length)>limit)continue;
+  const left=short?key.normalize('NFD'):key;
+  const right=short?alias.normalize('NFD'):alias;
+  const distance=itemNameDistance(left,right);
+  if(distance<=limit&&distance<(scores.get(standard)??Infinity))scores.set(standard,distance);
+ }
+ return [...scores].sort((a,b)=>a[1]-b[1]||a[0].localeCompare(b[0],'ko')).slice(0,3).map(([standard])=>standard);
+}
 const rnn = name => /주민\s*등록\s*번호|주민번호/.test(name);
 function signal(name){
+ name=standardItemName(name);
  if(rnn(name)||/여권\s*번호|운전면허\s*번호|외국인등록\s*번호/.test(name)) return 'unique';
  if(/종교|사상|신념|성생활|성 생활|정치적 견해|노동조합 가입|정당 가입|범죄경력|유전정보|건강정보/.test(name)) return 'sensitive';
  if(/병력|진단|질병|장애|상담|생체|인종|민족|복약|심리/.test(name)) return 'possible';
@@ -22,7 +110,27 @@ function signal(name){
 }
 function suggested(i){ const value=signal(i.name);return value==='possible'?'sensitive':value; }
 const kind = i => i.kind || suggested(i);
-const hint = i => ({unique:rnn(i.name)?'주민등록번호 · 별도 처리 근거 확인':'고유식별정보 검토',sensitive:'민감정보 후보',possible:'민감정보 가능성 높음',general:'일반 개인정보 후보'}[signal(i.name)]);
+const needsItemReview = i => signal(i.name)!=='general'||!knownItemName(i.name);
+function hint(i){
+ const standard = standardItemName(i.name);
+ if(standard!==i.name.trim())return '권장 표기 · '+standard;
+ const type=signal(i.name);
+ return ({
+  unique:rnn(standard)?'주민등록번호 · 별도 처리 근거 확인':'고유식별정보',
+  sensitive:'민감정보',
+  possible:'민감정보 가능성 높음',
+  general:knownItemName(i.name)?'일반 개인정보':'사전에 없는 항목명 · 의미와 분류 확인'
+ })[type];
+}
+function itemNameHelp(item){
+ if(!item.name.trim())return '';
+ const standard=standardItemName(item.name);
+ const exact=standard!==item.name.trim();
+ const suggestions=exact?[standard]:similarItemNames(item.name);
+ if(!suggestions.length)return safe(hint(item));
+ const label=exact?'권장 표기':'비슷한 항목명 · 적용할 이름을 선택하세요';
+ return `<span>${label}</span>${suggestions.map(name=>`<button type="button" data-item-suggestion="${safe(name)}" aria-label="${safe(name)} 적용">${safe(name)}</button>`).join('')}`;
+}
 const requiredMark = '<span class="required-mark" aria-hidden="true">*</span>';
 const field = (label,path,value,placeholder='',area=false,required=false) => {
  const attrs=`data-path="${path}" placeholder="${safe(placeholder)}" ${required?'required':''}`;
@@ -31,14 +139,67 @@ const field = (label,path,value,placeholder='',area=false,required=false) => {
 };
 const checkbox = (label,attrs,checked,required=false) => `<label class="check"><input type="checkbox" ${attrs} ${checked?'checked':''} ${required?'required':''}>${label}${required?requiredMark:''}</label>`;
 function home(){
- return `<section class="hero"><div><span class="eyebrow">개인정보 보호 업무 지원</span><h1>개인정보 동의서·고지서<br>작성하기</h1><p>항목별 분류와 처리 근거를 검토하고<br>기관 업무에 맞는 동의서와 고지서를 작성하세요.</p><div class="actions"><button class="primary" data-start>동의서 생성 <span aria-hidden="true">→</span></button><button data-sample>예시로 시작</button></div></div><div class="art" aria-hidden="true"><div class="orbit"></div><div class="orbit"></div><div class="paper"><span class="tileicon">▤</span><b>개인정보 수집·이용 동의서</b><i></i><i></i><i class="short"></i><strong>☑ 동의 항목</strong><i></i><i class="short"></i></div><span class="float one">✓ 항목 분류 검토</span><span class="float two">▤ A4 문서 출력</span></div></section><div class="section-heading"><h2>문서 작성 절차</h2><p>네 단계로 작성하고, 이전 단계로 돌아가 입력을 수정할 수 있습니다.</p></div><div class="cards">${labels.map((label,n)=>`<article class="card"><small>0${n+1}단계</small><span class="tileicon" aria-hidden="true">${['▤','☷','⌕','▧'][n]}</span><h3>${label}</h3><p>${descriptions[n]}</p></article>`).join('')}</div><div class="info"><span aria-hidden="true">ⓘ</span><div><strong>개인정보 원문은 입력하지 마세요</strong><p>‘성명’, ‘휴대전화번호’처럼 항목명과 처리 맥락만 입력하세요. 분류와 처리 근거는 담당자가 직접 확정합니다.</p></div></div>`;
+ return `
+  <section class="hero">
+   <div>
+    <h1>동의보감 <span class="hero-ai">AI</span></h1>
+    <p>AI가 관련 법령과 지침에 맞는 개인정보 수집·이용 동의서를 자동으로 작성해 주는 서비스</p>
+    <div class="actions">
+     <button class="primary" data-start>동의서 생성 <span aria-hidden="true">→</span></button>
+     <button data-quick-create>빠른 생성 <span aria-hidden="true">→</span></button>
+    </div>
+   </div>
+   <div class="art" aria-hidden="true">
+    <div class="orbit"></div><div class="orbit"></div>
+    <div class="paper">
+     <b>개인정보 수집·이용 동의서</b>
+     <i></i><i></i><i class="short"></i>
+     <div class="paper-choices">
+      <span><span class="paper-check is-checked"></span>동의</span>
+      <span><span class="paper-check"></span>미동의</span>
+     </div>
+     <i></i><i class="short"></i>
+    </div>
+    <span class="float one"><span class="badge-check">✓</span>항목 분류 검토</span>
+    <span class="float trust"><span class="badge-shield"></span>안전하고 신뢰 있게</span>
+    <span class="float law"><span class="badge-scale">⚖︎</span>법령·지침에 맞게</span>
+    <span class="float two"><span class="badge-printer"></span>A4 문서 출력</span>
+   </div>
+   <a class="hero-source" href="${reference}" target="_blank" rel="noopener">국가법령정보센터 <span aria-hidden="true">↗</span></a>
+  </section>
+  <div class="section-heading"><h2>동의서 작성 절차</h2></div>
+  <div class="cards">${labels.map((label,n)=>`<article class="card"><small>0${n+1}단계</small><span class="tileicon" aria-hidden="true">${['▤','☷','<span class="step-symbol step-search"></span>','<span class="step-symbol step-preview"></span>'][n]}</span><h3>${label}</h3><p>${descriptions[n]}</p></article>`).join('')}</div>
+  <div class="info home-input-note"><span aria-hidden="true">ⓘ</span><p><strong>빠른 생성으로 시작하세요.</strong> 교육·행사, 강사료·자문료, 진료 예약 등 ${quickTemplates.length}개 양식에서 기본 항목을 불러올 수 있습니다.</p></div>
+ `;
 }
 const canSetRequired = key => ['collect','extra'].includes(key);
+const itemPresetGroups = [
+ ['일반 개인정보', ['부서명','생년월일','성명','성별','소속 업체명','업무용 연락처','이메일 주소','주소','휴대전화번호','은행명','계좌번호','예금주명']],
+ ['민감정보', ['건강정보','범죄경력']],
+ ['고유식별정보', ['여권번호','외국인등록번호','운전면허번호','주민등록번호']]
+].map(([label,names])=>[label,names.sort((left,right)=>left.localeCompare(right,'ko'))]);
+const itemPresetNames = new Set(itemPresetGroups.flatMap(([,names])=>names));
+const isManualItemName = item => item.manualName || Boolean(item.name && !itemPresetNames.has(item.name));
+function itemNameControl(item,index){
+ const manual=isManualItemName(item);
+ const selected=manual?'custom':item.name;
+ return `<div class="field item-name">
+  <label class="item-name-label" for="item-choice-${item.id}"><span class="item-number">${index+1}</span> 개인정보 항목명${requiredMark}</label>
+  <select id="item-choice-${item.id}" data-item-preset="${item.id}" required>
+   <option value="" disabled ${selected?'':'selected'}>항목을 선택하세요</option>
+   ${itemPresetGroups.map(([label,names])=>`<optgroup label="${safe(label)}">
+    ${names.map(name=>`<option value="${safe(name)}" ${selected===name?'selected':''}>${safe(name)}</option>`).join('')}
+   </optgroup>`).join('')}
+   <option value="custom" ${manual?'selected':''}>직접 입력</option>
+  </select>
+  ${manual?`<input type="text" aria-label="${index+1} 개인정보 항목명 직접 입력" autocomplete="off" data-name="${item.id}" value="${safe(item.name)}" required>`:''}
+ </div>`;
+}
 function basics(){
- return `<section class="panel"><h2>기관 정보</h2>${field('수집 기관명','agency',state.agency,'예: ○○시청',false,true)}</section>`+Object.entries(state.groups).map(([key,g])=>{
+ return `<section class="panel"><h2>기관 정보</h2>${field('수집 기관명','agency',state.agency,'예: ○○병원 또는 ○○시청',false,true)}</section>`+Object.entries(state.groups).map(([key,g])=>{
   const title=key==='provide'?'제공받는 자의 ':'';
   const hasRequiredControls=canSetRequired(key);
-  return `<section class="panel"><div class="panelhead"><h2>${groupNames[key]}</h2>${checkbox(groupNames[key]+' 사용',`data-enable="${key}"`,g.enabled)}</div>${g.enabled?`<div class="pair">${key==='provide'?field('제공받는 자','groups.provide.recipient',g.recipient,'기관 또는 법인명',false,true)+checkbox('수집 목적 외 제공','data-outside',g.outside):''}${field(title+(key==='collect'?'기본 이용 목적':'이용 목적'),`groups.${key}.purpose`,g.purpose,'예: 프로그램 신청 관리',false,true)}${field(title+(key==='collect'?'기본 보유 및 이용기간':'보유 및 이용기간'),`groups.${key}.period`,g.period,'예: 사업 종료 후 1년',false,true)}</div>${key==='collect'?`<fieldset class="optional-details"><legend>선택 항목의 이용 조건</legend><div class="pair">${field('선택 항목 이용 목적','groups.collect.optionalPurpose',g.optionalPurpose,'기본 이용 목적과 같으면 비워 두세요')}${field('선택 항목 보유 및 이용기간','groups.collect.optionalPeriod',g.optionalPeriod,'기본 보유 및 이용기간과 같으면 비워 두세요')}</div></fieldset>`:''}${hasRequiredControls? `<div class="actions bulk-required" role="group" aria-label="${groupNames[key]} 전체 항목 필수 여부"><button data-bulk-required="${key}" value="required" ${g.items.length?'':'disabled'}>모두 필수</button><button data-bulk-required="${key}" value="optional" ${g.items.length?'':'disabled'}>모두 선택</button></div>`:''}<div class="item-list">${g.items.length?'':`<p class="muted">개인정보 항목${requiredMark}</p>`}${g.items.map((i,n)=>`<div class="item-row"><label class="field item-name"><span>개인정보 항목명 ${n+1}${requiredMark}</span><input type="text" data-name="${i.id}" value="${safe(i.name)}" placeholder="예: 성명" required></label><div class="item-controls">${hasRequiredControls?requiredSwitch(i,'항목 '+(n+1)):key==='marketing'?'<span class="pill">선택</span>':''}<div class="order"><button data-move="${i.id}:-1" aria-label="항목 ${n+1} 위로 이동" ${n?'':'disabled'}>↑</button><button data-move="${i.id}:1" aria-label="항목 ${n+1} 아래로 이동" ${n<g.items.length-1?'':'disabled'}>↓</button></div><button class="danger" data-delete="${i.id}" aria-label="항목 ${n+1} 삭제">삭제</button></div><small class="notice item-hint" id="hint-${i.id}">${i.name?hint(i):''}</small></div>`).join('')}</div><div class="actions"><button data-add="${key}">＋ 항목 추가</button>${key==='collect'?'<p class="muted">일반 개인정보, 민감정보, 고유식별정보 모두 작성해주세요.</p>':''}</div>`:'<p class="muted">필요한 처리 유형만 선택하세요.</p>'}</section>`;
+  return `<section class="panel"><div class="panelhead"><h2>${groupNames[key]}</h2>${checkbox(groupNames[key]+' 사용',`data-enable="${key}"`,g.enabled)}</div>${g.enabled?`<div class="pair">${key==='provide'?field('제공받는 자','groups.provide.recipient',g.recipient,'기관 또는 법인명',false,true)+checkbox('수집 목적 외 제공','data-outside',g.outside):''}${field(title+'이용 목적',`groups.${key}.purpose`,g.purpose,'예: 프로그램 신청 관리',false,true)}${field(title+'보유 및 이용 기간',`groups.${key}.period`,g.period,'예: 사업 종료 후 1년',false,true)}</div>${key==='collect'?`<fieldset class="optional-details"><legend>선택 항목의 이용 조건</legend><div class="pair">${field('선택 항목 이용 목적','groups.collect.optionalPurpose',g.optionalPurpose,'이용 목적과 같으면 공백')}${field('선택 항목 보유 및 이용 기간','groups.collect.optionalPeriod',g.optionalPeriod,'보유 및 이용 기간과 같으면 공백')}</div></fieldset>`:''}${hasRequiredControls? `<div class="actions bulk-required" role="group" aria-label="${groupNames[key]} 전체 항목 필수 여부"><button data-bulk-required="${key}" value="required" ${g.items.length?'':'disabled'}>모두 필수</button><button data-bulk-required="${key}" value="optional" ${g.items.length?'':'disabled'}>모두 선택</button></div>`:''}<div class="item-list">${g.items.length?'':`<p class="muted">개인정보 항목${requiredMark}</p>`}${g.items.map((i,n)=>`<div class="item-row">${itemNameControl(i,n)}<div class="item-controls">${hasRequiredControls?requiredSwitch(i,'항목 '+(n+1)):key==='marketing'?'<span class="pill">선택</span>':''}<div class="order"><button type="button" data-move="${i.id}:-1" aria-label="항목 ${n+1} 위로 이동" ${n?'':'disabled'}><span class="move-chevron" aria-hidden="true"></span></button><button type="button" data-move="${i.id}:1" aria-label="항목 ${n+1} 아래로 이동" ${n<g.items.length-1?'':'disabled'}><span class="move-chevron down" aria-hidden="true"></span></button></div><button class="danger" data-delete="${i.id}" aria-label="항목 ${n+1} 삭제">삭제</button></div><div class="notice item-hint" id="hint-${i.id}">${itemNameHelp(i)}</div></div>`).join('')}</div><div class="actions"><button data-add="${key}">＋ 항목 추가</button>${key==='collect'?'<p class="muted">필요한 항목명만 추가하세요. 실제 이름이나 전화번호는 입력하지 마세요.</p>':''}</div>`:'<p class="muted">필요한 처리 유형만 선택하세요.</p>'}</section>`;
  }).join('');
 }
 const requiredSwitch = (item,label) => `<label class="required-switch"><input type="checkbox" role="switch" aria-label="${safe(label)} 필수 여부" data-required="${item.id}" ${item.required?'checked':''}><span class="required-track" aria-hidden="true"></span><span aria-hidden="true">${item.required?'필수':'선택'}</span></label>`;
@@ -302,9 +463,9 @@ function render(){
  if(step===5){app.innerHTML=finalPage();return;}
  const body=[basics,classify,grounds,output][step-1]();
  const all=entries();
- const issues=all.filter(({i})=>signal(i.name)!=='general');
+ const issues=all.filter(({i})=>needsItemReview(i));
  const missing=all.filter(({g})=>!g.purpose.trim()||!g.period.trim()).length;
- app.innerHTML=`<div class="trail"><button data-go="0">홈</button> / 문서 작성</div><div class="title"><h1>${labels[step-1]}</h1><p>${descriptions[step-1]}</p></div><nav class="stepper" aria-label="작성 단계">${labels.map((name,n)=>`<button data-go="${n+1}" ${step===n+1?'aria-current="step"':''} ${n+1>reached||(n===3&&unresolvedRnn().length)?'disabled':''}><span class="stepnum">${String(n+1).padStart(2,'0')}</span>${name}</button>`).join('')}</nav><div class="workspace ${step===4?'wide-output':''}"><div class="stack">${body}<div class="notice" id="message" role="status">${safe(message)}</div><div class="bar"><button data-go="${step-1}">← ${step===1?'홈으로':'이전 단계'}</button>${step<4?`<button class="primary" data-next ${step===3&&unresolvedRnn().length?'disabled aria-describedby="rrn-block"':''}>${step===2?'분류 확정 후 다음':step===3?'문서 작성으로':'다음 단계'} →</button>`:''}</div></div>${step===4?'':`<aside class="side"><h2>${step===1?'입력 점검':'검토 현황'}</h2><span class="pill">등록 항목 <span id="count">${all.length}</span>개</span><hr><p id="risk">${riskHTML(issues,missing)}</p><p class="muted">예시 규칙에 따른 제안입니다. 분류와 근거는 담당자가 직접 확인합니다.</p><button data-guide>이용 안내 ↗</button></aside>`}</div>`;
+ app.innerHTML=`<div class="trail"><button data-go="0">홈</button> / 문서 작성</div><div class="title"><h1>${labels[step-1]}</h1><p>${descriptions[step-1]}</p></div><nav class="stepper" aria-label="작성 단계">${labels.map((name,n)=>`<button data-go="${n+1}" ${step===n+1?'aria-current="step"':''} ${n+1>reached||(n===3&&unresolvedRnn().length)?'disabled':''}><span class="stepnum">${String(n+1).padStart(2,'0')}</span>${name}</button>`).join('')}</nav><div class="workspace ${step===4?'wide-output':''}"><div class="stack">${body}<div class="notice" id="message" role="status">${safe(message)}</div><div class="bar"><button data-go="${step-1}">← ${step===1?'홈으로':'이전 단계'}</button>${step<4?`<button class="primary" data-next ${step===3&&unresolvedRnn().length?'disabled aria-describedby="rrn-block"':''}>${step===2?'분류 확정 후 다음':step===3?'문서 작성으로':'다음 단계'} →</button>`:''}</div></div>${step===4?'':`<aside class="side"><h2>${step===1?'입력 점검':'검토 현황'}</h2><span class="pill">등록 항목 <span id="count">${all.length}</span>개</span><hr><p id="risk">${riskHTML(issues,missing)}</p><p class="muted">예시 규칙에 따른 제안입니다. 분류와 근거는 담당자가 직접 확인합니다.</p><button data-guide>이용 안내</button></aside>`}</div>`;
  if(step===1&&basicsChecked)showBasicsIssues();
 }
 
@@ -324,7 +485,7 @@ function refreshRisk(){
  const all=entries(), count=document.querySelector('#count');
  if(!count)return;
  count.textContent=all.length;
- document.querySelector('#risk').innerHTML=riskHTML(all.filter(({i})=>signal(i.name)!=='general'),all.filter(({g})=>!g.purpose.trim()||!g.period.trim()).length);
+ document.querySelector('#risk').innerHTML=riskHTML(all.filter(({i})=>needsItemReview(i)),all.filter(({g})=>!g.purpose.trim()||!g.period.trim()).length);
 }
 function go(n){
  if(n===5&&(step!==4||!finalDocument))return;
@@ -332,6 +493,11 @@ function go(n){
  if(step===1&&n>1&&!validateBasics())return;
  if(n===4&&unresolvedRnn().length){feedback('주민등록번호의 처리 근거를 먼저 확인해 주세요.');return;}
  if(n===2&&!state.groups[tab].enabled)tab=Object.keys(state.groups).find(k=>state.groups[k].enabled)||'collect';
+ if(n===1){
+  for(const [key,g] of Object.entries(state.groups)){
+   if(g.enabled&&!g.items.length)add(key);
+  }
+ }
  basicsChecked=false;
  step=n;reached=Math.max(reached,Math.min(n,4));message='';render();window.scrollTo(0,0);
  if(n){const h=app.querySelector('.title h1');h.tabIndex=-1;h.focus({preventScroll:true});}
@@ -349,17 +515,127 @@ function invalidateItems(items){
  syncGrounds();
 }
 function add(key,name='',required=false){
- const i={id:id(),name,required};state.groups[key].items.push(i);return i;
+ const i={id:id(),name:standardItemName(name),required};state.groups[key].items.push(i);return i;
 }
-function sample(){
- state.agency='가온시 평생학습관';
- state.groups={collect:group(true),extra:group(false),provide:group(true),marketing:group(false)};
- Object.assign(state.groups.collect,{purpose:'시민 교육 프로그램 신청 관리',period:'프로그램 종료 후 1년'});
- add('collect','성명',true);add('collect','휴대전화번호',true);add('collect','이메일');add('collect','건강상담 기록');
- Object.assign(state.groups.provide,{recipient:'가온시 교육지원센터',purpose:'참가자 출석 관리',period:'교육 종료 후 30일'});
- add('provide','성명');
- Object.assign(state,{title:'',intro:'',child:null,edits:{},refusals:{},search:false,grounds:[],groundDraft:null});
- chat='';tab='collect';reached=1;go(1);
+const quickTemplates = [
+ {
+  title:'용역·유지보수 인력 보안 및 출입 동의서',
+  purpose:'용역·유지보수 인력의 출입 권한 발급·회수 및 출입 관리',
+  period:'출입 권한 회수 완료 시까지',
+  items:['성명','소속 업체명','업무용 연락처'],
+  note:'자동 입력 기간은 출입 등록 정보 기준입니다. 출입기록을 함께 처리하면 기관의 기록 보존 기준과 연락처 수집 필요 여부를 확인하세요.'
+ },
+ {
+  title:'교육·행사 참여 동의서',
+  purpose:'교육·행사 참가 신청 접수, 운영 안내 및 출석 관리',
+  period:'교육·행사 종료 및 출석 확인 완료 시까지',
+  items:['성명','휴대전화번호'],
+  note:'운영 안내에 필요한 연락 수단을 선택하세요. 수료증 발급이나 운영기록 보존이 필요하면 해당 보존 기준을 확인하세요.'
+ },
+ {
+  title:'강사료·자문료 지급 동의서',
+  purpose:'강사료·자문료 지급 및 입금 계좌 확인',
+  items:['성명','은행명','계좌번호','예금주명'],
+  note:'지급 증빙에 적용되는 기관의 회계·기록관리 기준에 맞춰 기간을 입력하세요. 원천징수나 지급명세서 제출에 주민등록번호가 필요한 경우 적용 법령과 처리 근거를 확인하세요.'
+ },
+ {
+  title:'설문조사 참여 동의서',
+  purpose:'서비스·사업 개선을 위한 설문 응답 분석',
+  period:'설문 응답 분석 완료 시까지',
+  items:['설문 응답 내용'],
+  note:'응답자를 식별할 수 없는 설문이라면 이 양식이 필요한지 먼저 확인하세요.'
+ },
+ {
+  title:'모바일 쿠폰 발송 동의서',
+  purpose:'지급 대상자에게 모바일 쿠폰 발송',
+  period:'모바일 쿠폰 발송 완료 시까지',
+  items:['휴대전화번호'],
+  note:'외부 발송사를 이용하면 실제 계약과 발송 방식에 따라 처리위탁인지 제3자 제공인지 확인하세요.'
+ },
+ {
+  title:'사진·영상 촬영 및 활용 동의서',
+  purpose:'교육·행사 사진과 영상 촬영 및 사전에 안내한 매체에서의 활용',
+  items:['개인을 식별할 수 있는 사진·영상'],
+  note:'게시 매체와 공개 범위, 게시 종료일 및 원본 보유기간을 정하세요. 환자나 진료 장면 촬영은 해당 절차를 별도로 확인하세요.'
+ },
+ {
+  audience:'의료기관 업무',
+  title:'진료 예약·상담 연락 동의서',
+  purpose:'예약·상담 문의에 회신하고 진료 예약의 확인·변경을 안내',
+  items:['성명','휴대전화번호'],
+  note:'예약·문의 연락용 정보가 진료기록과 분리되는지 확인하세요. 적용되는 처리 근거, 별도 동의 필요 여부와 보유기간은 기관 기준에 맞춰 정하세요.'
+ },
+ {
+  audience:'의료기관 업무',
+  title:'퇴원 후 건강관리 프로그램 참여 동의서',
+  purpose:'퇴원 후 건강관리 프로그램 참가 신청 접수 및 일정 안내',
+  period:'건강관리 프로그램 종료 시까지',
+  items:['성명','휴대전화번호'],
+  note:'자동 입력 기간은 프로그램 신청·안내에 쓰는 연락처 기준입니다. 진료기록에 포함되거나 건강정보가 필요하면 별도의 보존 기준과 처리 근거를 확인하세요.'
+ }
+];
+const quickDialog = document.querySelector('#quick-create');
+const quickForm = quickDialog.querySelector('.quick-create-form');
+const quickPreview = quickDialog.querySelector('#quick-preview');
+const quickApply = quickForm.querySelector('[type="submit"]');
+const quickOptions = ['공통 업무','의료기관 업무'].map(audience=>
+ `<optgroup label="${audience}">${quickTemplates.map((template,index)=>
+  (template.audience||'공통 업무')===audience?`<option value="${index}">${safe(template.title)}</option>`:''
+ ).join('')}</optgroup>`
+).join('');
+quickForm.querySelector('select').insertAdjacentHTML('beforeend',quickOptions);
+function updateQuickPreview(){
+ const template = quickTemplates[quickForm.elements.template.value];
+ quickPreview.hidden = !template;
+ quickApply.disabled = !template;
+ if(template){
+  quickPreview.querySelector('[data-quick-purpose]').textContent = template.purpose;
+  quickPreview.querySelector('[data-quick-items]').textContent = template.items.join(', ');
+  quickPreview.querySelector('[data-quick-period]').textContent = template.period ?? '기관 기준 확인 후 직접 입력';
+  quickPreview.querySelector('[data-quick-note]').textContent = template.note;
+ }
+}
+quickForm.addEventListener('change',updateQuickPreview);
+quickForm.addEventListener('submit',e=>{
+ e.preventDefault();
+ const template = quickTemplates[quickForm.elements.template.value];
+ if(!template)return;
+ if(hasDraftChanges()&&!confirm('현재 작성 중인 내용을 선택한 양식으로 바꾸시겠습니까?'))return;
+ state = newDraft();
+ state.title = template.title;
+ state.groups.collect.purpose = template.purpose;
+ state.groups.collect.period = template.period ?? '';
+ template.items.forEach(name=>add('collect',name));
+ chat='';tab='collect';reached=0;
+ quickDialog.close();
+ go(1);
+});
+function showItemNameNotice(previous,current){
+ const notice=document.createElement('div');
+ notice.textContent='항목명 변경 · '+previous+' → '+current;
+ document.querySelector('#item-name-notice').append(notice);
+ setTimeout(()=>notice.remove(),4500);
+}
+function updateItemNameHelp(item){
+ document.getElementById('hint-'+item.id).innerHTML=itemNameHelp(item);
+}
+function commitItemName(input,name=standardItemName(input.value)){
+ const item=getItem(input.dataset.name);
+ const previous=input.value.trim();
+ if(item.name!==name){
+  item.name=name;delete item.kind;invalidateItems([item]);
+ }
+ if(previous!==name)showItemNameNotice(previous,name);
+ updateItemNameHelp(item);
+ if(itemPresetNames.has(name)){
+  const picker=input.parentElement.querySelector('[data-item-preset]');
+  delete item.manualName;
+  picker.value=name;
+  input.remove();
+  return picker;
+ }
+ input.value=name;
+ return input;
 }
 function setPath(path,value){
  if(path==='!chat'){chat=value;return;}
@@ -379,7 +655,7 @@ document.addEventListener('input',e=>{
  if(d.name){
   const i=getItem(d.name);
   i.name=el.value;delete i.kind;invalidateItems([i]);
-  document.querySelector('#hint-'+i.id).textContent=i.name?hint(i):'';
+  updateItemNameHelp(i);
  }
  if(d.edit){
   state.edits[d.edit]=el.innerText;
@@ -396,10 +672,37 @@ document.addEventListener('input',e=>{
  if(step===1&&basicsChecked&&(d.path||d.name))showBasicsIssues();
  if(step===4&&d.path&&d.path!=='!chat')refreshPreview();
 });
+document.addEventListener('focusout',e=>{
+ if(!e.target.dataset.name)return;
+ if(e.relatedTarget?.matches('[data-item-suggestion]')&&e.target.closest('.item-row').contains(e.relatedTarget))return;
+ commitItemName(e.target);
+ refreshRisk();
+ if(basicsChecked)showBasicsIssues();
+});
 document.addEventListener('change',e=>{
  const {dataset:d,checked,value}=e.target;
+ if(d.itemPreset){
+  const item=getItem(d.itemPreset);
+  const manual=value==='custom';
+  if(manual)item.manualName=true;
+  else {
+   delete item.manualName;
+   if(item.name!==value){
+    item.name=value;delete item.kind;invalidateItems([item]);
+   }
+  }
+  render();
+  app.querySelector(manual?`[data-name="${item.id}"]`:`[data-item-preset="${item.id}"]`).focus({preventScroll:true});
+ }
  if('child' in d){state.child=value==='yes';refreshPreview();}
- if(d.enable){const g=state.groups[d.enable];g.enabled=checked;invalidateItems(g.items);reached=1;render();document.querySelector(`[data-enable="${d.enable}"]`).focus();}
+ if(d.enable){
+  const g=state.groups[d.enable];
+  g.enabled=checked;
+  if(checked&&!g.items.length)add(d.enable);
+  invalidateItems(g.items);
+  reached=1;render();
+  document.querySelector(`[data-enable="${d.enable}"]`).focus();
+ }
  if('outside' in d){state.groups.provide.outside=checked;invalidateItems(state.groups.provide.items);render();}
  if(d.required){const i=getItem(d.required);i.required=checked;invalidateItems([i]);render();document.querySelector(`[data-required="${d.required}"]`).focus();}
  if(d.kind){const i=getItem(d.kind);i.kind=value;invalidateItems([i]);render();document.querySelector(`[data-kind="${d.kind}"]`)?.focus();}
@@ -420,11 +723,14 @@ function basicsIssues(){
  for(const [key,g] of active){
   const name=groupNames[key];
   if(key==='provide'&&!g.recipient.trim())add('[data-path="groups.provide.recipient"]','제공받는 자를 입력해 주세요.');
-  if(!g.purpose.trim())add(`[data-path="groups.${key}.purpose"]`,name+'의 이용 목적을 입력해 주세요.');
-  if(!g.period.trim())add(`[data-path="groups.${key}.period"]`,name+'의 보유 및 이용기간을 입력해 주세요.');
+  if(!g.purpose.trim())add(`[data-path="groups.${key}.purpose"]`,'이용 목적을 입력해 주세요.');
+  if(!g.period.trim())add(`[data-path="groups.${key}.period"]`,'보유 및 이용 기간을 입력해 주세요.');
   if(!g.items.length)add(`[data-add="${key}"]`,name+'의 개인정보 항목을 하나 이상 추가해 주세요.');
   g.items.forEach((item,index)=>{
-   if(!item.name.trim())add(`[data-name="${item.id}"]`,name+'의 '+(index+1)+'번째 개인정보 항목명을 입력해 주세요.');
+   if(!item.name.trim()){
+    const field=isManualItemName(item)?'data-name':'data-item-preset';
+    add(`[${field}="${item.id}"]`,name+'의 '+(index+1)+'번째 개인정보 항목명을 선택하거나 직접 입력해 주세요.');
+   }
   });
  }
  return issues;
@@ -443,7 +749,7 @@ function showBasicsIssues(){
   error.className='basic-error';
   error.id='basic-error-'+index;
   error.textContent=text;
-  if(control.matches('[data-name]'))control.parentElement.append(error);
+  if(control.matches('[data-name], [data-item-preset]'))control.parentElement.append(error);
   else control.after(error);
   control.setAttribute('data-basic-invalid','');
   if(!control.matches('button'))control.setAttribute('aria-invalid','true');
@@ -452,6 +758,7 @@ function showBasicsIssues(){
  return issues;
 }
 function validateBasics(){
+ app.querySelectorAll('[data-name]').forEach(input=>commitItemName(input));
  basicsChecked=true;
  const [first]=showBasicsIssues();
  if(!first)return true;
@@ -462,10 +769,18 @@ document.addEventListener('click',e=>{
  const b=e.target.closest('button');if(!b)return;const d=b.dataset;
  if('guide' in d)document.querySelector('#guide').showModal();
  if('start' in d)go(1);
- if('sample' in d&&(!entries().length||confirm('현재 입력을 예시로 바꾸시겠습니까?')))sample();
+ if(d.itemSuggestion){
+  const input=b.closest('.item-row').querySelector('[data-name]');
+  commitItemName(input,d.itemSuggestion).focus({preventScroll:true});
+  refreshRisk();
+  if(basicsChecked)showBasicsIssues();
+ }
+ if('quickCreate' in d){
+  quickForm.reset();quickPreview.hidden=true;quickApply.disabled=true;quickDialog.showModal();
+ }
  if('go' in d)go(Number(d.go));
  if(d.add){
-  const i=add(d.add);render();document.querySelector(`[data-name="${i.id}"]`).focus();
+  const i=add(d.add);render();app.querySelector(`[data-item-preset="${i.id}"]`).focus();
  }
  if(d.bulkRequired&&canSetRequired(d.bulkRequired)){
   const required=b.value==='required';
@@ -481,7 +796,7 @@ document.addEventListener('click',e=>{
   const [key,direction]=d.move.split(':');
   const g=Object.values(state.groups).find(g=>g.items.some(i=>i.id===key));
   const from=g.items.findIndex(i=>i.id===key), to=from+Number(direction);
-  if(to>=0&&to<g.items.length){[g.items[from],g.items[to]]=[g.items[to],g.items[from]];state.edits={};render();document.querySelector(`[data-move="${d.move}"]:enabled, [data-name="${key}"]`).focus();}
+  if(to>=0&&to<g.items.length){[g.items[from],g.items[to]]=[g.items[to],g.items[from]];state.edits={};render();(app.querySelector(`[data-move="${d.move}"]:enabled`)||app.querySelector(`[data-item-preset="${key}"]`)).focus();}
  }
  if(d.delete){const item=getItem(d.delete);for(const g of Object.values(state.groups))g.items=g.items.filter(i=>i.id!==d.delete);invalidateItems([item]);render();}
  if(d.tab){tab=d.tab;render();document.querySelector(`[data-tab="${d.tab}"]`).focus();}
@@ -514,7 +829,51 @@ document.addEventListener('click',e=>{
  if('print' in d){document.querySelector('#print').innerHTML=exportMarkup();window.print();}
  if('pdf' in d||'hwpx' in d)downloadDocument(b,'pdf' in d?'pdf':'hwpx');
 });
+function watchLocalPreview(){
+ if(location.protocol!=='http:'||!['localhost','127.0.0.1','[::1]'].includes(location.hostname))return;
+ const selectionKey='consent-preview-template';
+ const picker=quickForm.elements.template;
+ try{
+  const previousTitle=sessionStorage.getItem(selectionKey);
+  sessionStorage.removeItem(selectionKey);
+  if(previousTitle!==null){
+   picker.value=Array.from(picker.options).find(option=>option.textContent===previousTitle)?.value||'';
+   updateQuickPreview();
+   quickDialog.showModal();
+  }
+ }catch{
+  // The preview can still update when session storage is unavailable.
+ }
+
+ const version=doc=>{
+  const script=doc.querySelector('script[src^="app.js"]')?.getAttribute('src');
+  const style=doc.querySelector('link[href^="style.css"]')?.getAttribute('href');
+  return script&&style?`${script}|${style}`:null;
+ };
+ const loadedVersion=version(document);
+ const canReload=()=>!document.hidden&&step===0&&!chat&&!hasDraftChanges()&&(quickDialog.open||!document.querySelector('dialog[open]'));
+ let checking=false;
+ setInterval(async ()=>{
+  if(checking||!canReload())return;
+  checking=true;
+  try{
+   const response=await fetch(location.pathname,{cache:'no-store'});
+   if(!response.ok)return;
+   const latest=version(new DOMParser().parseFromString(await response.text(),'text/html'));
+   if(!latest||latest===loadedVersion||!canReload())return;
+   if(quickDialog.open){
+    try{sessionStorage.setItem(selectionKey,picker.selectedOptions[0]?.textContent||'');}catch{}
+   }
+   location.reload();
+  }catch{
+   // The local server may be restarting. Check again on the next interval.
+  }finally{
+   checking=false;
+  }
+ },2000);
+}
 render();
+watchLocalPreview();
 
 function zipStored(files){
  const enc=new TextEncoder(), chunks=[], directory=[];
