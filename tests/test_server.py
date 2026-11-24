@@ -34,6 +34,32 @@ class LawTests(unittest.TestCase):
         future=SEARCH.replace(b'20200101',b'29990101')
         with patch.object(server,'law_request',return_value=server.xml(future)):
             with self.assertRaises(server.ApiError):server.resolve_law('시험법')
+    def test_bom_env_from_windows_notepad(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            file=Path(folder)/'.env'
+            file.write_text('BOM_TEST_SETTING=ok\n',encoding='utf-8-sig')
+            with patch.dict(os.environ,{},clear=False):
+                os.environ.pop('BOM_TEST_SETTING',None)
+                server.load_env(file)
+                self.assertEqual(os.environ['BOM_TEST_SETTING'],'ok')
+    def test_catalog_and_article_tree(self):
+        with patch.object(server,'law_request',return_value=server.xml(SEARCH)):
+            result=server.search_law_catalog({'query':'시험','page':1})
+        self.assertEqual(len(result['laws']),2)
+        self.assertEqual(result['laws'][0]['law'],'시험법')
+        with patch.object(server,'law_request',side_effect=[server.xml(SEARCH),server.xml(BODY)]):
+            tree=server.law_article_catalog({'law':'시험법','mst':'123'})
+        self.assertEqual(tree['articles'][0]['value'],'10')
+        self.assertEqual(tree['articles'][0]['paragraphs'][0]['value'],'1')
+        self.assertEqual(tree['articles'][0]['paragraphs'][0]['clauses'][0]['value'],'1')
+        self.assertEqual(tree['articles'][1]['value'],'24의2')
+    def test_catalog_validation_and_version_change(self):
+        with self.assertRaises(server.ApiError):server.search_law_catalog({'query':'가'})
+        with self.assertRaises(server.ApiError):server.search_law_catalog({'query':'시험','page':0})
+        with patch.object(server,'law_request',return_value=server.xml(SEARCH)):
+            with self.assertRaises(server.ApiError):server.law_article_catalog({'law':'시험법','mst':'999'})
+            with self.assertRaises(server.ApiError):server.verify_citation({'law':'시험법','mst':'999','article':'10'})
     def test_dtd_and_html_are_rejected(self):
         for data in [b'<!DOCTYPE root [<!ENTITY a "test">]><root/>',b'<html>login</html>']:
             with self.assertRaises(server.ApiError):server.xml(data)
@@ -119,6 +145,12 @@ class HttpTests(unittest.TestCase):
         self.assertNotIn(b'server-private',body)
         self.assertEqual(len(seen),5)
 
+    def test_catalog_http_needs_no_ai_key(self):
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':''}),patch.object(server,'law_request',return_value=server.xml(SEARCH)):
+            status,body=self.call('/api/law/catalog',{'query':'시험','page':1})
+        self.assertEqual(status,200)
+        self.assertEqual(len(json.loads(body)['laws']),2)
+        self.assertEqual(self.call('/api/law/articles',{'law':'시험법','mst':'123'},csrf=False)[0],403)
     def test_demo_must_be_explicitly_enabled(self):
         self.srv.demo=False
         data={'items':[{'name':'성명','context':'collect','type':'required'}],'demo':True}

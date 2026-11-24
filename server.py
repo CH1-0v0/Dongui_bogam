@@ -29,7 +29,7 @@ def load_env(path):
     """Read only the chosen private file; inherited deployment secrets take precedence."""
     if not path.exists():
         return
-    for line in path.read_text(encoding='utf-8').splitlines():
+    for line in path.read_text(encoding='utf-8-sig').splitlines():
         line = line.strip()
         if not line or line.startswith('#'):
             continue
@@ -56,6 +56,7 @@ def xml(data):
     return root
 
 def request_bytes(url, payload=None, headers=None, timeout=15):
+    service = 'OpenRouter' if urllib.parse.urlsplit(url).hostname == 'openrouter.ai' else '국가법령정보센터'
     req = urllib.request.Request(url, data=payload, headers=headers or {}, method='POST' if payload else 'GET')
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
@@ -66,14 +67,14 @@ def request_bytes(url, payload=None, headers=None, timeout=15):
     except urllib.error.HTTPError as e:
         # Do not expose upstream bodies or request URLs: LAW OC is a query credential.
         if e.code in (401, 403):
-            raise ApiError('외부 API 인증 또는 네트워크 접근이 거부되었습니다. 서버의 키·OC·허용 도메인을 확인하세요.') from None
+            raise ApiError(f'{service} 인증 또는 네트워크 접근이 거부되었습니다. 서버의 키·OC·허용 도메인을 확인하세요.') from None
         if e.code == 402:
             raise ApiError('OpenRouter 사용 잔액을 확인하세요.') from None
         if e.code == 429:
             raise ApiError('외부 API 호출 한도에 도달했습니다. 잠시 후 다시 시도하세요.', 429) from None
         raise ApiError('외부 API 요청이 실패했습니다. 잠시 후 다시 시도하세요.') from None
     except (urllib.error.URLError, TimeoutError, OSError):
-        raise ApiError('외부 API에 연결하지 못했습니다. 네트워크 허용 도메인과 연결 상태를 확인하세요.') from None
+        raise ApiError(f'{service}에 연결하지 못했습니다. 네트워크 허용 도메인과 연결 상태를 확인하세요.') from None
 
 def law_request(endpoint, **params):
     oc = os.environ.get('LAW_API_OC', '')
@@ -104,6 +105,71 @@ def resolve_law(name):
         raise ApiError('법령 API 응답에 유효한 법령 식별자가 없습니다.')
     return row, mst
 
+def search_law_catalog(data):
+    query = str(data.get('query', '')).strip()
+    if not 2 <= len(query) <= 100:
+        raise ApiError('법령 검색어를 2~100자로 입력하세요.', 400)
+    page = data.get('page', 1)
+    if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= 100:
+        raise ApiError('검색 페이지를 확인하세요.', 400)
+    root = law_request('lawSearch.do', query=query, search='1', display='20', page=str(page), nw='1')
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime('%Y%m%d')
+    laws = []
+    for row in root.findall('.//law'):
+        mst = text(row, '법령일련번호')
+        effective = re.sub(r'\D', '', text(row, '시행일자'))
+        if not mst.isdigit() or len(effective) != 8 or effective > today:
+            continue
+        laws.append({'law': text(row, '법령명한글'), 'mst': mst, 'effectiveDate': text(row, '시행일자'),
+                     'department': text(row, '소관부처명'), 'kind': text(row, '법령구분명')})
+    total = root.findtext('totalCnt', default='0')
+    return {'laws': laws, 'page': page, 'hasNext': total.isdigit() and int(total) > page * 20}
+
+
+def article_label(node):
+    number = text(node, '조문번호').lstrip('0') or '0'
+    sub = text(node, '조문가지번호').lstrip('0')
+    return number + ('의' + sub if sub else '')
+
+
+def law_article_catalog(data):
+    name = str(data.get('law', '')).strip()[:100]
+    mst = str(data.get('mst', ''))
+    row, current = resolve_law(name)
+    if current != mst:
+        raise ApiError('법령 버전이 변경되었거나 검색 결과와 다릅니다. 법령을 다시 검색하세요.', 422)
+    root = law_request('lawService.do', MST=mst)
+    official_name = root.findtext('.//기본정보/법령명_한글')
+    if official_name and compact(official_name) != compact(name):
+        raise ApiError('검색 결과와 본문의 법령명이 다릅니다.')
+    articles = []
+    for node in root.findall('.//조문단위'):
+        if text(node, '조문여부') != '조문' or text(node, '조문제목') == '삭제':
+            continue
+        article = article_label(node)
+        if not re.fullmatch(r'\d+(?:의\d+)?', article):
+            continue
+        try:
+            excerpt = extract_article(root, article)
+        except ApiError:
+            continue
+        def clauses(parent):
+            return [{'value': leading_number(text(c, '호번호')), 'text': '\n'.join(''.join(n.itertext()).strip() for n in c.iter() if n.tag in ('호내용', '목내용'))}
+                    for c in parent.findall('호') if leading_number(text(c, '호번호'))]
+        paragraphs = [{'value': leading_number(text(part, '항번호')), 'text': text(part, '항내용'), 'clauses': clauses(part)}
+                      for part in node.findall('항') if leading_number(text(part, '항번호'))]
+        # Some single-paragraph articles have unnumbered 항 wrappers holding their 호.
+        implicit_clauses = clauses(node)
+        if not paragraphs:
+            for part in node.findall('항'):
+                implicit_clauses.extend(clauses(part))
+        articles.append({'value': article, 'title': text(node, '조문제목'), 'text': excerpt,
+                         'paragraphs': paragraphs, 'clauses': implicit_clauses})
+    if not articles:
+        raise ApiError('선택할 수 있는 조문 본문을 확인하지 못했습니다.', 422)
+    return {'law': text(row, '법령명한글'), 'mst': mst, 'effectiveDate': text(row, '시행일자'), 'articles': articles}
+
+
 def extract_article(root, article, paragraph='', clause=''):
     major, _, sub = article.partition('의')
     matches = [n for n in root.findall('.//조문단위')
@@ -116,7 +182,7 @@ def extract_article(root, article, paragraph='', clause=''):
         ps = [p for p in node.findall('항') if leading_number(text(p, '항번호')) == paragraph]
         if not ps:
             # A one-paragraph article may have no numbered 항 container.
-            if paragraph != '1' or node.findall('항'):
+            if paragraph != '1' or any(leading_number(text(p, '항번호')) for p in node.findall('항')):
                 raise ApiError('요청한 항이 현행 조문에 없습니다.', 422)
         else:
             node = ps[0]
@@ -151,6 +217,8 @@ def verify_citation(candidate):
     paragraph = number(candidate['paragraph'], '항') if candidate.get('paragraph') else ''
     clause = number(candidate['clause'], '호') if candidate.get('clause') else ''
     row, mst = resolve_law(name)
+    if candidate.get('mst') and str(candidate['mst']) != mst:
+        raise ApiError('법령 버전이 변경되었습니다. 법령을 다시 검색해 선택하세요.', 422)
     root = law_request('lawService.do', MST=mst)
     excerpt = extract_article(root, article, paragraph, clause)
     # Confirm the body itself belongs to the searched current law version.
@@ -171,7 +239,7 @@ def verify_citation(candidate):
 # Mirrored rule data is checked against the browser table in tests; AI text is never used as a quotation.
 def basis_rules():
     # Test-enforced mirror of the browser policy table.
-    return json.loads((ROOT / 'basis-rules.json').read_text(encoding='utf-8'))
+    return json.loads((ROOT / 'basis-rules.json').read_text(encoding='utf-8-sig'))
 
 def verify_with_basis(candidate):
     code = candidate.get('basisCode', 'consent')
@@ -179,7 +247,8 @@ def verify_with_basis(candidate):
     if not rule:
         raise ApiError('지원하는 개인정보 보호법 처리 근거를 선택하세요.', 400)
     actual = verify_citation(candidate)
-    pipa = verify_citation({'law': '개인정보 보호법', 'article': rule['article'], 'paragraph': rule['paragraph'], 'clause': rule['clause']})
+    same_reference = compact(actual['law']) == '개인정보보호법' and all(actual.get(key, '') == rule[key] for key in ('article', 'paragraph', 'clause'))
+    pipa = actual if same_reference else verify_citation({'law': '개인정보 보호법', 'article': rule['article'], 'paragraph': rule['paragraph'], 'clause': rule['clause']})
     return {**actual, 'basisCode': code, 'pipaVerified': True, 'pipa': pipa,
             'reason': str(candidate.get('reason', ''))[:1600], 'type': candidate.get('type', 'required')}
 
@@ -275,6 +344,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def respond(self, status, data, content_type='application/json; charset=utf-8'):
+        if urllib.parse.urlsplit(self.path).path.startswith('/api/'):
+            print(f'API {self.command} {urllib.parse.urlsplit(self.path).path} {status}', flush=True)
         payload = json.dumps(data, ensure_ascii=False).encode() if not isinstance(data, bytes) else data
         self.send_response(status)
         self.send_header('Content-Type', content_type)
@@ -291,7 +362,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == '/api/status':
             return self.respond(200, {'aiConfigured': bool(os.environ.get('OPENROUTER_API_KEY')),
                'lawConfigured': bool(os.environ.get('LAW_API_OC')), 'demoAvailable': self.server.demo,
-               'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'csrfToken': self.server.csrf})
+               'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'app': 'dongui', 'apiVersion': 2, 'csrfToken': self.server.csrf})
         # Explicit allowlist: .env, server code, tests, docs, .git and arbitrary files are never served.
         if path == '/':
             path = '/index.html'
@@ -310,7 +381,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self.connection.settimeout(200)
         path = urllib.parse.urlsplit(self.path).path
-        if path not in ('/api/law/search', '/api/law/verify'):
+        if path not in ('/api/law/search', '/api/law/verify', '/api/law/catalog', '/api/law/articles'):
             return self.respond(404, {'error': '요청한 API가 없습니다.'})
         # Same-origin browser API, JSON + per-process token; no permissive CORS.
         if self.headers.get('X-CSRF-Token') != self.server.csrf or self.headers.get('Sec-Fetch-Site') == 'cross-site':
@@ -332,7 +403,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             demo = data.get('demo') is True
             if demo and not self.server.demo:
                 raise ApiError('이 서버에서는 시연 모드를 사용할 수 없습니다.', 403)
-            if path.endswith('/search'):
+            if path.endswith('/catalog'):
+                result = search_law_catalog(data)
+            elif path.endswith('/articles'):
+                result = law_article_catalog(data)
+            elif path.endswith('/search'):
                 context = validate_context(data)
                 # Small global spend guard: at most six AI searches/minute/process.
                 if not demo:

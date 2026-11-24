@@ -103,3 +103,13 @@
 .basis-scope:last-child{padding-bottom:0}
 .unconfirmed .ground-purpose{margin-bottom:2px}
 .unconfirmed li+li{margin-top:12px}
+
+.law-picker{margin:16px 0;padding:16px;border:1px solid var(--line);border-radius:8px;background:var(--soft)}
+.law-picker h3{margin:0 0 8px}
+.catalog-results{display:grid;gap:8px;margin:12px 0}
+.catalog-result{text-align:left;overflow-wrap:anywhere}
+.catalog-result small{display:block;color:var(--muted);font-weight:400}
+.law-picker-selects{display:grid;grid-template-columns:minmax(0,2fr) repeat(2,minmax(0,1fr));gap:10px}
+.law-picker-selects select{width:100%;min-width:0}
+.picked-citation{margin-top:16px}
+@media(max-width:640px){.law-picker-selects{grid-template-columns:minmax(0,1fr)}}

@@ -43,10 +43,21 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
  assert.match(await page.locator('.doc-notice').innerText(),/개인정보 보호법 제15조 제1항 제2호/);
  console.log('PASS only explicitly scoped and confirmed law basis becomes a notice');
  await page.locator('[data-go="3"]').first().click();await page.locator('details.basis summary').click();await page.locator('[data-edit-ground]').click();
- await page.locator('[data-path="groundDraft.article"]').fill('11');
+ await page.route('**/api/law/catalog',r=>r.fulfill({json:{laws:[{law:'시험법',mst:'123',effectiveDate:'20200101',department:'테스트기관',kind:'법률'}],page:1,hasNext:false}}));
+ await page.route('**/api/law/articles',r=>r.fulfill({json:{law:'시험법',mst:'123',effectiveDate:'20200101',articles:[{value:'11',title:'테스트 조문',text:'테스트 조문 전체',paragraphs:[{value:'1',text:'테스트 항',clauses:[{value:'2',text:'테스트 호'}]}],clauses:[]}]}}));
+ await page.locator('[data-law-query]').fill('시험');await page.locator('[data-catalog-search]').click();
+ await page.locator('[data-catalog-law]').click();await page.locator('[data-pick-article]').selectOption('11');
+ await page.locator('[data-pick-paragraph]').selectOption('1');await page.locator('[data-pick-clause]').selectOption('2');
+ assert.match(await page.locator('.picked-citation').innerText(),/시험법 제11조 제1항 제2호/);
+ assert.equal(await page.locator('[data-path="groundDraft.law"]').count(),0);
  assert.match(await page.locator('.basis-selection').innerText(),/원문 미확인/);
  await page.locator('[data-adopt-ground]').click();assert.match(await page.locator('#ground-status').innerText(),/원문을 먼저 확인/);
  console.log('PASS editing a verified citation invalidates verification');
+ console.log('PASS official search result → article/paragraph/clause selection without text entry');
+ await page.screenshot({path:'.test-output/step3-law-picker.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ await page.setViewportSize({width:1440,height:1100});
  // Return to original adopted basis; edits are not saved on failure.
  await page.locator('[data-cancel-ground]').click();await page.locator('[data-next]').click();
  await page.locator('[data-title]').click();await page.locator('[data-intro]').click();await page.locator('[data-child][value="no"]').check();
@@ -57,6 +68,12 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   await download.saveAs(`.test-output/output.${format}`);assert.ok((await fs.stat(`.test-output/output.${format}`)).size>1000);
  }
  console.log('PASS PDF and HWPX export regression');
- assert.deepEqual(errors,[]);console.log('6 browser checks passed');
+ await stage3();
+ await page.route('**/api/status',r=>r.abort('connectionrefused'));
+ await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();
+ assert.match(await page.getByRole('alert').innerText(),/로컬 API 서버와 연결/);
+ assert.doesNotMatch(await page.getByRole('alert').innerText(),/Failed to fetch/);
+ console.log('PASS connection failure gives actionable local-server instructions');
+ assert.deepEqual(errors,[]);console.log('8 browser checks passed');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});
