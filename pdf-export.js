@@ -63,7 +63,7 @@ export async function createPdf(body,tableGrid){
  const [regular,bold]=await Promise.all([
   pdf.embedFont(regularBytes,{subset:false}),pdf.embedFont(boldBytes,{subset:false})
  ]);
- const ink=rgb(.10,.15,.23), blue=rgb(.09,.30,.63), border=rgb(.56,.62,.71), fill=rgb(.94,.96,.99);
+ const ink=rgb(.10,.15,.23), blue=rgb(33/255,84/255,199/255), border=rgb(.56,.62,.71), fill=rgb(.94,.96,.99);
  let page,y;
  function nextPage(){page=pdf.addPage([pageWidth,pageHeight]);y=pageHeight-margin;}
  function room(height){if(y-height<margin)nextPage();}
@@ -95,13 +95,32 @@ export async function createPdf(body,tableGrid){
   const total=widths.reduce((sum,width)=>sum+width,0);
   const columns=widths.map(width=>contentWidth*width/total);
   const padding=5, leading=16;
-  const prepare=(row,header=false)=>row.map((entry,index)=>{
-   const cell=entry.cell;
-   const emphasized=!header&&(cell.tagName==='TH'||cell.querySelector('strong'));
-   const font=header||emphasized?bold:regular;
-   const size=emphasized?11.5:10.5;
-   return {entry,font,size,color:emphasized?blue:ink,lines:wrapText(nodeText(cell),font,size,columns[index]-2*padding)};
-  });
+  function cellLines(cell,width,header){
+   const lines=[{runs:[],width:0}];
+   function add(text,important){
+    const font=header||cell.tagName==='TH'||important?bold:regular,size=important?12.6:10.5,color=important?blue:ink;
+    function append(part){
+     const line=lines.at(-1),last=line.runs.at(-1);
+     if(last&&last.font===font&&last.size===size&&last.color===color)last.text+=part;else line.runs.push({text:part,font,size,color});
+     line.width+=font.widthOfTextAtSize(part,size);
+    }
+    for(const token of text.replace(/\r/g,'').match(/\n|[^\S\n]+|\S+/g)||[]){
+     if(token==='\n'){lines.push({runs:[],width:0});continue;}
+     const tokenWidth=font.widthOfTextAtSize(token,size);
+     if(tokenWidth<=width){
+      if(lines.at(-1).width+tokenWidth>width&&lines.at(-1).runs.length)lines.push({runs:[],width:0});
+      if(token.trim()||lines.at(-1).runs.length)append(token);
+     }else for(const char of token){
+      if(lines.at(-1).width+font.widthOfTextAtSize(char,size)>width&&lines.at(-1).runs.length)lines.push({runs:[],width:0});
+      append(char);
+     }
+    }
+   }
+   function visit(node){if(node.nodeType===3)add(node.textContent,Boolean(node.parentElement.closest('.doc-important')));else if(node.nodeType===1){if(node.tagName==='BR')add('\n',false);else for(const child of node.childNodes)visit(child);}}
+   visit(cell);return lines;
+  }
+  function paintLine(line,x,baseline,width){let offset=x+(width-line.width)/2;for(const run of line.runs){draw(run.text,offset,baseline,run.font,run.size,run.color);offset+=run.font.widthOfTextAtSize(run.text,run.size);}}
+  const prepare=(row,header=false)=>row.map((entry,index)=>({entry,size:12.6,lines:cellLines(entry.cell,columns[index]-2*padding,header)}));
   const count=cells=>Math.max(...cells.map(cell=>cell.lines.length));
   const height=n=>2*padding+n*leading;
   const grid=tableGrid(element);
@@ -118,7 +137,7 @@ export async function createPdf(body,tableGrid){
     page.drawRectangle({x,y:y-cellHeight,width,height:cellHeight,borderWidth:.5,borderColor:border,...(isHeader?{color:fill}:{})});
     const visible=lines.slice(start,start+length);
     const offset=(cellHeight-height(visible.length))/2;
-    visible.forEach((line,n)=>draw(line,x+padding,y-padding-offset-size-n*leading,font,size,color,width-2*padding,'center'));
+    visible.forEach((line,n)=>paintLine(line,x+padding,y-padding-offset-size-n*leading,width-2*padding));
     x+=width;
    });
    y-=rowHeight;
@@ -151,7 +170,7 @@ export async function createPdf(body,tableGrid){
      const capacity=Math.max(0,Math.floor((cellHeight-2*padding)/leading));
      const visible=cell.lines.slice(cursor,cursor+capacity);
      const center=(cellHeight-height(visible.length))/2;
-     visible.forEach((line,n)=>draw(line,x+padding,top-offset-padding-center-cell.size-n*leading,cell.font,cell.size,cell.color,columns[column]-2*padding,'center'));
+     visible.forEach((line,n)=>paintLine(line,x+padding,top-offset-padding-center-cell.size-n*leading,columns[column]-2*padding));
      cursors.set(cell.entry.cell,cursor+visible.length);
      offset+=cellHeight;start=end;
     }
@@ -183,7 +202,7 @@ export async function createPdf(body,tableGrid){
    else if(node.matches('table'))table(node);
    else if(node.matches('.doc-agency'))paragraph(nodeText(node),{font:bold,size:15,align:'center'});
    else if(node.closest('.sign'))paragraph(nodeText(node),{align:'right'});
-   else if(node.matches('.doc-marketing'))paragraph(nodeText(node),{font:bold,size:12,color:blue});
+   else if(node.matches('.doc-marketing'))paragraph(nodeText(node),{font:bold,size:12.6,color:blue});
    else if(node.matches('.doc-note'))paragraph(nodeText(node).replace(/^※\s*/,''),{prefix:'※'});
    else if(node.matches('.doc-choice')){
     const [question,choices]=Array.from(node.children,nodeText);

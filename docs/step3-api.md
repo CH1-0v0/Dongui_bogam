@@ -113,7 +113,7 @@ python server.py
 
 새 ZIP을 받으면 기존 서버를 Ctrl+C로 종료하고, 실제 `.env`를 새 폴더에 복사한 뒤 새 폴더의 server.py를 실행합니다. 브라우저는 Ctrl+F5로 새로고침합니다.
 
-`http://127.0.0.1:3000/api/status`에는 `app: dongui`, **`apiVersion: 7`**이 표시되어야 합니다. aiConfigured/lawConfigured는 값의 존재 여부이며 인증 성공을 보증하지는 않습니다. 키는 출력하지 않습니다.
+`http://127.0.0.1:3000/api/status`에는 `app: dongui`, **`apiVersion: 8`**이 표시되어야 합니다. aiConfigured/lawConfigured는 값의 존재 여부이며 인증 성공을 보증하지는 않습니다. 키는 출력하지 않습니다.
 
 - 상태 페이지도 안 열림: 로컬 서버 실행·주소·포트를 확인합니다.
 - aiConfigured/lawConfigured가 false: `.env`의 경로·정확한 이름·변수명을 확인하고 재시작합니다.

@@ -19,7 +19,7 @@ OPENROUTER_API_KEY=발급받은_키
 OPENROUTER_MODEL=openai/gpt-oss-120b
 ```
 
-기존 서버를 Ctrl+C로 종료하고 새 폴더에서 `python server.py`를 실행합니다. `http://127.0.0.1:3000`에서 Ctrl+F5로 새로고침합니다. `/api/status`의 `apiVersion`은 **7**입니다. 설정 여부는 인증 성공을 의미하지 않습니다.
+기존 서버를 Ctrl+C로 종료하고 새 폴더에서 `python server.py`를 실행합니다. `http://127.0.0.1:3000`에서 Ctrl+F5로 새로고침합니다. `/api/status`의 `apiVersion`은 **8**입니다. 설정 여부는 인증 성공을 의미하지 않습니다.
 
 ## 호출 방식
 

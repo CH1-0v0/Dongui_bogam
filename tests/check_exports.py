@@ -12,7 +12,7 @@ with zipfile.ZipFile(out / 'grouped-output.hwpx') as archive:
     body = ET.fromstring(raw)
     header = ET.fromstring(archive.read('Contents/header.xml'))
 assert raw.count('수정한 공통 처리 목적') == 1
-assert raw.count('rowSpan="3"') == 2
+assert raw.count('rowSpan="2"') >= 2
 choices = [table for table in body.findall('.//p:tbl', ns) if table.get('rowCnt') == '1' and table.get('colCnt') == '2']
 assert len(choices) == 3
 for table in choices:

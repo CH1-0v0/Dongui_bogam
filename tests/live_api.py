@@ -25,7 +25,7 @@ try:
     print('PASS 국가법령정보센터 검색 → 현행법령 식별 → 제15조 제1항 제4호 본문 조회')
     print('확인 시점:',result['verifiedAt'],'시행일:',result['effectiveDate'])
     assert result['pipaParagraph']['paragraph']=='1' and not result['pipaParagraph']['clause']
-    request={'basisCode':'contract','type':'required','items':[{'id':'test-item-1','name':'성명','purpose':'근로계약 체결 및 계약서 작성','recipient':'','type':'required','context':'collect','classification':'general'}]}
+    request={'basisCode':'contract','type':'collect','items':[{'id':'test-item-1','name':'성명','purpose':'근로계약 체결 및 계약서 작성','recipient':'','type':'collect','context':'collect','classification':'general'}]}
     skipped=server.apply_reviewed_basis(request,secrets.token_bytes(32))
     assert skipped['verified'] and not skipped['reviewConfirmed']
     print('PASS 제15조 제1항 전체 조회 및 AI 없이 공식 원문 확인·적용 경로')
@@ -39,24 +39,22 @@ try:
         assert len(classified['items'])==1
         print('PASS 공식 기준 조문 대조 및 민감정보 API 분류 응답:',classified['items'][0]['verdict'])
     if args.search:
-        result=server.search({'items':[{'name':'성명','purpose':'근로계약 체결 및 법정 근로자 명부 작성','recipient':'','type':'required','context':'collect','classification':'general'}]})
+        result=server.search({'items':[{'name':'성명','purpose':'근로계약 체결 및 법정 근로자 명부 작성','recipient':'','type':'collect','context':'collect','classification':'general'}]})
         if not result['candidates']:
             raise server.ApiError('AI 응답은 받았으나 원문 대조를 통과한 후보가 없습니다. 브라우저에서 제외 사유를 확인하세요.')
         print('PASS OpenRouter 후보 검색 → 법령 API 원문 및 개인정보 보호법 연결 조항 대조')
         print('확인한 후보:',len(result['candidates']),'제외한 후보:',len(result['rejected']))
     if args.review:
-        request={'basisCode':'contract','type':'required','items':[{'id':'test-item-1','name':'성명','purpose':'근로계약 체결 및 계약서 작성','recipient':'','type':'required','context':'collect','classification':'general'}]}
+        request={'basisCode':'contract','type':'collect','items':[{'id':'test-item-1','name':'성명','purpose':'근로계약 체결 및 계약서 작성','recipient':'','type':'collect','context':'collect','classification':'general'}]}
         secret=secrets.token_bytes(32)
         outcome=server.review_application(request,secret)
         print('PASS 적용 전 AI 검토 응답 수신:',len(outcome['review']['items']),'개 항목')
         for item in outcome['review']['items']:
             print('검토 상태:',item['verdict'])
-        if outcome['review']['canApply']:
-            applied=server.apply_reviewed_basis({**request,'reviewToken':outcome['review']['token']},secret)
-            assert applied['reviewConfirmed']
-            print('PASS 검토 결과를 확인하고 적용 요청 검증 (추가 AI 호출 없음)')
-        else:
-            print('적용하지 않음: AI가 추가 확인 또는 근거 보완이 필요하다고 응답했습니다.')
+        applied=server.apply_reviewed_basis({**request,'reviewToken':outcome['review']['token']},secret)
+        assert applied['reviewConfirmed']
+        print('PASS AI의 검토 의견과 무관하게 담당자가 적용 요청 가능 (추가 AI 호출 없음)')
+
 except server.ApiError as e:
     print('FAIL',str(e));sys.exit(1)
 except Exception:

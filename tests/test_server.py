@@ -271,6 +271,33 @@ class ClassificationTests(unittest.TestCase):
             with self.assertRaises(server.ApiError):server.classify_privacy_items(self.data)
             call.assert_not_called()
 
+class ContextBundleTests(unittest.TestCase):
+    def setUp(self):
+        self.items=[{'id':'item-'+str(n),'name':name,'purpose':'법정 신고','type':'collect','context':'collect','classification':kind} for n,(name,kind) in enumerate([('성명','general'),('건강정보','sensitive'),('여권번호','unique'),('주민등록번호','rnn')])]
+        self.data={'type':'collect','basisCode':'statutory','law':'시험법','article':'10','items':self.items,'additionalBasisCodes':['sensitiveLaw','uniqueLaw','residentLaw']}
+    def test_common_context_accepts_mixed_classes_and_verifies_all_permissions(self):
+        def verify(data):return {'law':'시험법','basisCode':data['basisCode'],'excerpt':'공식 검증 원문','verified':True,'pipaVerified':True}
+        with patch.object(server,'verify_with_basis',side_effect=verify) as call,patch.object(server,'ai_application_review') as ai:
+            result=server.apply_reviewed_basis(self.data,b'secret')
+        self.assertEqual(call.call_count,4);ai.assert_not_called()
+        self.assertEqual([p['basisCode'] for p in result['additionalGrounds']],self.data['additionalBasisCodes'])
+    def test_unrelated_permissions_and_cross_contexts_rejected(self):
+        with patch.object(server,'verify_with_basis',return_value={'law':'시험법'}):
+            with self.assertRaises(server.ApiError):server.apply_reviewed_basis({**self.data,'items':[self.items[0]],'additionalBasisCodes':['residentLaw']},b'secret')
+            with self.assertRaises(server.ApiError):server.apply_reviewed_basis({**self.data,'items':[{**self.items[0],'context':'provide'}]},b'secret')
+    def test_permission_failure_does_not_return_partial_bundle(self):
+        def verify(data):
+            if data['basisCode']=='uniqueLaw':raise server.ApiError('없는 허용 조문',422)
+            return {'law':'시험법','basisCode':data['basisCode'],'verified':True}
+        with patch.object(server,'verify_with_basis',side_effect=verify):
+            with self.assertRaises(server.ApiError):server.apply_reviewed_basis(self.data,b'secret')
+    def test_search_prompt_requires_actual_business_laws(self):
+        response={'choices':[{'message':{'content':json.dumps({'candidates':[]})}}]}
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}),patch.object(server,'request_bytes',return_value=json.dumps(response).encode()) as call:
+            server.ai_candidates({'items':self.items})
+        payload=json.loads(call.call_args.args[1]);prompt=payload['messages'][0]['content']
+        self.assertIn('소득세법',prompt);self.assertIn('주민등록번호',prompt);self.assertIn('구체적 처리 허용',prompt)
+
 class HttpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -395,3 +395,20 @@
 .finish-bottom{justify-content:flex-end;margin-top:20px}.doc .doc-agency{font-size:1.65em}.item-name .basic-error{grid-column:1/-1}
 @media(max-width:820px){.classification-section .class-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:570px){.item-row{grid-template-columns:24px minmax(0,1fr) auto;gap:4px}.item-controls{gap:4px}.required-switch{gap:3px}.manual-input-line .item-picker{flex-basis:80px}.item-picker>[data-item-menu]{padding-inline:6px;font-size:13px}.item-name-label{font-size:12px}.classification-section .class-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* Guideline-based distinctions: visual headings are separate from important data. */
+.manual-input-line .item-picker{order:0;flex:0 0 42%;max-width:230px}.manual-input-line>input{order:1}
+.item-option-group{font-weight:850;color:var(--blue-dark);background:#dce8fa;border-block:1px solid #b9cde9;padding:9px 10px}
+.item-options [role=option]{padding-left:18px}.additional-grounds .check{white-space:normal;align-items:flex-start}
+.applied-law-actions{margin:8px 0 14px}.applied-law-actions button{font-size:14px;white-space:normal;text-align:left}
+.doc-important{font-size:1.2em;font-weight:800;color:var(--blue)}.doc .doc-notice .doc-important{font-size:1.2em}
+.doc .doc-notice-heading{margin-top:26px;padding-top:15px;border-top:2px solid var(--line)}
+.doc .guardian-heading{margin-top:1.6em}.doc .relationship-line{display:inline-block;min-width:120px}
+.consent-audit>section{padding:12px 0;border-bottom:1px solid var(--line)}.consent-audit h3{font-size:15px;margin:0 0 8px}.consent-audit label{display:flex;gap:8px;align-items:flex-start;font-size:13px}.consent-audit label span{margin-left:auto;white-space:nowrap}.consent-audit input{accent-color:var(--blue);margin-top:4px}
+.doc-table tbody td:not(:has(.doc-important)){font-weight:400;color:var(--ink)}
+@media(max-width:570px){.manual-input-line .item-picker{flex-basis:43%;max-width:none}}
+.doc-marketing{font-size:1.2em;color:var(--blue)}
+.item-option-group[data-group-name="민감정보"]{background:var(--warn-bg);color:var(--warn);border-color:#d4b779}
+.item-option-group[data-group-name="고유식별정보"]{background:var(--blue-dark);color:var(--white);border-color:var(--blue-dark)}
+.item-row[data-personal-kind="general"] .item-hint{color:var(--muted)}
+.item-row[data-personal-kind="sensitive"] .item-hint{color:var(--warn);font-weight:750}
+.item-row[data-personal-kind="unique"] .item-hint{color:var(--blue-dark);font-weight:750}
