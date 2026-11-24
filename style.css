@@ -117,3 +117,21 @@
 .ground-editor .check{white-space:normal;align-items:flex-start}
 .ground-editor .check input,.ground-editor .scope-option input{flex-shrink:0}
 .law-picker .law-search-controls .field{min-width:0}
+/* Type-first review: one candidate, one application form, in its own category. */
+.manual-ground>summary{font-size:17px;font-weight:750;cursor:pointer;min-height:44px}
+.ground-form{padding-top:16px}
+.candidate-editor{margin-top:16px}
+.category-law-guide{font-size:13px;color:var(--muted);margin-bottom:12px}
+.category-items{margin:10px 0 18px}
+.candidate-instruction{background:var(--wash);padding:12px;border-radius:8px}
+.applied-basis{background:var(--soft);padding:12px;margin-top:10px;border-radius:8px}
+.application-scope{margin-top:18px}
+.application-scope .scope-option{align-items:flex-start}
+.application-scope .scope-option small{display:block;color:var(--muted);font-size:13px}
+.application-scope .check{white-space:normal}
+.application-scope fieldset{min-width:0}
+.catalog-search-box summary{cursor:pointer;font-weight:750;min-height:44px}
+.catalog-results{max-height:350px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.catalog-result{min-height:64px;flex-shrink:0}
+.law-mode{min-width:140px;max-width:190px}
+@media(max-width:640px){.application-scope .actions>*{width:100%}.law-result{min-width:0}.law-result .check{white-space:normal}.category-items .row{gap:8px}}

@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server
 
 # Synthetic fixture, not a quotation of an actual law.
-SEARCH='''<LawSearch><law><법령명한글>시험법</법령명한글><법령일련번호>123</법령일련번호><시행일자>20200101</시행일자></law><law><법령명한글>시험법 시행령</법령명한글><법령일련번호>999</법령일련번호><시행일자>20200101</시행일자></law></LawSearch>'''.encode()
+SEARCH='''<LawSearch><law><법령명한글>시험법</법령명한글><법령구분명>법률</법령구분명><법령일련번호>123</법령일련번호><시행일자>20200101</시행일자></law><law><법령명한글>시험법 시행령</법령명한글><법령구분명>대통령령</법령구분명><법령일련번호>999</법령일련번호><시행일자>20200101</시행일자></law></LawSearch>'''.encode()
 BODY='''<법령><기본정보><법령명_한글>시험법</법령명_한글></기본정보><조문><조문단위><조문번호>10</조문번호><조문여부>조문</조문여부><조문내용>제10조 테스트 조문</조문내용><항><항번호>①</항번호><항내용>테스트 항</항내용><호><호번호>1.</호번호><호내용>테스트 호</호내용></호></항></조문단위><조문단위><조문번호>24</조문번호><조문가지번호>2</조문가지번호><조문여부>조문</조문여부><조문내용>제24조의2 테스트 가지조문</조문내용></조문단위></조문></법령>'''.encode()
 
 class LawTests(unittest.TestCase):
@@ -34,6 +34,51 @@ class LawTests(unittest.TestCase):
         future=SEARCH.replace(b'20200101',b'29990101')
         with patch.object(server,'law_request',return_value=server.xml(future)):
             with self.assertRaises(server.ApiError):server.resolve_law('시험법')
+    def test_blanket_and_admin_cannot_be_statutory_permission(self):
+        for candidate in [dict(law='개인정보 보호법',article='15',paragraph='1',clause='2'), dict(law='개인정보 보호법 시행령',article='1'), dict(law='행정규칙',article='1',target='admrul')]:
+            with self.assertRaises(server.ApiError):server.verify_with_basis({'basisCode':'statutory',**candidate})
+    def test_non_law_ground_only_fetches_its_pipa_basis(self):
+        pipa={'law':'개인정보 보호법','article':'15','paragraph':'1','clause':'5','excerpt':'테스트 긴급 요건','verified':True}
+        with patch.object(server,'verify_citation',return_value=pipa) as fetch:
+            result=server.verify_with_basis({'basisCode':'emergency','type':'required','reason':'테스트 사실관계'})
+        self.assertEqual(fetch.call_count,1)
+        self.assertTrue(result['pipaVerified'])
+        self.assertEqual(result['law'],'개인정보 보호법')
+    def test_paragraph_includes_descendant_clauses_and_points(self):
+        body=BODY.replace('</호내용>'.encode(),'</호내용><목><목번호>가.</목번호><목내용>테스트 하위 목</목내용></목>'.encode())
+        with patch.object(server,'law_request',side_effect=[server.xml(SEARCH),server.xml(body)]):
+            tree=server.law_article_catalog({'law':'시험법','mst':'123'})
+        paragraph=tree['articles'][0]['paragraphs'][0]
+        self.assertIn('테스트 호',paragraph['text'])
+        self.assertIn('테스트 하위 목',paragraph['text'])
+        self.assertEqual(paragraph['clauses'][0]['points'][0]['value'],'가')
+    def test_default_catalog_limits_kinds_and_page_size(self):
+        body=SEARCH.replace('</LawSearch>'.encode(),'<law><법령명한글>시험법 시행규칙</법령명한글><법령구분명>부령</법령구분명><법령일련번호>888</법령일련번호><시행일자>20200101</시행일자></law></LawSearch>'.encode())
+        with patch.object(server,'law_request',return_value=server.xml(body)) as request:
+            results=server.search_law_catalog({'query':'시험','page':1})
+        self.assertEqual(len(results['laws']),2)
+        self.assertEqual(request.call_args.kwargs['display'],'5')
+        self.assertEqual(request.call_args.kwargs['target'],'law')
+    def test_law_request_cache_reuses_same_query_and_is_credential_scoped(self):
+        with server.LAW_CACHE_LOCK:server.LAW_CACHE.clear()
+        with patch.dict(os.environ,{'LAW_API_OC':'cache-test-one'}),patch.object(server,'request_bytes',return_value=SEARCH) as fetch:
+            server.law_request('lawSearch.do',query='시험')
+            server.law_request('lawSearch.do',query='시험')
+            self.assertEqual(fetch.call_count,1)
+            with patch.dict(os.environ,{'LAW_API_OC':'cache-test-two'}):server.law_request('lawSearch.do',query='시험')
+            self.assertEqual(fetch.call_count,2)
+        with server.LAW_CACHE_LOCK:server.LAW_CACHE.clear()
+    def test_admin_is_opt_in_and_plaintext_reference_only(self):
+        catalog='<AdmRulSearch><totalCnt>1</totalCnt><admrul><행정규칙명>테스트규정</행정규칙명><행정규칙일련번호>777</행정규칙일련번호><시행일자>20200101</시행일자></admrul></AdmRulSearch>'.encode()
+        detail='<행정규칙><행정규칙명>테스트규정</행정규칙명><본문><![CDATA[<p>참고 조항</p><script>bad()</script>]]></본문></행정규칙>'.encode()
+        with patch.object(server,'law_request',return_value=server.xml(catalog)) as request:
+            results=server.search_law_catalog({'query':'테스트','target':'admrul'})
+        self.assertEqual(request.call_args.kwargs['target'],'admrul')
+        self.assertEqual(results['laws'][0]['kind'],'행정규칙')
+        with patch.object(server,'law_request',return_value=server.xml(detail)):
+            result=server.law_article_catalog({'law':'테스트규정','mst':'777','target':'admrul'})
+        self.assertTrue(result['referenceOnly']);self.assertNotIn('bad()',result['text'])
+
     def test_bom_env_from_windows_notepad(self):
         import tempfile
         with tempfile.TemporaryDirectory() as folder:
@@ -73,7 +118,7 @@ class LawTests(unittest.TestCase):
         self.assertEqual(result['candidates'],[])
         self.assertEqual(len(result['rejected']),1)
     def test_api_authoritative_text_replaces_ai_text(self):
-        actual={'law':'시험법','excerpt':'공식 API 테스트 원문','verified':True}
+        actual={'law':'시험법','kind':'법률','excerpt':'공식 API 테스트 원문','verified':True}
         with patch.object(server,'verify_citation',side_effect=[actual,{'excerpt':'연결 조항'}]):
             result=server.verify_with_basis({'basisCode':'statutory','excerpt':'AI가 만든 가짜 원문'})
         self.assertEqual(result['excerpt'],'공식 API 테스트 원문')
@@ -119,7 +164,7 @@ class HttpTests(unittest.TestCase):
     def test_full_ai_to_official_api_chain(self):
         import urllib.parse
         seen=[]
-        pipa_search=SEARCH.replace('시험법'.encode(),'개인정보 보호법'.encode())
+        pipa_search=SEARCH.replace('시험법'.encode(),'개인정보 보호법'.encode()).replace(b'>123<',b'>456<')
         pipa_body=BODY.replace('시험법'.encode(),'개인정보 보호법'.encode()).replace(b'>10<',b'>15<').replace('<호번호>1.</호번호>'.encode(),'<호번호>2.</호번호>'.encode())
         def transport(url,payload=None,headers=None,timeout=15):
             seen.append(url.split('?')[0])
@@ -134,7 +179,7 @@ class HttpTests(unittest.TestCase):
             if 'lawSearch' in url:
                 return pipa_search if query['query'][0]=='개인정보 보호법' else SEARCH
             # Both fixture versions use MST 123; use the call order after the second search.
-            return pipa_body if seen.count('https://www.law.go.kr/DRF/lawSearch.do')==2 else BODY
+            return pipa_body if query.get('MST')==['456'] else BODY
         data={'items':[{'name':'성명','type':'required','context':'collect','classification':'general'}]}
         with patch.dict(os.environ,{'LAW_API_OC':'server-private-oc','OPENROUTER_API_KEY':'server-private-token'}),patch.object(server,'request_bytes',side_effect=transport):
             status,body=self.call('/api/law/search',data)

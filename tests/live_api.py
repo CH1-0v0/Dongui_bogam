@@ -17,9 +17,9 @@ if missing:
     print('미실행: 서버 전용 환경 파일에 다음 변수를 설정하세요: '+', '.join(missing))
     sys.exit(2)
 try:
-    result=server.verify_with_basis({'law':'개인정보 보호법','article':'15','paragraph':'1','clause':'1','basisCode':'consent'})
+    result=server.verify_with_basis({'law':'개인정보 보호법','article':'15','paragraph':'1','clause':'4','basisCode':'contract'})
     assert result['verified'] and result['pipaVerified'] and result['excerpt']
-    print('PASS 국가법령정보센터 검색 → 현행법령 식별 → 제15조 제1항 제1호 본문 조회')
+    print('PASS 국가법령정보센터 검색 → 현행법령 식별 → 제15조 제1항 제4호 본문 조회')
     print('확인 시점:',result['verifiedAt'],'시행일:',result['effectiveDate'])
     if args.search:
         models=json.loads(server.request_bytes('https://openrouter.ai/api/v1/models'))

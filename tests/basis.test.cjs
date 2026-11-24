@@ -1,6 +1,6 @@
 const test=require('node:test');const assert=require('node:assert/strict');
 const p=require('../law-basis.js');const fs=require('node:fs');
-const base=(basisCode='statutory',other={})=>({law:'시험법',article:'10',paragraph:'1',clause:'',basisCode,verified:true,pipaVerified:true,conditionsConfirmed:true,authorityConfirmed:true,specific:true,...other});
+const base=(basisCode='statutory',other={})=>({law:'시험법',article:'10',paragraph:'1',clause:'',basisCode,verified:true,pipaVerified:true,supportVerified:true,conditionsConfirmed:true,authorityConfirmed:true,specific:true,...other});
 test('server/browser legal rules stay identical',()=>assert.deepEqual(p.rules,JSON.parse(fs.readFileSync('basis-rules.json','utf8'))));
 test('no adopted authority and legacy citation alone preserve consent',()=>{assert.equal(p.notice([],'collect','general'),false);assert.equal(p.notice([{law:'시험법',article:'10'}],'collect','general'),false)});
 for(const [article,paragraph,clause] of [['15','1','1'],['17','1','1'],['18','2','1'],['23','1','1'],['24','1','1'],['15','1',''],['15','','']]){
@@ -32,3 +32,13 @@ test('resident ID is not permitted by an unrelated checked legal basis',()=>{
 });
 
 test('non-resident supplementary bases do not require resident confirmation',()=>assert.equal(p.notice([base(),base('sensitiveLaw',{specific:false})],'collect','sensitive'),true));
+
+test('compatible use/provision does not get mistaken for a consent paragraph',()=>{
+ assert.equal(p.notice([base('compatibleUse',{law:'개인정보 보호법',article:'15',paragraph:'3',clause:''})],'collect','general'),true);
+ assert.equal(p.notice([base('compatibleProvide',{law:'개인정보 보호법',article:'17',paragraph:'4',clause:''})],'provide','general'),true);
+});
+test('non-statutory provision must verify its underlying collection authority',()=>{
+ assert.equal(p.notice([base('provisionEmergency',{supportVerified:false})],'provide','general'),false);
+ assert.equal(p.notice([base('provisionEmergency')],'provide','general'),true);
+ assert.equal(p.notice([base('contract')],'provide','general'),false);
+});

@@ -1,6 +1,8 @@
 """Same-origin API and allowlisted static server. Python 3.12+, no dependencies."""
 from __future__ import annotations
 import concurrent.futures
+import hashlib
+from html.parser import HTMLParser
 import datetime as dt
 import http.server
 import json
@@ -10,6 +12,7 @@ import re
 import secrets
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,6 +22,11 @@ ROOT = Path(__file__).resolve().parent
 MODEL = 'openai/gpt-oss-120b'
 MAX_BODY = 24000
 MAX_RESPONSE = 8_000_000
+LAW_CACHE = {}
+LAW_CACHE_LOCK = threading.Lock()
+LAW_INFLIGHT = {}
+LAW_CACHE_SECONDS = 300
+LAW_CACHE_MAX_BYTES = 32_000_000
 
 class ApiError(Exception):
     def __init__(self, message, status=502):
@@ -79,9 +87,40 @@ def request_bytes(url, payload=None, headers=None, timeout=15):
 def law_request(endpoint, **params):
     oc = os.environ.get('LAW_API_OC', '')
     if not oc:
-        raise ApiError('법령 원문 조회를 위해 서버에 LAW_API_OC를 설정해 주세요.', 503)
-    query = urllib.parse.urlencode({'OC': oc, 'target': 'law', 'type': 'XML', **params})
-    return xml(request_bytes('https://www.law.go.kr/DRF/' + endpoint + '?' + query))
+        raise ApiError('법령 검색을 위해 서버에 LAW_API_OC를 설정해 주세요.', 503)
+    target = params.pop('target', 'law')
+    key = (hashlib.sha256(oc.encode()).hexdigest(), endpoint, target, tuple(sorted(params.items())))
+    with LAW_CACHE_LOCK:
+        cached = LAW_CACHE.get(key)
+        if cached and time.monotonic() - cached[0] < LAW_CACHE_SECONDS:
+            return xml(cached[1])
+        event = LAW_INFLIGHT.get(key)
+        owner = event is None
+        if owner:
+            event = threading.Event()
+            LAW_INFLIGHT[key] = event
+    if not owner:
+        if not event.wait(12):
+            raise ApiError('같은 법령을 확인하고 있습니다. 잠시 후 다시 시도하세요.', 504)
+        with LAW_CACHE_LOCK:
+            cached = LAW_CACHE.get(key)
+        if cached and time.monotonic() - cached[0] < LAW_CACHE_SECONDS:
+            return xml(cached[1])
+        raise ApiError('법령 조회에 실패했습니다. 다시 시도하세요.')
+    try:
+        query = urllib.parse.urlencode({'OC': oc, 'target': target, 'type': 'XML', **params})
+        raw = request_bytes('https://www.law.go.kr/DRF/' + endpoint + '?' + query, timeout=10)
+        root = xml(raw)
+        with LAW_CACHE_LOCK:
+            while LAW_CACHE and (len(LAW_CACHE) >= 64 or sum(len(v[1]) for v in LAW_CACHE.values()) + len(raw) > LAW_CACHE_MAX_BYTES):
+                LAW_CACHE.pop(min(LAW_CACHE, key=lambda k: LAW_CACHE[k][0]))
+            LAW_CACHE[key] = (time.monotonic(), raw)
+        return root
+    finally:
+        with LAW_CACHE_LOCK:
+            LAW_INFLIGHT.pop(key, None)
+            event.set()
+
 
 def number(value, unit=''):
     s = compact(value).removeprefix('제')
@@ -112,18 +151,72 @@ def search_law_catalog(data):
     page = data.get('page', 1)
     if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= 100:
         raise ApiError('검색 페이지를 확인하세요.', 400)
-    root = law_request('lawSearch.do', query=query, search='1', display='20', page=str(page), nw='1')
+    target = data.get('target', 'law')
+    if target not in ('law', 'admrul'):
+        raise ApiError('지원하지 않는 검색 종류입니다.', 400)
+    display = 5
+    params = {'query': query, 'search': '1', 'display': str(display), 'page': str(page)}
+    if target == 'law':
+        params.update(nw='1')
+    root = law_request('lawSearch.do', target=target, **params)
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime('%Y%m%d')
     laws = []
-    for row in root.findall('.//law'):
-        mst = text(row, '법령일련번호')
+    for row in root.findall('.//' + ('law' if target == 'law' else 'admrul')):
+        mst = text(row, '법령일련번호' if target == 'law' else '행정규칙일련번호')
         effective = re.sub(r'\D', '', text(row, '시행일자'))
+        kind = text(row, '법령구분명') if target == 'law' else '행정규칙'
+        # Bound each fetch to five records and filter on official kind metadata. Do not assume undocumented multi-kind query syntax.
+        if target == 'law' and kind not in ('법률', '대통령령'):
+            continue
         if not mst.isdigit() or len(effective) != 8 or effective > today:
             continue
-        laws.append({'law': text(row, '법령명한글'), 'mst': mst, 'effectiveDate': text(row, '시행일자'),
-                     'department': text(row, '소관부처명'), 'kind': text(row, '법령구분명')})
+        laws.append({'law': text(row, '법령명한글' if target == 'law' else '행정규칙명'), 'mst': mst,
+                     'effectiveDate': text(row, '시행일자'), 'department': text(row, '소관부처명'), 'kind': kind, 'target': target})
     total = root.findtext('totalCnt', default='0')
-    return {'laws': laws, 'page': page, 'hasNext': total.isdigit() and int(total) > page * 20}
+    return {'laws': laws, 'page': page, 'target': target, 'hasNext': total.isdigit() and int(total) > page * display}
+
+
+def node_excerpt(node):
+    return '\n'.join(''.join(n.itertext()).strip() for n in node.iter()
+                     if n.tag in ('조문내용', '항내용', '호내용', '목내용') and ''.join(n.itertext()).strip())
+
+
+def child_clauses(parent):
+    return [{'value': leading_number(text(c, '호번호')), 'text': node_excerpt(c),
+             'points': [{'value': text(m, '목번호').strip().rstrip('.'), 'text': node_excerpt(m)} for m in c.findall('목')]}
+            for c in parent.findall('호') if leading_number(text(c, '호번호'))]
+
+
+def admin_document(data):
+    mst = str(data.get('mst', ''))
+    if not mst.isdigit() or len(mst) > 20:
+        raise ApiError('행정규칙 검색 결과를 다시 선택하세요.', 400)
+    root = law_request('lawService.do', target='admrul', ID=mst)
+    name = root.findtext('.//행정규칙명') or root.findtext('.//기본정보/행정규칙명')
+    if not name or compact(name) != compact(data.get('law')):
+        raise ApiError('행정규칙의 공식 명칭을 확인하지 못했습니다. 검색 결과를 다시 확인하세요.', 422)
+    raw = root.findtext('.//조문내용') or root.findtext('.//본문내용') or root.findtext('.//행정규칙내용') or root.findtext('.//본문')
+    if not raw:
+        raw = node_excerpt(root)
+    if not raw:
+        raise ApiError('행정규칙 본문이 제공되지 않았습니다. 국가법령정보센터 원문에서 확인하세요.', 422)
+    class Plain(HTMLParser):
+        def __init__(self):
+            super().__init__(); self.parts = []; self.hidden = 0
+        def handle_starttag(self, tag, attrs):
+            if tag in ('script', 'style'):
+                self.hidden += 1
+            if tag in ('p', 'div', 'br', 'li'):
+                self.parts.append('\n')
+        def handle_endtag(self, tag):
+            if tag in ('script', 'style'):
+                self.hidden = max(0, self.hidden - 1)
+        def handle_data(self, value):
+            if not self.hidden:
+                self.parts.append(value)
+    plain = Plain(); plain.feed(raw)
+    return {'law': name, 'mst': mst, 'target': 'admrul', 'articles': [], 'referenceOnly': True,
+            'text': ''.join(plain.parts).strip(), 'sourceUrl': 'https://www.law.go.kr/행정규칙/' + urllib.parse.quote(name)}
 
 
 def article_label(node):
@@ -133,6 +226,8 @@ def article_label(node):
 
 
 def law_article_catalog(data):
+    if data.get('target') == 'admrul':
+        return admin_document(data)
     name = str(data.get('law', '')).strip()[:100]
     mst = str(data.get('mst', ''))
     row, current = resolve_law(name)
@@ -149,25 +244,20 @@ def law_article_catalog(data):
         article = article_label(node)
         if not re.fullmatch(r'\d+(?:의\d+)?', article):
             continue
-        try:
-            excerpt = extract_article(root, article)
-        except ApiError:
+        excerpt = node_excerpt(node)
+        if not excerpt:
             continue
-        def clauses(parent):
-            return [{'value': leading_number(text(c, '호번호')), 'text': '\n'.join(''.join(n.itertext()).strip() for n in c.iter() if n.tag in ('호내용', '목내용'))}
-                    for c in parent.findall('호') if leading_number(text(c, '호번호'))]
-        paragraphs = [{'value': leading_number(text(part, '항번호')), 'text': text(part, '항내용'), 'clauses': clauses(part)}
+        paragraphs = [{'value': leading_number(text(part, '항번호')), 'text': node_excerpt(part), 'clauses': child_clauses(part)}
                       for part in node.findall('항') if leading_number(text(part, '항번호'))]
-        # Some single-paragraph articles have unnumbered 항 wrappers holding their 호.
-        implicit_clauses = clauses(node)
+        implicit_clauses = child_clauses(node)
         if not paragraphs:
             for part in node.findall('항'):
-                implicit_clauses.extend(clauses(part))
+                implicit_clauses.extend(child_clauses(part))
         articles.append({'value': article, 'title': text(node, '조문제목'), 'text': excerpt,
                          'paragraphs': paragraphs, 'clauses': implicit_clauses})
     if not articles:
         raise ApiError('선택할 수 있는 조문 본문을 확인하지 못했습니다.', 422)
-    return {'law': text(row, '법령명한글'), 'mst': mst, 'effectiveDate': text(row, '시행일자'), 'articles': articles}
+    return {'law': text(row, '법령명한글'), 'mst': mst, 'effectiveDate': text(row, '시행일자'), 'articles': articles, 'sourceUrl': 'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=' + mst}
 
 
 def extract_article(root, article, paragraph='', clause=''):
@@ -191,22 +281,18 @@ def extract_article(root, article, paragraph='', clause=''):
         if len(candidates) != 1:
             raise ApiError('요청한 호가 없거나 항 지정이 필요합니다.', 422)
         node = candidates[0]
-    parts = []
-    for n in node.iter():
-        if n.tag in ('조문내용', '항내용', '호내용', '목내용'):
-            v = ''.join(n.itertext()).strip()
-            if v:
-                parts.append(v)
-    if not parts:
+    excerpt = node_excerpt(node)
+    if not excerpt:
         raise ApiError('요청한 조문의 본문을 확인하지 못했습니다.', 422)
-    return '\n'.join(parts)
+    return excerpt
+
 
 def leading_number(value):
     circles = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳'
     for i, c in enumerate(circles):
         if c in value:
             return str(i + 1)
-    m = re.search(r'\d+', value)
+    m = re.search(r'\d+', unicodedata.normalize('NFKC', value))
     return str(int(m[0])) if m else ''
 
 def verify_citation(candidate):
@@ -233,7 +319,7 @@ def verify_citation(candidate):
         cite += f' 제{clause}호'
     return {'law': text(row, '법령명한글'), 'article': article, 'paragraph': paragraph, 'clause': clause,
             'cite': cite, 'excerpt': excerpt, 'articleExcerpt': extract_article(root, article), 'verified': True, 'mst': mst,
-            'effectiveDate': text(row, '시행일자'), 'verifiedAt': dt.datetime.now(dt.timezone.utc).isoformat(),
+            'kind': text(row, '법령구분명'), 'effectiveDate': text(row, '시행일자'), 'verifiedAt': dt.datetime.now(dt.timezone.utc).isoformat(),
             'sourceUrl': 'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=' + mst}
 
 # Mirrored rule data is checked against the browser table in tests; AI text is never used as a quotation.
@@ -241,16 +327,43 @@ def basis_rules():
     # Test-enforced mirror of the browser policy table.
     return json.loads((ROOT / 'basis-rules.json').read_text(encoding='utf-8-sig'))
 
-def verify_with_basis(candidate):
-    code = candidate.get('basisCode', 'consent')
+def verify_basis(candidate):
+    code = candidate.get('basisCode')
     rule = basis_rules().get(code)
-    if not rule:
-        raise ApiError('지원하는 개인정보 보호법 처리 근거를 선택하세요.', 400)
-    actual = verify_citation(candidate)
-    same_reference = compact(actual['law']) == '개인정보보호법' and all(actual.get(key, '') == rule[key] for key in ('article', 'paragraph', 'clause'))
-    pipa = actual if same_reference else verify_citation({'law': '개인정보 보호법', 'article': rule['article'], 'paragraph': rule['paragraph'], 'clause': rule['clause']})
-    return {**actual, 'basisCode': code, 'pipaVerified': True, 'pipa': pipa,
-            'reason': str(candidate.get('reason', ''))[:1600], 'type': candidate.get('type', 'required')}
+    if not rule or rule['effect'] == 'consent':
+        raise ApiError('동의 외의 개인정보 보호법 근거를 먼저 선택하세요.', 400)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        pipa_task = pool.submit(verify_citation, {'law': '개인정보 보호법', **{k: rule[k] for k in ('article', 'paragraph', 'clause')}})
+        support_task = pool.submit(verify_citation, {'law': '개인정보 보호법', **rule['support']}) if rule.get('support') else None
+        pipa = pipa_task.result()
+        support = support_task.result() if support_task else None
+    return {**pipa, 'pipa': pipa, 'basisCode': code, 'type': candidate.get('type', 'required'),
+            'pipaVerified': True, 'support': support, 'supportVerified': not rule.get('support') or bool(support)}
+
+
+def verify_with_basis(candidate):
+    code = candidate.get('basisCode', '')
+    rule = basis_rules().get(code)
+    if not rule or rule['effect'] == 'consent':
+        raise ApiError('동의 외의 처리 근거를 먼저 선택하세요.', 400)
+    if not rule.get('needsLaw'):
+        actual = verify_basis(candidate)
+    else:
+        if candidate.get('target', 'law') != 'law':
+            raise ApiError('행정규칙만으로는 법령상 처리 근거를 적용할 수 없습니다. 상위 법률·시행령의 구체적 조문을 선택하세요.', 422)
+        if compact(candidate.get('law')) in ('개인정보보호법', '개인정보보호법시행령'):
+            raise ApiError('개인정보 보호법의 포괄 조항이 아니라 해당 업무의 수집·이용·제공을 구체적으로 정한 개별 법률·시행령을 선택하세요.', 422)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            actual_task = pool.submit(verify_citation, candidate)
+            basis_task = pool.submit(verify_basis, candidate)
+            actual = actual_task.result()
+            basis = basis_task.result()
+        if actual.get('kind') not in ('법률', '대통령령'):
+            raise ApiError('기본 적용 근거는 법률·시행령에서 선택하세요. 행정규칙·시행규칙은 단독 근거로 적용하지 않습니다.', 422)
+        actual.update({k: basis[k] for k in ('pipa', 'pipaVerified', 'support', 'supportVerified')})
+    return {**actual, 'basisCode': code, 'type': candidate.get('type', 'required'),
+            'reason': str(candidate.get('reason', ''))[:1400]}
+
 
 def ai_candidates(context):
     key = os.environ.get('OPENROUTER_API_KEY')
@@ -263,14 +376,16 @@ def ai_candidates(context):
 개인정보 보호법 제15조 제1항 제1호 등 동의 조항은 동의 없는 처리 근거가 아니다.
 제15조 제1항 제2호 등 포괄 조항만으로 특정 업무의 근거를 단정하지 마라. 법령에 근거한 처리에는 구체적 개별 법령 조문을 찾아라.
 민감정보/고유식별정보/주민등록번호 허용 규정은 일반적인 수집·제공 근거와 별도로 검토한다.
-JSON만 반환: {"candidates":[{"law":"법령명","article":"15","paragraph":"1","clause":"1","basisCode":"consent","type":"required","reason":"확인이 필요한 적용 요건"}],"note":"한계/추가 확인 사항"}.
+동의 근거는 후보로 제안하지 마라. needsLaw=true이면 개인정보 보호법 자체가 아닌 특별한 개별 업무 법령 조문을 반드시 law에 넣어라. 법령 원문이 없는 행정규칙이나 시행규칙은 제안하지 마라.
+각 후보에 itemNames(적용을 검토할 항목명 배열)와 itemReasons(항목명:검토의견 객체)를 추가하라. 가능한 경우 항목마다 적용 요건을 구별하라. 여러 후보 중 선택은 사용자가 한다.
+JSON만 반환: {"candidates":[{"law":"법령명","article":"15","paragraph":"1","clause":"1","basisCode":"statutory","type":"required","reason":"확인이 필요한 적용 요건"}],"note":"한계/추가 확인 사항"}.
 article은 숫자 또는 24의2, paragraph/clause는 숫자 문자열 또는 빈 문자열. basisCode는 아래 제공되는 코드 중 하나다.'''
-    payload = {'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'temperature': 0.1, 'max_tokens': 3000,
-               'response_format': {'type': 'json_object'}, 'provider': {'data_collection': 'deny'},
-               'messages': [{'role': 'system', 'content': prompt + '\n처리 근거 코드: ' + json.dumps(basis_rules(), ensure_ascii=False)},
+    payload = {'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'temperature': 0.1, 'max_tokens': 2200,
+               'response_format': {'type': 'json_object'}, 'provider': {'data_collection': 'deny', 'sort': 'latency'}, 'reasoning': {'effort': 'low', 'exclude': True},
+               'messages': [{'role': 'system', 'content': prompt + '\n처리 근거 코드: ' + json.dumps({k:v for k,v in basis_rules().items() if v['effect'] != 'consent'}, ensure_ascii=False)},
                             {'role': 'user', 'content': json.dumps(context, ensure_ascii=False)}]}
     data = request_bytes('https://openrouter.ai/api/v1/chat/completions', json.dumps(payload).encode(),
-                         {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'X-Title': 'Dongui Bogam'}, timeout=45)
+                         {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'X-Title': 'Dongui Bogam'}, timeout=25)
     try:
         result = json.loads(data)
         content = result['choices'][0]['message']['content']
@@ -317,7 +432,11 @@ def search(context):
             scope = [i for i in context['items'] if i['type'] == candidate['type']]
             if not rule or not any(i.get('context') in rule['contexts'] and (not rule.get('supplement') or i.get('classification') == rule['supplement']) for i in scope):
                 raise ApiError('후보의 개인정보 보호법 연결 조항이 처리 유형과 맞지 않습니다.', 422)
-            return verify_with_basis(candidate), None
+            actual = verify_with_basis(candidate)
+            proposed = candidate.get('itemNames', [])
+            reasons = candidate.get('itemReasons', {})
+            actual['itemReviews'] = [{'name': i['name'], 'suggested': i['name'] in proposed, 'reason': str(reasons.get(i['name'], candidate.get('reason', '적용 요건을 확인해 주세요.')))[:500]} for i in scope if not rule.get('supplement') or i.get('classification') == rule['supplement']] if isinstance(proposed, list) and isinstance(reasons, dict) else []
+            return actual, None
         except ApiError as e:
             return None, {'law': str(candidate.get('law', ''))[:100], 'message': str(e)}
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
@@ -331,10 +450,10 @@ def search(context):
 def demo_results(context):
     # Explicitly synthetic; never marked as official verification.
     return {'mode': 'demo', 'note': '시연 데이터입니다. AI·국가법령정보센터 API를 호출하지 않았으며 실제 법령 원문이 아닙니다.',
-            'rejected': [], 'candidates': [{'law': '개인정보 보호법', 'article': '15', 'paragraph': '1', 'clause': '1',
-             'cite': '개인정보 보호법 제15조 제1항 제1호', 'excerpt': '[시연용 요약] 정보주체의 동의를 받는 경우',
-             'basisCode': 'consent', 'type': next((i['type'] for i in context['items'] if i['context']=='collect'), context['items'][0]['type']),
-             'verified': False, 'pipaVerified': False, 'reason': '동의를 요구하는 조항은 채택하지 않아도 됩니다. 채택하더라도 동의서가 유지됩니다.',
+            'rejected': [], 'candidates': [{'law': '개인정보 보호법', 'article': '15', 'paragraph': '1', 'clause': '4',
+             'cite': '개인정보 보호법 제15조 제1항 제4호', 'excerpt': '[시연용 요약] 계약 체결·이행에 필요한 경우',
+             'basisCode': 'contract', 'type': next((i['type'] for i in context['items'] if i['context']=='collect'), context['items'][0]['type']),
+             'verified': False, 'pipaVerified': False, 'reason': '시연 후보입니다. 실제 원문을 확인하지 않아 적용할 수 없습니다.',
              'sourceUrl': 'https://www.law.go.kr/법령/개인정보보호법/제15조'}]}
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -362,7 +481,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == '/api/status':
             return self.respond(200, {'aiConfigured': bool(os.environ.get('OPENROUTER_API_KEY')),
                'lawConfigured': bool(os.environ.get('LAW_API_OC')), 'demoAvailable': self.server.demo,
-               'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'app': 'dongui', 'apiVersion': 2, 'csrfToken': self.server.csrf})
+               'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'app': 'dongui', 'apiVersion': 3, 'csrfToken': self.server.csrf})
         # Explicit allowlist: .env, server code, tests, docs, .git and arbitrary files are never served.
         if path == '/':
             path = '/index.html'
@@ -381,7 +500,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self.connection.settimeout(200)
         path = urllib.parse.urlsplit(self.path).path
-        if path not in ('/api/law/search', '/api/law/verify', '/api/law/catalog', '/api/law/articles'):
+        if path not in ('/api/law/search', '/api/law/verify', '/api/law/catalog', '/api/law/articles', '/api/law/basis'):
             return self.respond(404, {'error': '요청한 API가 없습니다.'})
         # Same-origin browser API, JSON + per-process token; no permissive CORS.
         if self.headers.get('X-CSRF-Token') != self.server.csrf or self.headers.get('Sec-Fetch-Site') == 'cross-site':
@@ -405,6 +524,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 raise ApiError('이 서버에서는 시연 모드를 사용할 수 없습니다.', 403)
             if path.endswith('/catalog'):
                 result = search_law_catalog(data)
+            elif path.endswith('/basis'):
+                result = verify_basis(data)
             elif path.endswith('/articles'):
                 result = law_article_catalog(data)
             elif path.endswith('/search'):
