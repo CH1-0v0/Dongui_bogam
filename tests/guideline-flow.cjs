@@ -28,7 +28,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3010';
  await page.locator('.applied-law-actions [data-edit-ground]').click();assert.equal(await page.locator('[data-extra-basis]:checked').count(),3);await page.locator('[data-adopt-ground]').click();await page.locator('[data-adopt-ground]').waitFor({state:'detached'});assert.equal(await page.locator('.applied-law-actions [data-edit-ground]').count(),1);
  await page.locator('[data-next]').click();assert.equal(await page.locator('[contenteditable]').count(),0);
  assert.equal(await page.locator('.notice-section .doc-notice-row').count(),1);assert.equal(await page.locator('.doc-consent').count(),1);assert.equal(await page.locator('.doc-category [data-consent-items] strong').count(),0);
- assert.equal(await page.locator('.doc-notice .doc-important').count(),4);assert.ok(await page.locator('.notice-section').evaluate(e=>e.previousElementSibling.matches('.sign')));
+ assert.equal(await page.locator('.doc-notice .doc-important').count(),4);assert.ok(await page.locator('.notice-section').evaluate(e=>e.nextElementSibling.matches('.sign')));
  assert.equal(await page.locator('.doc-notice .doc-text').filter({hasText:/^성명$/}).evaluate(e=>Boolean(e.closest('strong'))),false);
  await page.locator('[data-toggle-document-edit]').click();await page.locator('.doc-notice [data-merge-keys] [data-edit$=".purpose"]').fill('지침에 맞춘 고지 목적');await page.locator('[data-toggle-document-edit]').click();assert.equal(await page.locator('[contenteditable]').count(),0);
  assert.match(await page.locator('.doc-notice').innerText(),/지침에 맞춘 고지 목적/);assert.ok(await page.locator('.bar>[data-finish]').count());

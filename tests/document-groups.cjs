@@ -26,7 +26,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3008';
   assert.match(await notices().innerText(),/성명, 휴대전화번호/);
   assert.doesNotMatch(await table().innerText(),/성명|휴대전화번호/);
   assert.equal(await page.locator('[contenteditable]').count(),0);
-  assert.ok(await page.locator('.notice-section').evaluate(e=>Boolean(e.previousElementSibling?.matches('.sign'))));
+  assert.ok(await page.locator('.notice-section').evaluate(e=>Boolean(e.nextElementSibling?.matches('.sign'))));
   const clause=rules.contract.pipa;assert.equal((await notices().innerText()).split(clause).length-1,1);
   console.log('PASS consent stays separate and notices below it batch identical legal grounds');
   await page.locator('[data-go="3"]').first().click();await manual('legitimate',[1]);await page.locator('[data-next]').click();

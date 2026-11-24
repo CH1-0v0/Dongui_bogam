@@ -42,8 +42,8 @@ if shutil.which('pdftotext'):
     pdf=subprocess.check_output(['pdftotext','-raw',str(out/'guideline-output.pdf'),'-'],text=True)
     normalized=''.join(pdf.split())
     assert normalized.count('건강정보')==1 and normalized.count('주민등록번호')==1
-    assert '고지사항' in normalized and normalized.index('고지사항')>normalized.index('법정대리인:')
-    print('PASS PDF preserves separate notice after consent/signatures and batches special fields once')
+    assert '고지사항' in normalized and normalized.index('고지사항')<normalized.index('법정대리인:')
+    print('PASS PDF preserves separate notice before date/signatures and batches special fields once')
 
 try:
     import fitz

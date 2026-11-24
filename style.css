@@ -443,3 +443,25 @@
 .a4-paper:last-child{margin-bottom:0}.a4-paper canvas{display:block;width:100%;height:auto;aspect-ratio:210/297}
 .a4-page-label{margin:0;padding:5px 9px;text-align:right;font-size:12px;color:var(--muted);background:var(--soft);border-bottom:1px solid var(--line)}
 .a4-page-text{position:absolute;clip-path:inset(50%);width:1px;height:1px;overflow:hidden;white-space:nowrap}
+/* Review summaries share the same warning-only collection check in every step. */
+.review-status-header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.review-status-header h3{font-size:18px;margin:0}.review-status-header .pill{font-size:12px;white-space:nowrap}
+.risk-summary ul{padding:0;list-style:none;margin:8px 0 0}.risk-summary li{margin:6px 0;line-height:1.7}
+.risk-possible{color:var(--warn);font-weight:700}.risk-classification,.risk-purpose{margin-top:20px}
+.review-human-warning{color:#a12535!important;font-weight:650;font-size:13px;line-height:1.8;margin:20px 0 24px!important}
+.review-guide{margin-top:4px}.final-status{border-bottom:1px solid var(--line);padding:12px 0 18px;margin-bottom:16px}
+.ground-editor p,.law-search-panel p{max-width:none;word-break:keep-all;overflow-wrap:break-word;text-wrap:wrap}
+.ground-editor,.ground-category,.law-search-panel{word-break:keep-all;overflow-wrap:break-word}
+.law-excerpt{white-space:pre-wrap;word-break:keep-all;overflow-wrap:break-word;width:100%}
+/* A full A4 page fits its viewport; cached pages are selected through the pager. */
+.a4-document-frame{display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0!important;max-height:none;padding:12px;scrollbar-gutter:auto}
+.a4-paper,.a4-paper:last-child{margin:0;flex:0 0 auto;max-width:100%}.a4-paper[hidden]{display:none!important}
+.a4-page-nav{display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0 0;flex-wrap:wrap}
+.a4-page-nav[hidden]{display:none!important}.a4-page-nav button{min-height:38px;padding:7px 12px}.a4-page-counter{font-size:13px;font-weight:700;min-width:66px;text-align:center}
+.review-checks{padding:14px 0;border-top:1px solid var(--line);margin:0}
+.review-checks summary{display:block;min-height:0;padding:0}.review-checks summary::before,.review-checks[open]>summary::before{content:none}
+.review-check-title{display:flex;gap:8px;align-items:center}.review-check-title .pill{margin-left:auto}
+.review-toggle::after{content:'+';font-size:21px;font-weight:600}.review-checks[open] .review-toggle::after{content:'−'}
+.review-check-description{display:block;color:var(--muted);font-size:13px;line-height:1.75;margin-top:8px}
+.not-applicable-review{margin-top:16px!important;padding:12px!important;list-style:none;background:#edf0f4;border:1px solid #d3dae3;border-radius:8px;color:#697586}
+.not-applicable-review:empty{display:none}.not-applicable-review .pill{background:#e0e5eb;color:#697586}.not-applicable-review li{border:0!important}
