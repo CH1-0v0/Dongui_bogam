@@ -6,7 +6,7 @@ Cloudflare 무료 사용량·CPU·메모리·외부 요청 제한 내에서 운�
 
 ## 설치와 로그인
 
-Node.js 22 이상과 npm을 설치한 뒤 프로젝트 폴더에서 실행합니다. Wrangler 버전은 lockfile에 고정되어 있습니다.
+Node.js 22.13 이상과 npm을 설치한 뒤 프로젝트 폴더에서 실행합니다. Wrangler 버전은 lockfile에 고정되어 있습니다.
 
 ```sh
 npm ci

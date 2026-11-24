@@ -202,12 +202,12 @@ export async function createPdf(body,tableGrid){
    else if(node.matches('table'))table(node);
    else if(node.matches('.doc-agency'))paragraph(nodeText(node),{font:bold,size:15,align:'center'});
    else if(node.closest('.sign'))paragraph(nodeText(node),{align:'right'});
-   else if(node.matches('.doc-marketing'))paragraph(nodeText(node),{font:bold,size:12.6,color:blue});
-   else if(node.matches('.doc-note'))paragraph(nodeText(node).replace(/^※\s*/,''),{prefix:'※'});
+   else if(node.matches('.doc-marketing'))paragraph(nodeText(node),{font:bold,size:11,color:blue});
+   else if(node.matches('.doc-note'))paragraph(nodeText(node).replace(/^※\s*/,''),{prefix:'※',keep:node.nextElementSibling?.matches('.doc-marketing')?50:29});
    else if(node.matches('.doc-choice')){
     const [question,choices]=Array.from(node.children,nodeText);
     room(17);
-    draw(question,margin,y-11,regular,11,ink);
+    draw(' '+question,margin,y-11,regular,11,ink);
     draw(choices,margin,y-11,bold,11,ink,contentWidth,'right');
     y-=29;
    }
@@ -220,5 +220,5 @@ export async function createPdf(body,tableGrid){
   const size=9;
   pdfPage.drawText(label,{font:regular,size,color:ink,x:(pageWidth-regular.widthOfTextAtSize(label,size))/2,y:margin/2});
  });
- return new Blob([await pdf.save()],{type:'application/pdf'});
+ const blob=new Blob([await pdf.save()],{type:'application/pdf'});blob.pageCount=pages.length;return blob;
 }

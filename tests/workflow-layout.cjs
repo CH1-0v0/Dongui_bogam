@@ -32,7 +32,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3008';
  await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:to.x+to.width/2,y:to.y+12}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
  assert.equal(await page.locator('[data-drop-group=collect][data-drop-category=optional] .class-item').filter({hasText:'상담메모'}).count(),1);await cdp.detach();
  await page.screenshot({path:'.test-output/all-classification-groups.png',fullPage:true});console.log('PASS bounded picker, single-line custom input, boundary sorting and same-group pointer/keyboard drag');
- await page.locator('[data-next]').click();await page.locator('.law-search-panel').waitFor();await page.locator('[data-next]').click();assert.match(await page.locator('.doc-category[data-document-category^="provide"] h3').innerText(),/수집 목적 외 제공/);
+ await page.locator('[data-next]').click();await page.locator('.law-search-panel').waitFor();await page.locator('[data-next]').click();assert.match(await page.locator('.doc-category[data-document-category^="provide"] h3').innerText(),/목적 외 제공/);
  await start();await page.locator('[data-bulk-required=collect][value=required]').click();await page.locator('[data-next]').click();await page.locator('[data-next]').click();
  const proof=()=>{const r=rules.contract,pipa={law:'개인정보 보호법',article:r.article,paragraph:r.paragraph,clause:r.clause,cite:r.pipa,excerpt:'테스트 근거'};return {...pipa,pipa,pipaVerified:true,verified:true,supportVerified:true};};
  for(const path of ['basis','apply'])await page.route('**/api/law/'+path,r=>r.fulfill({json:proof()}));

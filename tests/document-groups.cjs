@@ -31,7 +31,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3008';
   console.log('PASS consent stays separate and notices below it batch identical legal grounds');
   await page.locator('[data-go="3"]').first().click();await manual('legitimate',[1]);await page.locator('[data-next]').click();
   assert.equal(await notices().locator('.doc-notice-row').count(),2);assert.equal(await notices().locator('td[rowspan="2"]').count(),2);
-  assert.equal(await page.locator('.doc-category').count(),3);
+  assert.equal(await page.locator('.doc-category').count(),2);
   await page.locator('[data-toggle-document-edit]').click();
   const shared=notices().locator('[data-merge-keys] [data-edit$=".purpose"]');await shared.fill('수정한 공통 처리 목적');await page.locator('[data-toggle-document-edit]').click();assert.equal(await page.locator('[contenteditable]').count(),0);
   await page.locator('[data-intro]').click();await page.locator('[data-child][value=no]').check();

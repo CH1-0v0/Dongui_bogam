@@ -19,7 +19,11 @@ for table in choices:
     assert table.get('borderFillIDRef') == '1'
     cells = table.findall('.//p:tc', ns)
     assert all(cell.get('borderFillIDRef') == '1' for cell in cells)
-    assert [cell.find('.//p:p', ns).get('paraPrIDRef') for cell in cells] == ['21', '23']
+    for cell, align in zip(cells, ['LEFT', 'RIGHT']):
+        paragraph_id=cell.find('.//p:p', ns).get('paraPrIDRef')
+        prop=header.find(f'.//h:paraPr[@id="{paragraph_id}"]', ns)
+        assert prop.find('h:align',ns).get('horizontal')==align
+        assert all(spacing.get('value')=='130' for spacing in prop.findall('.//h:lineSpacing',ns))
 for paragraph_id, expected in [('21', 'LEFT'), ('23', 'RIGHT')]:
     assert header.find(f'.//h:paraPr[@id="{paragraph_id}"]/h:align', ns).get('horizontal') == expected
 border = header.find('.//h:borderFill[@id="1"]', ns)

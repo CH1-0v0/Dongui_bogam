@@ -34,3 +34,5 @@ UI와 PDF·HWPX 회귀 검증은 Playwright와 Chromium이 설치된 개발 환�
 첨부 안내서 반영: 처리 상황별 법령 등록, 주민등록번호 동의 제외, 동의와 하단 고지 분리, 표 편집·저장, 동의 구분별 최종 체크, 제목 기반 파일 저장을 제공합니다. [안내서 반영 기준과 검증](docs/guideline-application.md)을 참고하세요.
 
 Cloudflare 운영 배포는 Python 로컬 서버와 분리된 Workers 백엔드를 사용합니다. [무료 플랜 배포·Wrangler 로그인·Secrets 설정](docs/cloudflare.md)을 참고하세요.
+
+최종 서식 개선: 항목 이동 제한·정렬 애니메이션, 일반 개인정보 필수/선택 통합 표, 처리 유형별 동의란, 기본 A4 쪽 미리보기와 접을 수 있는 최종 점검을 제공합니다. [변경 안내](docs/editor-flow.md#최종-화면-보완)를 참고하세요.

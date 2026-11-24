@@ -214,12 +214,12 @@ function home(){
   <div class="info home-input-note"><span aria-hidden="true">ⓘ</span><p><strong>빠른 생성으로 시작하세요.</strong> 교육·행사, 강사료·자문료, 진료 예약 등 ${quickTemplates.length}개 양식에서 기본 항목을 불러올 수 있습니다.</p></div>
  `;
 }
-const canSetRequired = key => Object.hasOwn(groupNames,key);
+const canSetRequired = key => Object.hasOwn(groupNames,key)&&key!=='marketing';
 const itemPresetGroups = [
- ['일반 개인정보', ['부서명','생년월일','성명','성별','소속 업체명','업무용 연락처','이메일 주소','주소','휴대전화번호','은행명','계좌번호','예금주명']],
+ ['일반 개인정보', ['성명','휴대전화번호','전화번호','생년월일','이메일 주소','성별','주소','부서명','소속 업체명','업무용 연락처','은행명','계좌번호','예금주명']],
  ['민감정보', ['건강정보','범죄경력']],
- ['고유식별정보', ['여권번호','외국인등록번호','운전면허번호','주민등록번호']]
-].map(([label,names])=>[label,names.sort((left,right)=>left.localeCompare(right,'ko'))]);
+ ['고유식별정보', ['주민등록번호','외국인등록번호','운전면허번호','여권번호']]
+];
 const itemPresetNames = new Set(itemPresetGroups.flatMap(([,names])=>names));
 const isManualItemName = item => item.manualName || Boolean(item.name && !itemPresetNames.has(item.name));
 const dragHandle=(item,key)=>`<span class="drag-handle" role="button" tabindex="0" draggable="true" data-drag-item="${item.id}" data-drag-group="${key}" aria-label="${safe(item.name||'빈 항목')} 이동" aria-description="위아래 화살표로 순서 변경, 분류 화면에서는 좌우 화살표로 분류 변경">⠿</span>`;
@@ -232,7 +232,7 @@ function basics(){
  return `<section class="panel"><h2>기관 정보</h2>${field('수집 기관명','agency',state.agency,'예: ○○병원 또는 ○○시청',false,true)}</section>`+Object.entries(state.groups).map(([key,g])=>{
   const title=key==='provide'?'제공받는 자의 ':'';
   const hasRequiredControls=canSetRequired(key);
-  return `<section class="panel"><div class="panelhead"><h2>${groupNames[key]}</h2>${checkbox(groupNames[key]+' 사용',`data-enable="${key}"`,g.enabled)}</div>${g.enabled?`<div class="pair">${key==='provide'?field('제공받는 자','groups.provide.recipient',g.recipient,'기관 또는 법인명',false,true)+checkbox('수집 목적 외 제공','data-outside',g.outside):''}${field(title+'이용 목적',`groups.${key}.purpose`,g.purpose,'예: 프로그램 신청 관리',false,true)}${field(title+'보유 및 이용 기간',`groups.${key}.period`,g.period,'예: 사업 종료 후 1년',false,true)}</div>${key==='collect'?`<fieldset class="optional-details"><legend>선택 항목의 이용 조건</legend><div class="pair">${field('선택 항목 이용 목적','groups.collect.optionalPurpose',g.optionalPurpose,'이용 목적과 같으면 공백')}${field('선택 항목 보유 및 이용 기간','groups.collect.optionalPeriod',g.optionalPeriod,'보유 및 이용 기간과 같으면 공백')}</div></fieldset>`:''}${hasRequiredControls? `<div class="actions bulk-required" role="group" aria-label="${groupNames[key]} 전체 항목 필수 여부"><button data-bulk-required="${key}" value="required" ${g.items.length?'':'disabled'}>모두 필수</button><button data-bulk-required="${key}" value="optional" ${g.items.length?'':'disabled'}>모두 선택</button></div>`:''}<div class="item-list">${g.items.length?'':`<p class="muted">개인정보 항목${requiredMark}</p>`}${g.items.map((i,n)=>`<div class="item-row" data-personal-kind="${kind(i)}" data-item-row="${i.id}" data-item-group="${key}">${dragHandle(i,key)}${itemNameControl(i,n)}<div class="item-controls">${hasRequiredControls?requiredSwitch(i,'항목 '+(n+1)):key==='marketing'?'<span class="pill">선택</span>':''}<button class="danger" data-delete="${i.id}" aria-label="항목 ${n+1} 삭제">삭제</button></div><div class="notice item-hint" id="hint-${i.id}">${itemNameHelp(i)}</div></div>`).join('')}</div><div class="actions"><button data-add="${key}">＋ 항목 추가</button>${key==='collect'?'<p class="muted">필요한 항목명만 추가하세요. 실제 이름이나 전화번호는 입력하지 마세요.</p>':''}</div>`:'<p class="muted">필요한 처리 유형만 선택하세요.</p>'}</section>`;
+  return `<section class="panel"><div class="panelhead"><h2>${groupNames[key]}</h2>${checkbox(groupNames[key]+' 사용',`data-enable="${key}"`,g.enabled)}</div>${g.enabled?`<div class="pair">${key==='provide'?field('제공받는 자','groups.provide.recipient',g.recipient,'기관 또는 법인명',false,true)+checkbox('수집 목적 외 제공','data-outside',g.outside):''}${field(title+'이용 목적',`groups.${key}.purpose`,g.purpose,'예: 프로그램 신청 관리',false,true)}${field(title+'보유 및 이용 기간',`groups.${key}.period`,g.period,'예: 사업 종료 후 1년',false,true)}</div>${key==='collect'?`<fieldset class="optional-details"><legend>선택 항목의 이용 조건</legend><div class="pair">${field('선택 항목 이용 목적','groups.collect.optionalPurpose',g.optionalPurpose,'필수항목과 같으면 공백')}${field('선택 항목 보유 및 이용 기간','groups.collect.optionalPeriod',g.optionalPeriod,'필수항목과 같으면 공백')}</div></fieldset>`:''}${hasRequiredControls? `<div class="actions bulk-required" role="group" aria-label="${groupNames[key]} 전체 항목 필수 여부"><button data-bulk-required="${key}" value="required" ${g.items.length?'':'disabled'}>모두 필수</button><button data-bulk-required="${key}" value="optional" ${g.items.length?'':'disabled'}>모두 선택</button></div>`:''}<div class="item-list">${g.items.length?'':`<p class="muted">개인정보 항목${requiredMark}</p>`}${g.items.map((i,n)=>`<div class="item-row" data-personal-kind="${kind(i)}" data-item-row="${i.id}" data-item-group="${key}">${dragHandle(i,key)}${itemNameControl(i,n)}<div class="item-controls">${hasRequiredControls?requiredSwitch(i,'항목 '+(n+1)):key==='marketing'?'<span class="pill">선택</span>':''}<button class="danger" data-delete="${i.id}" aria-label="항목 ${n+1} 삭제">삭제</button></div><div class="notice item-hint" id="hint-${i.id}">${itemNameHelp(i)}</div></div>`).join('')}</div><div class="actions"><button data-add="${key}">＋ 항목 추가</button>${key==='collect'?'<p class="muted">필요한 항목명만 추가하세요. 실제 이름이나 전화번호는 입력하지 마세요.</p>':''}</div>`:'<p class="muted">필요한 처리 유형만 선택하세요.</p>'}</section>`;
  }).join('')+`<p class="muted">민감정보일 가능성이 높은 항목은 다음 단계에서 우선 민감정보로 분류합니다.</p><p id="sensitivity-status" class="notice" role="status"></p>`;
 }
 const requiredSwitch = (item,label) => `<label class="required-switch"><input type="checkbox" role="switch" aria-label="${safe(label)} 필수 여부" data-required="${item.id}" ${item.required?'checked':''}><span class="required-track" aria-hidden="true"></span><span aria-hidden="true">${item.required?'필수':'선택'}</span></label>`;
@@ -241,19 +241,26 @@ const entryClass=({i})=>kind(i)!=='general'?kind(i):i.required?'required':'optio
 function classify(){
  return '<p class="muted">왼쪽 손잡이를 끌어 같은 처리 유형 안에서 분류를 바꿀 수 있습니다.</p>'+Object.entries(state.groups).map(([key,g])=>`<section class="panel classification-section" data-class-group="${key}"><h2>${key==='collect'?'개인정보':groupNames[key]}</h2>${g.enabled?`<div class="class-grid">${classificationGroups.map(category=>{
  const items=entries().filter(e=>e.key===key&&entryClass(e)===category);
- return `<section class="class-card" data-drop-group="${key}" data-drop-category="${category}"><h3>${categoryNames[category]} <span class="pill">${items.length}</span></h3>${items.map(({i})=>`<div class="class-item" data-item-row="${i.id}" data-item-group="${key}">${dragHandle(i,key)}<b>${safe(i.name)}</b><select class="native-item-choice" tabindex="-1" aria-hidden="true" aria-label="${safe(i.name)} 분류" data-kind="${i.id}">${classificationGroups.map(c=>`<option value="${c}" ${c===entryClass({i})?'selected':''}>${categoryNames[c]}</option>`).join('')}</select><button class="danger" data-delete="${i.id}" aria-label="${safe(i.name)} 삭제">삭제</button></div>`).join('')}${!items.length?'<p class="empty-class">항목을 여기로 이동</p>':''}</section>`;
+ return `<section class="class-card ${key==='marketing'&&category==='required'?'class-disabled':''}" data-drop-group="${key}" data-drop-category="${category}" ${key==='marketing'&&category==='required'?'aria-disabled="true"':''}><h3>${categoryNames[category]} <span class="pill">${items.length}</span></h3>${items.map(({i})=>`<div class="class-item" data-item-row="${i.id}" data-item-group="${key}">${dragHandle(i,key)}<b>${safe(i.name)}</b><select class="native-item-choice" tabindex="-1" aria-hidden="true" aria-label="${safe(i.name)} 분류" data-kind="${i.id}">${classificationGroups.map(c=>`<option value="${c}" ${c===entryClass({i})?'selected':''} ${canChangeClassification(i,c)?'':'disabled'}>${categoryNames[c]}</option>`).join('')}</select><button class="danger" data-delete="${i.id}" aria-label="${safe(i.name)} 삭제">삭제</button></div>`).join('')}${!items.length?`<p class="empty-class">${key==='marketing'&&category==='required'?'마케팅은 선택사항입니다.':category==='unique'?'고유식별정보는 다른 분류로 이동할 수 없습니다.':'항목을 여기로 이동'}</p>`:''}</section>`;
  }).join('')}</div>`:'<p class="muted">사용하지 않는 처리 유형입니다.</p>'}</section>`).join('');
 }
 function sortRequired(g){g.items=[...g.items.filter(i=>i.required),...g.items.filter(i=>!i.required)];}
 function changeRequired(item,value){
+ if(state.groups.marketing.items.includes(item)){item.required=false;return;}
  const g=Object.values(state.groups).find(g=>g.items.includes(item));g.items=g.items.filter(i=>i!==item);item.required=value;
  const required=g.items.filter(i=>i.required),optional=g.items.filter(i=>!i.required);
  if(value)required.push(item);else optional.unshift(item);g.items=[...required,...optional];
 }
+function canChangeClassification(item,category){
+ const current=entryClass({i:item});
+ if(current==='unique'||category==='unique')return current===category;
+ return !(state.groups.marketing.items.includes(item)&&category==='required');
+}
 function changeClassification(item,category){
+ if(!canChangeClassification(item,category))return false;
  item.kind=['sensitive','unique'].includes(category)?category:'general';
  if(['required','optional'].includes(category))changeRequired(item,category==='required');
- invalidateItems([item]);
+ invalidateItems([item]);return true;
 }
 const reference = 'https://www.law.go.kr/법령/개인정보보호법';
 const groundTypes={collect:'일반 수집',provide:'목적 내 제공',outside:'목적 외 이용·제공'};
@@ -341,7 +348,7 @@ function catalogFeedback(){
  if(lawPicker.hasNext)return `${Number.isInteger(lawPicker.total)?'전체 '+lawPicker.total+'건':'현재 '+lawPicker.laws.length+'건 · '+(lawPicker.countFailed?'전체 건수 확인 불가':'전체 집계 중')} · 아래로 스크롤하면 더 불러옵니다.`;
  return lawPicker.laws.length?`전체 ${lawPicker.laws.length}건 · 검색 결과의 마지막입니다.`:'검색 결과 0건';
 }
-function catalogWindow(){return `<div class="catalog-window" style="--catalog-visible:${lawPicker.loading||lawPicker.hasNext?5:Math.max(1,Math.min(5,lawPicker.laws.length))}"><div class="catalog-results" tabindex="0" role="region" aria-label="법령 검색 결과" aria-busy="${lawPicker.loading}">${catalogRows()}<div class="catalog-sentinel" aria-hidden="true"></div></div><div class="catalog-feedback" role="status" aria-live="polite">${catalogFeedback()}</div></div>`;}
+function catalogWindow(){return `<div class="catalog-window" style="--catalog-visible:${Math.max(1,Math.min(5,lawPicker.laws.length))}"><div class="catalog-results" tabindex="0" role="region" aria-label="법령 검색 결과" aria-busy="${lawPicker.loading}">${catalogRows()}<div class="catalog-sentinel" aria-hidden="true"></div></div><div class="catalog-feedback" role="status" aria-live="polite">${catalogFeedback()}</div></div>`;}
 function updateCatalogWindow(){
  document.querySelectorAll('[data-law-query],[data-catalog-search],[data-include-admin]').forEach(control=>control.disabled=lawPicker.loading);
  const box=document.querySelector('.catalog-results');if(!box)return;
@@ -354,7 +361,7 @@ function updateCatalogWindow(){
   [...holder.children].slice(oldCount).forEach(node=>box.insertBefore(node,sentinel));
  }
  box.scrollTop=top;
- if(!lawPicker.loading&&!lawPicker.hasNext)box.parentElement.style.setProperty('--catalog-visible',Math.max(1,Math.min(5,lawPicker.laws.length)));
+ box.parentElement.style.setProperty('--catalog-visible',Math.max(1,Math.min(5,lawPicker.laws.length)));
  const feedback=document.querySelector('.catalog-feedback');if(feedback)feedback.innerHTML=catalogFeedback();
 }
 const shortArticle=value=>'제'+value.replace('의','조의')+(value.includes('의')?'':'조');
@@ -422,7 +429,7 @@ async function chooseBasis(code){
  try{
   const proof=await lawRequest('/api/law/basis',{basisCode:code,type:draft.type});
   if(state.groundDraft!==draft||draft.basisCode!==code)return;
-  Object.assign(draft,{pipa:proof.pipa,pipaParagraph:proof.pipaParagraph,pipaVerified:proof.pipaVerified,support:proof.support,supportVerified:proof.supportVerified});
+  Object.assign(draft,{pipa:proof.pipa,pipaParagraph:proof.pipaParagraph,pipaParagraphSegments:proof.pipaParagraph?.paragraphSegments||proof.paragraphSegments,pipaVerified:proof.pipaVerified,support:proof.support,supportVerified:proof.supportVerified});
   if(!rule.needsLaw)Object.assign(draft,{law:proof.law,article:proof.article,paragraph:proof.paragraph,clause:proof.clause,excerpt:proof.excerpt,articleExcerpt:proof.articleExcerpt,sourceUrl:proof.sourceUrl,verified:true});
   message=rule.needsLaw?'다음으로 이 업무의 구체적인 법령 조문을 선택하세요.':'적용할 항목과 법령의 요건을 확인하세요.';
  }catch(error){if(state.groundDraft===draft)message=apiErrorMessage(error);}
@@ -430,7 +437,7 @@ async function chooseBasis(code){
 }
 function basisEditor(draft){
  const rule=LawBasis.rules[draft.basisCode];
- return `<section class="basis-selection"><h4>② 개인정보 보호법의 처리 근거 선택</h4><label class="field"><span>동의 외의 처리 근거</span><select data-basis-code ${lawActionBusy?'disabled':''}><option value="">먼저 근거를 선택하세요</option>${draftOptions(draft).map(([code,r])=>`<option value="${code}" ${draft.basisCode===code?'selected':''}>${safe(r.label)} (${safe(r.pipa)})</option>`).join('')}</select></label>${rule&&draft.pipa?`<details class="pipa-original"><summary>원문 보기</summary><blockquote class="law-excerpt">${safe(draft.pipaParagraph?.excerpt||draft.pipa.articleExcerpt||draft.pipa.excerpt)}</blockquote></details>`:''}${['legitimate','provisionLegitimate'].includes(draft.basisCode)?'<p class="legitimate-warning" role="note">개인정보처리자의 정당한 이익이 정보주체의 권리보다 명백히 우선한다는 점은 개인정보처리자가 직접 입증해야 합니다. 필요성·관련성·합리적 범위를 검토하고 입증 자료를 보관하세요.</p>':''}</section>`;
+ return `<section class="basis-selection"><h4>② 개인정보 보호법의 처리 근거 선택</h4><label class="field"><span>동의 외의 처리 근거</span><select data-basis-code ${lawActionBusy?'disabled':''}><option value="">먼저 근거를 선택하세요</option>${draftOptions(draft).map(([code,r])=>`<option value="${code}" ${draft.basisCode===code?'selected':''}>${safe(r.label)} (${safe(r.pipa)})</option>`).join('')}</select></label>${rule&&draft.pipa?`<details class="pipa-original"><summary>원문 보기</summary><blockquote class="law-excerpt">${candidateExcerpt({...draft.pipa,paragraphExcerpt:draft.pipaParagraph?.excerpt,paragraphSegments:draft.pipaParagraphSegments})}</blockquote></details>`:''}${['legitimate','provisionLegitimate'].includes(draft.basisCode)?'<p class="legitimate-warning" role="note">개인정보처리자의 정당한 이익이 정보주체의 권리보다 명백히 우선한다는 점은 개인정보처리자가 직접 입증해야 합니다. 필요성·관련성·합리적 범위를 검토하고 입증 자료를 보관하세요.</p>':''}</section>`;
 }
 function selectedReviewItems(draft){return applicableEntries(draft).filter(({i})=>draft.ids.includes(i.id)).map(e=>({id:e.i.id,name:e.i.name,purpose:e.g.purpose,recipient:e.g.recipient,type:groundType(e),context:lawContext(e),classification:lawClassification(e.i)}));}
 function reviewSnapshot(draft){return JSON.stringify({basisCode:draft.basisCode,type:draft.type,law:draft.law,article:draft.article,paragraph:draft.paragraph,clause:draft.clause,mst:draft.mst,additionalBasisCodes:additionalCodes(draft),items:selectedReviewItems(draft).sort((a,b)=>a.id.localeCompare(b.id))});}
@@ -494,12 +501,12 @@ function categoryGrounds(type,label){
  const available=candidates.filter(({n})=>!lawSearch.hidden?.includes(n));
  const visible=available.filter(({key})=>!activeKeys.size||activeKeys.has(key)||lawSearch.showAlternatives?.[type]);
  const alternativeCount=available.length-visible.length;
- return `<section class="panel ground-category" data-ground-category="${type}"><h2>${label}</h2>${groundPurpose(list)}<div class="actions applied-law-actions">${state.grounds.filter(b=>b.type===type&&!b.bundleSupplement).map(b=>`<button data-edit-ground="${b.id}">적용 법령 수정 · ${safe(b.cite)}</button>`).join('')}</div><div class="category-items">${list.map(e=>`<div class="row"><b>${safe(e.i.name)}</b><span class="pill ${LawBasis.notice(e.i.bases,lawContext(e),lawClassification(e.i))?'':'pending'}">${groundItemStatus(e)}</span></div>`).join('')}</div>${[...grouped.values()].map(records=>{const b=records[0],ids=[...new Set(records.flatMap(r=>r.ids))];return `<details class="basis applied-basis"><summary>적용한 근거 · ${safe(LawBasis.rules[b.basisCode]?.label||'처리 근거')} · ${ids.map(id=>safe(getItem(id)?.name)).join(', ')}</summary><p>${safe(LawBasis.rules[b.basisCode]?.pipa)}</p><p>${safe(b.cite)}</p><blockquote class="law-excerpt">${safe(b.excerpt)}</blockquote>${records.map(r=>`<p>적용 항목: ${r.ids.map(id=>safe(getItem(id)?.name)).join(', ')}</p><div class="actions"><button data-edit-ground="${r.id}">적용 항목·근거 수정</button><button data-remove-ground="${r.id}">이 근거 적용 취소</button></div>`).join('')}</details>`;}).join('')}${candidates.length?`<details class="law-options-group" data-law-group="${type}" ${lawSearch.groupOpen?.[type]===false?'':'open'}><summary>검토할 법령 ${visible.length}개</summary><div class="law-options-children">`:''}${visible.map(({c,n,key})=>{
+ return `<section class="panel ground-category" data-ground-category="${type}"><h2>${label}</h2>${groundPurpose(list)}<div class="actions applied-law-actions">${state.grounds.filter(b=>b.type===type&&!b.bundleSupplement).map(b=>`<button data-edit-ground="${b.id}">적용 법령 수정 · ${safe(b.cite)}</button>`).join('')}</div><div class="category-items">${list.map(e=>`<div class="row"><b>${safe(e.i.name)}</b><span class="pill ${LawBasis.notice(e.i.bases,lawContext(e),lawClassification(e.i))?'':'pending'}">${groundItemStatus(e)}</span></div>`).join('')}</div>${[...grouped.values()].map(records=>{const b=records[0],ids=[...new Set(records.flatMap(r=>r.ids))];return `<details class="basis applied-basis"><summary>적용한 근거 · ${safe(LawBasis.rules[b.basisCode]?.label||'처리 근거')} · ${ids.map(id=>safe(getItem(id)?.name)).join(', ')}</summary><p>${safe(LawBasis.rules[b.basisCode]?.pipa)}</p><p>${safe(b.cite)}</p><blockquote class="law-excerpt">${safe(b.excerpt)}</blockquote>${records.map(r=>`<p>적용 항목: ${r.ids.map(id=>safe(getItem(id)?.name)).join(', ')}</p><div class="actions"><button data-edit-ground="${r.id}">적용 항목·근거 수정</button><button class="danger cancel-law" data-remove-ground="${r.id}">이 근거 적용 취소</button></div>`).join('')}</details>`;}).join('')}${candidates.length?`<details class="law-options-group" data-law-group="${type}" ${lawSearch.groupOpen?.[type]===false?'':'open'}><summary>검토할 법령 ${visible.length}개</summary><div class="law-options-children">`:''}${visible.map(({c,n,key})=>{
  const selected=state.groundDraft?.candidateKey===key;
  const applied=state.grounds.find(b=>b.candidateKey===key);
  const folded=lawSearch.dismissed?.includes(n);
  const isOpen=lawSearch.candidateOpen?.[n]??(!applied&&!folded);
- return `<details class="law-result candidate-block" data-candidate="${n}" ${isOpen?'open':''}><summary><span class="candidate-title">${LawBasis.isPipa(c.law)?safe(c.cite||cite(c)):`${safe(c.law)} · ${safe(LawBasis.rules[c.basisCode]?.label||'처리 근거')}`}</span><span class="pill ${applied?'':folded?'pending':''}">${applied?'적용됨 · '+applied.ids.map(id=>safe(getItem(id)?.name)).join(', '):folded?'선택 안함 · 다시 선택 가능':c.verified?'조문 확인됨 · 적용 전':'미검증 시연'}</span></summary><div class="candidate-body">${selected?groundEditor(state.groundDraft,true):`${candidateSource(applied||c)}${applied?`<p>적용 항목: ${applied.ids.map(id=>safe(getItem(id)?.name)).join(', ')}</p>`:''}<div class="actions"><button data-use-law="${n}" ${lawActionBusy?'disabled':''}>${applied?'적용 항목·근거 다시 검토':'이 법령의 적용 항목 선택'}</button><button data-dismiss-law="${n}">이 법령 선택 안함</button>${applied?`<button data-remove-ground="${applied.id}">이 근거 적용 취소</button>`:''}</div>`}</div></details>`;
+ return `<details class="law-result candidate-block" data-candidate="${n}" ${isOpen?'open':''}><summary><span class="candidate-title">${LawBasis.isPipa(c.law)?safe(c.cite||cite(c)):`${safe(c.law)} · ${safe(LawBasis.rules[c.basisCode]?.label||'처리 근거')}`}</span><span class="pill ${applied?'':folded?'pending':''}">${applied?'적용됨 · '+applied.ids.map(id=>safe(getItem(id)?.name)).join(', '):folded?'선택 안함 · 다시 선택 가능':c.verified?'조문 확인됨 · 적용 전':'미검증 시연'}</span></summary><div class="candidate-body">${selected?groundEditor(state.groundDraft,true):`${candidateSource(applied||c)}${applied?`<p>적용 항목: ${applied.ids.map(id=>safe(getItem(id)?.name)).join(', ')}</p>`:''}<div class="actions"><button data-use-law="${n}" ${lawActionBusy?'disabled':''}>${applied?'적용 항목·근거 다시 검토':'이 법령의 적용 항목 선택'}</button><button data-dismiss-law="${n}">이 법령 선택 안함</button>${applied?`<button class="danger cancel-law" data-remove-ground="${applied.id}">이 근거 적용 취소</button>`:''}</div>`}</div></details>`;
  }).join('')}${candidates.length?`</div>${alternativeCount?`<button class="other-laws" data-show-laws="${type}">다른 법령 보기 (${alternativeCount}개)</button>`:''}</details>`:''}</section>`;
 }
 function grounds(){
@@ -554,9 +561,9 @@ function sections(){
  for(const {key,g,i} of entries()){
   const isRnn=rnn(i.name);
   if(isRnn&&!LawBasis.notice(i.bases,lawContext({key,g,i}),'rnn')) continue;
-  const classification=isRnn?'rnn':kind(i);
-  const required=i.required?'필수':'선택';
-  const basis=LawBasis.notice(i.bases,lawContext({key,g,i}),classification)?'notice':'consent';
+  const classification=key==='collect'?(isRnn?'rnn':kind(i)):'mixed';
+  const required=key==='marketing'?'선택':key==='collect'?(i.required?'필수':'선택'):'공통';
+  const basis=LawBasis.notice(i.bases,lawContext({key,g,i}),isRnn?'rnn':kind(i))?'notice':'consent';
   const k=[basis,key,classification,required].join('.');
   if(!map.has(k)) map.set(k,{k,basis,key,g,classification,required,items:[]});
   map.get(k).items.push(i);
@@ -593,7 +600,7 @@ const defaultIntro = () => {
  const agency=withParticle(state.agency.trim(),'은','는');
  return `${agency} ${withParticle(purpose,'을','를')} 위하여 아래와 같이 개인정보를 ${action}하고자 합니다. 내용을 자세히 확인하신 후 동의 여부를 결정하여 주시기 바랍니다.`;
 };
-const sectionTitle = s => [groupNames[s.key],s.classification==='rnn'?'고유식별정보 (주민등록번호)':s.classification!=='general'?categoryNames[s.classification]:'',s.required].filter(Boolean).join(' · ');
+const sectionTitle = s => documentCategory(s);
 const refusalSections = () => sections().filter(s=>s.basis==='consent'||s.classification==='rnn');
 const refusalText = (s,preview) => {
  const text=state.refusals[s.k]?.trim();
@@ -601,11 +608,11 @@ const refusalText = (s,preview) => {
  return preview?'<em class="doc-refusal-missing">아직 입력하지 않았습니다</em>':'';
 };
 const note = text => `<p class="doc-note"><span class="doc-note-marker" aria-hidden="true">※</span> <span>${text}</span></p>`;
-const refusalPrefix = s => `[${s.required||'선택'}] 동의를 거부할 수 있습니다. 그러나 동의를 거부할 경우, `;
+const refusalPrefix = s => `${s.required==='공통'?'':'['+(s.required||'선택')+'] '}동의를 거부할 수 있습니다. 그러나 동의를 거부할 경우, `;
 const marketingContact = '<p class="doc-marketing"><strong>제공하신 연락처로 마케팅 안내나 홍보 연락을 받을 수 있습니다.</strong></p>';
 const editableText = (label,key,value,editable) => `<span class="doc-text" ${editable?`contenteditable="plaintext-only" role="textbox" aria-label="${safe(label)}" data-edit="${key}"`:''}>${safe(state.edits[key]??value)}</span>`;
 const noticeBasisText=item=>[...new Set((item.bases||[]).filter(b=>LawBasis.rules[b.basisCode]?.effect!=='consent').map(b=>[...new Set([LawBasis.rules[b.basisCode]?.pipa,b.cite].filter(Boolean))].join(' · ')))].join(' / ');
-const documentCategory=s=>s.classification==='general'?(s.required==='필수'?'일반 개인정보(필수)':'일반 개인정보(선택)'):s.classification==='rnn'?'고유식별정보(주민등록번호)':categoryNames[s.classification];
+const documentCategory=s=>s.key==='extra'?'목적 외 이용':s.key==='provide'?(s.g.outside?'목적 외 제공':'제3자 제공'):s.key==='marketing'?'홍보 또는 마케팅 관련':s.classification==='general'?(s.required==='필수'?'일반 개인정보(필수)':'일반 개인정보(선택)'):s.classification==='rnn'?'고유식별정보(주민등록번호)':categoryNames[s.classification];
 const importantText=text=>`<strong class="doc-important">${text}</strong>`;
 function categoryTable(rows,editable){
  const first=rows[0],provider=first.key==='provide';
@@ -617,7 +624,7 @@ function categoryTable(rows,editable){
   const text=editableText({purpose:'이용 목적',period:'보유 및 이용기간',recipient:'제공받는 자'}[key],keys[0],row.g[key],editable);
   return `<td data-merge-keys="${safe(JSON.stringify(keys))}"${end-index>1?` rowspan="${end-index}"`:''}>${important?importantText(text):text}</td>`;
  };
- return `<article class="doc-category" data-document-category="${safe([first.key,first.classification,first.classification==='general'?first.required:''].join('.'))}"><h3>${safe(documentCategory(first))}${provider&&first.g.outside?' (수집 목적 외 제공)':''}</h3><table class="doc-table"><thead><tr>${rows.length>1?'<th scope="col">구분</th>':''}${provider?'<th scope="col">제공받는 자</th>':''}<th scope="col">개인정보 항목</th><th scope="col">${provider?'제공받는 자의 이용 목적':'이용 목적'}</th><th scope="col">보유 및 이용기간</th></tr></thead><tbody>${rows.map((row,index)=>{const items=editableText(documentCategory(row)+' 항목',row.k+'.items',row.items.map(i=>i.name).join(', '),editable);return `<tr class="doc-consent-row" data-consent-row="${row.k}">${rows.length>1?`<th scope="row">${row.required}</th>`:''}${provider?conditionCell(row,index,'recipient',true):''}<td data-consent-items="${row.k}">${row.classification==='general'?items:importantText(items)}</td>${conditionCell(row,index,'purpose',provider)}${conditionCell(row,index,'period',true)}</tr>`;}).join('')}</tbody></table>${rows.map(s=>`<div class="doc-consent" data-consent-section="${s.k}">${note(refusalPrefix(s)+refusalText(s,editable))}${s.key==='marketing'?marketingContact:''}<p class="doc-choice"><span>☞ ${safe(documentCategory(s))}의 ${s.key==='provide'?(s.g.outside?'목적 외 제공':'제공'):s.key==='extra'?'목적 외 이용':'수집·이용'}에 동의하십니까?</span><strong>□ 동의　 □ 미동의</strong></p></div>`).join('')}</article>`;
+ return `<article class="doc-category" data-document-category="${safe([first.key,first.classification,first.classification==='general'?first.required:''].join('.'))}"><h3>${safe(first.key==='collect'&&first.classification==='general'?'일반 개인정보':documentCategory(first))}</h3><table class="doc-table"><thead><tr>${first.key==='collect'&&first.classification==='general'||rows.length>1?'<th scope="col">구분</th>':''}${provider?'<th scope="col">제공받는 자</th>':''}<th scope="col">개인정보 항목</th><th scope="col">${provider?'제공받는 자의 이용 목적':'이용 목적'}</th><th scope="col">보유 및 이용기간</th></tr></thead><tbody>${rows.map((row,index)=>{const items=row.classification==='mixed'?row.items.map(i=>{const name=editableText('개인정보 항목',i.id+'.item',i.name,editable);return kind(i)==='general'&&!rnn(i.name)?name:importantText(name);}).join(', '):editableText(documentCategory(row)+' 항목',row.k+'.items',row.items.map(i=>i.name).join(', '),editable);return `<tr class="doc-consent-row" data-consent-row="${row.k}">${first.key==='collect'&&first.classification==='general'||rows.length>1?`<th scope="row">${row.required}</th>`:''}${provider?conditionCell(row,index,'recipient',true):''}<td data-consent-items="${row.k}">${['general','mixed'].includes(row.classification)?items:importantText(items)}</td>${conditionCell(row,index,'purpose',provider)}${conditionCell(row,index,'period',true)}</tr>`;}).join('')}</tbody></table>${rows.map(s=>`<div class="doc-consent" data-consent-section="${s.k}">${note(refusalPrefix(s)+refusalText(s,editable))}${s.key==='marketing'?marketingContact:''}<p class="doc-choice"><span>&nbsp;☞ ${safe(documentCategory(s))}${s.key==='collect'?'의 수집·이용':s.key==='marketing'?' 연락을 받는 것':''}에 동의하십니까?</span><strong>□ 동의　 □ 미동의</strong></p></div>`).join('')}</article>`;
 }
 function noticeTable(sections,editable){
  const first=sections[0],provider=first.key==='provide',grouped=new Map();
@@ -634,9 +641,9 @@ function noticeTable(sections,editable){
   let end=index+1;while(end<rows.length&&value(row)===value(rows[end]))end++;
   const keys=key==='basis'?[]:rows.slice(index,end).flatMap(r=>r.items.map(i=>i.id+'.'+key));
   const text=key==='basis'?safe(row.basis):editableText({purpose:'처리 목적',period:'보유 및 이용기간',recipient:'제공받는 자'}[key],keys[0],value(row),editable);
-  return `<td${keys.length?` data-merge-keys="${safe(JSON.stringify(keys))}"`:''}${end-index>1?` rowspan="${end-index}"`:''}>${text}</td>`;
+  return `<td${keys.length?` data-merge-keys="${safe(JSON.stringify(keys))}"`:''}${end-index>1?` rowspan="${end-index}"`:''}>${key==='period'?importantText(text):text}</td>`;
  };
- return `<article class="doc-notice" data-document-category="notice.${first.key}"><h3>${safe(groupNames[first.key])}${first.g.outside?' (수집 목적 외 제공)':''}</h3><table class="doc-table"><thead><tr>${provider?'<th>제공받는 자</th>':''}<th>개인정보 항목</th><th>처리 목적</th><th>보유 및 이용기간</th><th>법적 근거</th></tr></thead><tbody>${rows.map((row,index)=>`<tr class="doc-notice-row">${provider?cell(row,index,'recipient'):''}<td>${row.items.map(i=>{const text=editableText('개인정보 항목',i.id+'.item',i.name,editable);return kind(i)==='general'&&!rnn(i.name)?text:importantText(text);}).join(', ')}</td>${cell(row,index,'purpose')}${cell(row,index,'period')}${cell(row,index,'basis')}</tr>`).join('')}</tbody></table></article>`;
+ return `<article class="doc-notice" data-document-category="notice.${first.key}"><h3>${safe(first.key==='provide'&&first.g.outside?'목적 외 제공':first.key==='marketing'?'홍보 또는 마케팅 관련':groupNames[first.key])}</h3><table class="doc-table"><thead><tr>${provider?'<th>제공받는 자</th>':''}<th>개인정보 항목</th><th>처리 목적</th><th>보유 및 이용기간</th><th>법적 근거</th></tr></thead><tbody>${rows.map((row,index)=>`<tr class="doc-notice-row">${provider?cell(row,index,'recipient'):''}<td>${row.items.map(i=>{const text=editableText('개인정보 항목',i.id+'.item',i.name,editable);return kind(i)==='general'&&!rnn(i.name)?text:importantText(text);}).join(', ')}</td>${cell(row,index,'purpose')}${cell(row,index,'period')}${cell(row,index,'basis')}</tr>`).join('')}</tbody></table></article>`;
 }
 const signatureLine = '_'.repeat(24);
 function signatureBlock(){
@@ -645,10 +652,44 @@ function signatureBlock(){
 function documentHTML(editable=false){
  const rows=sections();if(!rows.length)return '';
  const consentGroups=new Map(),noticeGroups=new Map();
- for(const row of rows){const consent=row.basis==='consent',groups=consent?consentGroups:noticeGroups;const key=consent?[row.key,row.classification,row.classification==='general'?row.required:''].join('.'):[row.key,Boolean(row.g.outside)].join('.');if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);}
+ for(const row of rows){const consent=row.basis==='consent',groups=consent?consentGroups:noticeGroups;const key=consent?[row.key,row.classification].join('.'):[row.key,Boolean(row.g.outside)].join('.');if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);}
  const title=state.title.trim()||suggestedTitle(),intro=state.intro.trim()||defaultIntro();
  return `<section class="doc"><h1>${safe(title)}</h1><p class="doc-intro">${safe(intro)}</p>${[...consentGroups.values()].map(group=>categoryTable(group,editable)).join('')}${consentGroups.size?signatureBlock():''}${noticeGroups.size?`<section class="notice-section"><h3 class="doc-notice-heading">고지사항</h3>${[...noticeGroups.values()].map(group=>noticeTable(group,editable)).join('')}</section>`:''}<p class="doc-agency"><strong>${safe(state.agency||'기관명 미입력')} 귀중</strong></p></section>`;
 }
+function previewMarkup(html,editing=false){
+ return `<p class="a4-preview-status muted" role="status">${editing?'표 수정 중입니다. 저장하면 A4 쪽 미리보기가 갱신됩니다.':'A4 미리보기를 준비하고 있습니다…'}</p><div class="a4-document-frame" role="region" aria-label="A4 문서 쪽 미리보기" ${editing?'hidden':''}></div><div id="preview-docs" class="document-source" ${editing?'':'hidden'}>${html}</div>`;
+}
+let a4PreviewVersion=0,a4PreviewTimer,pdfViewer;
+function scheduleA4Preview(){
+ clearTimeout(a4PreviewTimer);const version=++a4PreviewVersion;
+ const frame=document.querySelector('.a4-document-frame'),status=document.querySelector('.a4-preview-status');
+ if(!frame||step===4&&documentEditing)return;
+ a4PreviewTimer=setTimeout(async()=>{
+  let documentPdf,loadingTask;
+  try{
+   const blob=await (await import('./pdf-export.js')).createPdf(exportBody(),documentTableGrid);
+   const viewer=await (pdfViewer??=import('./export-assets/pdfjs.min.js').catch(error=>{pdfViewer=null;throw error;}));
+   if(version!==a4PreviewVersion||!frame.isConnected)return;
+   viewer.GlobalWorkerOptions.workerSrc=new URL('/export-assets/pdfjs-worker.min.js',location.origin).href;
+   loadingTask=viewer.getDocument({data:new Uint8Array(await blob.arrayBuffer()),isEvalSupported:false,useWasm:false});documentPdf=await loadingTask.promise;
+   const pages=document.createDocumentFragment();
+   for(let n=1;n<=documentPdf.numPages;n++){
+    if(version!==a4PreviewVersion||!frame.isConnected)return;
+    const page=await documentPdf.getPage(n),viewport=page.getViewport({scale:1.5}),paper=document.createElement('section');
+    paper.className='a4-paper';paper.setAttribute('aria-label','문서 '+n+'쪽');
+    const label=document.createElement('p');label.className='a4-page-label';label.textContent=n+' / '+documentPdf.numPages+'쪽';paper.append(label);
+    const canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);canvas.setAttribute('aria-hidden','true');paper.append(canvas);
+    await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+    const accessible=document.createElement('div');accessible.className='a4-page-text';accessible.textContent=(await page.getTextContent()).items.map(i=>i.str).join(' ');paper.append(accessible);pages.append(paper);
+   }
+   if(version!==a4PreviewVersion||!frame.isConnected)return;
+   frame.replaceChildren(pages);frame.hidden=false;frame.dataset.pages=documentPdf.numPages;
+   status.textContent='A4 · 총 '+documentPdf.numPages+'쪽 · 아래로 스크롤하여 다음 쪽을 확인하세요.';
+  }catch{if(version===a4PreviewVersion&&frame.isConnected){status.textContent='A4 미리보기를 만들지 못했습니다. 문서 내용을 확인한 뒤 다시 시도해 주세요.';document.querySelector('#preview-docs').hidden=false;frame.hidden=true;}}
+  finally{await loadingTask?.destroy().catch(()=>{});}
+ },220);
+}
+
 function output(){
  const rows=hasConsent()?refusalSections():[];
  const docs=documentHTML(documentEditing);
@@ -656,7 +697,7 @@ function output(){
  ${hasConsent()?`<fieldset class="panel child-choice"><legend>만 14세 미만 아동 대상 여부${requiredMark}</legend><p class="muted">아동 대상이면 동의서에 법정대리인 동의·서명란을 추가합니다.</p><div class="actions"><label class="check"><input type="radio" name="child" required data-child value="yes" ${state.child?'checked':''}> 대상</label><label class="check"><input type="radio" name="child" required data-child value="no" ${state.child===false?'checked':''}> 대상 아님</label></div></fieldset>`:''}
  <section class="panel stack"><h2>동의 거부 시 불이익</h2>${rows.length?'<p class="muted">동의를 거부하거나 정보를 제공하지 않았을 때의 영향을 적어 주세요.</p>':''}${rows.length?rows.map(s=>field(sectionTitle(s)+(s.classification==='rnn'?' · 번호 미제공 시 안내':''),'refusals.'+s.k.replaceAll('.',':'),state.refusals[s.k],'해당하는 불이익 또는 안내 내용을 입력하세요.',true,true)).join(''):'<p class="not-applicable">동의를 받아 개인정보를 수집하지 않기 때문에 해당사항 없습니다.</p>'}</section>
 </div>
- <section class="panel preview-panel"><div class="panelhead"><h2>A4 문서 미리보기</h2><button data-toggle-document-edit aria-pressed="${documentEditing}">${documentEditing?'저장하기':'표 내용 직접 수정'}</button></div><div class="actions export"><button data-page-preview ${docs?'':'disabled'}>쪽 미리보기</button><button class="primary" data-finish ${docs?'':'disabled'}>완성하기 →</button></div><p class="notice" id="output-status" role="status"></p><div id="preview-docs">${docs||'<p>문서에 표시할 항목이 없습니다.</p>'}</div></section></div>`;
+ <section class="panel preview-panel"><div class="panelhead"><h2>A4 문서 미리보기</h2><button data-toggle-document-edit aria-pressed="${documentEditing}">${documentEditing?'저장하기':'표 내용 직접 수정'}</button></div><div class="actions export"><button class="primary" data-finish ${docs?'':'disabled'}>완성하기 →</button></div><p class="notice" id="output-status" role="status"></p>${previewMarkup(docs||'<p>문서에 표시할 항목이 없습니다.</p>',documentEditing)}</section></div>`;
 }
 function validateDraft(){
  const missingRefusal=hasConsent()?refusalSections().find(s=>!state.refusals[s.k]?.trim()):null;
@@ -694,7 +735,7 @@ function reviewDocument(){
   checks.push(['독립된 동의·미동의 선택란',choice.includes('□ 동의')&&choice.includes('□ 미동의')]);
   if(s.key==='marketing')checks.push(['홍보·판매 권유 연락 사실',Boolean(scope?.querySelector('.doc-marketing')?.textContent.trim())]);
   checks.push(['동의란의 개인정보 구분명 표시',choice.includes(documentCategory(s))]);
-  return {title:groupNames[s.key]+' · '+documentCategory(s)+(s.classification!=='general'?' · '+s.required:''),checks};
+  return {title:documentCategory(s),checks};
  });
  const items=[
   [consent.length?'필수 고지 항목 기재':'고지사항 기재',!missingCell&&refusalCount===consent.length&&audit.every(section=>section.checks.every(([,ok])=>ok))?'확인':'보완 필요',
@@ -705,7 +746,7 @@ function reviewDocument(){
    '아동 대상인 경우 법정대리인 서명란과 관계 기입란을 확인합니다.'],
   ['법적 근거와 동의 범위의 적정성','담당자 확인 필요',
    notices.length?'채택한 근거가 고지 항목에 실제로 적용되는지 확인해 주세요.':'동의가 필요한 처리 범위와 동의 방법이 적절한지 확인해 주세요.'],
-  ['첨부 안내서 작성 기준','반영','동의·고지 분리, 민감정보·고유식별정보 별도 동의, 중요 내용 강조 기준을 반영했습니다. 개별 업무의 적법성 판단은 담당자 확인이 필요합니다.']
+  ['첨부 안내서 작성 기준','반영','동의·고지 분리, 수집 항목의 개인정보 유형 구분, 처리 목적별 동의와 중요 내용 강조를 반영했습니다. 개별 업무의 적법성 판단은 담당자 확인이 필요합니다.']
  ];
  if(rows.some(row=>row.classification!=='general'||row.key==='extra'||row.g.outside)){
   items.splice(4,0,['특수 처리 요건','담당자 확인 필요','민감정보, 고유식별정보 또는 목적 외 이용·제공에 해당하는 항목의 처리 요건과 근거를 확인해 주세요.']);
@@ -717,26 +758,32 @@ function reviewDocument(){
 }
 function finalPage(){
  const {items,html,audit=[]}=finalDocument;
+ const pill=status=>`<span class="pill ${['확인','해당 없음','반영'].includes(status)?'':'pending'}">${status}</span>`;
+ const row=([title,status,description])=>`<li><div><strong>${safe(title)}</strong> ${pill(status)}</div><p>${safe(description)}</p></li>`;
+ const auditBody=choices=>audit.length?audit.map(section=>`<section><h3>${safe(section.title)}</h3><ul>${section.checks.filter(([label])=>/독립된 동의|동의란의/.test(label)===choices).map(([label,ok])=>`<li><label><input type="checkbox" disabled ${ok?'checked':''}>${safe(label)} <span>${ok?'확인':'보완 필요'}</span></label></li>`).join('')}</ul></section>`).join(''):'<p class="not-applicable">동의 항목이 없는 고지서입니다. 동의란 점검은 해당사항 없습니다.</p>';
+ const pending=items.filter(([,status])=>!['확인','해당 없음','반영'].includes(status));
  return `<div class="title"><h1 tabindex="-1">최종본</h1><p>최종본을 확인하고 저장하거나 인쇄하세요.</p></div>
  <div class="final-layout"><section class="panel final-review" aria-labelledby="final-review-title"><h2 id="final-review-title">최종 점검 결과</h2>
- <p class="muted">자동 점검은 문서에 필요한 항목과 동의란의 기재 여부를 확인합니다. 실제 처리 근거의 적정성과 법령 준수 여부는 담당자 확인이 필요합니다.</p>
- <div class="consent-audit">${audit.length?audit.map(section=>`<section><h3>${safe(section.title)}</h3><ul>${section.checks.map(([label,ok])=>`<li><label><input type="checkbox" disabled ${ok?'checked':''}>${safe(label)} <span>${ok?'확인':'보완 필요'}</span></label></li>`).join('')}</ul></section>`).join(''):'<p class="not-applicable">동의 항목이 없는 고지서입니다. 동의란 점검은 해당사항 없습니다.</p>'}</div><ul>${items.map(([title,status,description])=>`<li><div><strong>${title}</strong> <span class="pill ${['확인','해당 없음','반영'].includes(status)?'':'pending'}">${status}</span></div><p>${description}</p></li>`).join('')}</ul>
- <a href="${reference}" target="_blank" rel="noopener">개인정보 보호법 원문</a></section>
- <section class="panel preview-panel final-preview"><div class="panelhead"><h2>A4 최종본</h2></div><div class="actions export">
- <button data-go="4">← 문서 수정</button><button data-page-preview>쪽 미리보기</button><button data-pdf>PDF 저장</button><button data-hwpx>한글(HWPX) 저장</button><button class="primary" data-print>즉시 인쇄</button>
- </div><p class="notice" id="output-status" role="status"></p><div id="preview-docs">${html}</div></section></div>`;
+ <p class="muted">자동 점검은 기재 여부를 확인합니다. 법적 근거와 동의 범위의 적정성은 담당자가 확인해 주세요.</p>
+ <section class="human-review"><h3>담당자가 확인할 사항</h3><ul>${pending.map(row).join('')}</ul></section>
+ <details class="review-checks" data-audit-kind="fields"><summary><strong>${items[0][0]}</strong> ${pill(items[0][1])}</summary><p>${items[0][2]}</p><div class="consent-audit">${auditBody(false)}</div></details>
+ <details class="review-checks" data-audit-kind="choices"><summary><strong>동의란 구분</strong> ${pill(items[1][1])}</summary><p>${items[1][2]}</p><div class="choice-audit">${auditBody(true)}</div></details>
+ <ul>${items.slice(2).filter(([,status])=>['확인','해당 없음','반영'].includes(status)).map(row).join('')}</ul><a href="${reference}" target="_blank" rel="noopener">개인정보 보호법 원문</a></section>
+ <section class="panel preview-panel final-preview"><div class="panelhead"><h2>A4 최종본</h2></div><div class="actions export"><button data-go="4">← 문서 수정</button><button data-pdf>PDF 저장</button><button data-hwpx>한글(HWPX) 저장</button><button class="primary" data-print>즉시 인쇄</button></div><p class="notice" id="output-status" role="status"></p>${previewMarkup(html)}</section></div>`;
 }
 
 function refreshPreview(){
  const preview=document.querySelector('#preview-docs');
- if(preview)preview.innerHTML=documentHTML(documentEditing);
+ if(preview){preview.innerHTML=documentHTML(documentEditing);scheduleA4Preview();}
 }
 
 function render(){
+ const before=new Map([...document.querySelectorAll('[data-item-row]')].map(n=>[n.dataset.itemRow,n.getBoundingClientRect()]));
+ if(step<4){clearTimeout(a4PreviewTimer);a4PreviewVersion++;}
  document.querySelector('#homeNav').toggleAttribute('aria-current',step===0);
  document.querySelector('#workNav').toggleAttribute('aria-current',step!==0);
  if(!step){app.innerHTML=home();return;}
- if(step===5){app.innerHTML=finalPage();return;}
+ if(step===5){app.innerHTML=finalPage();scheduleA4Preview();return;}
  const body=[basics,classify,grounds,output][step-1]();
  const all=entries();
  const issues=all.filter(({i})=>needsItemReview(i));
@@ -744,6 +791,8 @@ function render(){
  app.innerHTML=`<div class="trail"><button data-go="0">홈</button> / 문서 작성</div><div class="title"><h1>${labels[step-1]}</h1><p>${descriptions[step-1]}</p></div><nav class="stepper" aria-label="작성 단계">${labels.map((name,n)=>`<button data-go="${n+1}" ${step===n+1?'aria-current="step"':''} ${n+1>reached||(n===3&&unresolvedRnn().length)?'disabled':''}><span class="stepnum">${String(n+1).padStart(2,'0')}</span>${name}</button>`).join('')}</nav><div class="workspace ${step===4?'wide-output':''}"><div class="stack">${body}<div class="notice" id="message" role="status">${safe(step===3&&state.groundDraft?'':message)}</div><div class="bar"><button data-go="${step-1}">← ${step===1?'홈으로':'이전 단계'}</button>${step<4?`<button class="primary" data-next ${step===3&&unresolvedRnn().length?'disabled aria-describedby="rrn-block"':''}>${step===2?'분류 확정 후 다음':step===3?'문서 작성으로':'다음 단계'} →</button>`:step===4?'<button class="primary" data-finish>완성하기 →</button>':''}</div></div>${step===4?'':`<aside class="side"><h2>${step===1?'입력 점검':'검토 현황'}</h2><span class="pill">등록 항목 <span id="count">${all.length}</span>개</span><hr><p id="risk">${riskHTML(issues,missing)}</p><p class="muted">분류 제안과 법령 근거는 담당자가 직접 확인합니다.</p><button data-guide>이용 안내</button></aside>`}</div>`;
  const selectAll=document.querySelector('[data-scope-all]');if(selectAll){const checks=[...document.querySelectorAll('[data-scope]')];selectAll.indeterminate=checks.some(c=>c.checked)&&checks.some(c=>!c.checked);}
  if(step===1&&basicsChecked)showBasicsIssues();
+ if(step===4)scheduleA4Preview();
+ if(!matchMedia('(prefers-reduced-motion: reduce)').matches)for(const node of document.querySelectorAll('[data-item-row]')){const old=before.get(node.dataset.itemRow);if(!old)continue;const now=node.getBoundingClientRect(),x=old.left-now.left,y=old.top-now.top;if(Math.abs(x)+Math.abs(y)>1)node.animate([{transform:`translate(${x}px,${y}px)`,backgroundColor:'#eaf1ff'},{transform:'translate(0,0)',backgroundColor:'transparent'}],{duration:320,easing:'cubic-bezier(.2,.7,.2,1)'});}
 }
 
 function contextualRisk({g,i}){
@@ -795,7 +844,7 @@ function invalidateItems(items){
  syncGrounds();
 }
 function add(key,name='',required=false){
- const i={id:id(),name:standardItemName(name),required};state.groups[key].items.push(i);return i;
+ const i={id:id(),name:standardItemName(name),required:key==='marketing'?false:required};state.groups[key].items.push(i);return i;
 }
 const quickTemplates = [
  {
@@ -1064,12 +1113,12 @@ function positionItemMenu(menu,trigger){const r=trigger.getBoundingClientRect(),
 function closeItemMenus(){document.querySelectorAll('.item-options').forEach(menu=>menu.hidden=true);document.querySelectorAll('[data-item-menu]').forEach(button=>button.setAttribute('aria-expanded','false'));}
 let itemDrag=null,touchDrag=null;
 function dragTarget(target){return target?.closest('[data-drop-group],[data-item-row]');}
-function validItemDrop(context,target){return target&&context?.group===(target.dataset.dropGroup||target.dataset.itemGroup);}
+function validItemDrop(context,target){if(!target||context?.group!==(target.dataset.dropGroup||target.dataset.itemGroup))return false;const item=getItem(context.id),category=target.closest('[data-drop-category]')?.dataset.dropCategory;return step!==2||!category||Boolean(item&&canChangeClassification(item,category));}
 function moveItemDrop(context,target,after=false){
  if(!validItemDrop(context,target))return false;
  const g=state.groups[context.group],item=g.items.find(i=>i.id===context.id);if(!item)return false;
  const category=target.closest('[data-drop-category]')?.dataset.dropCategory;
- if(step===2&&category&&entryClass({i:item})!==category)changeClassification(item,category);
+ if(step===2&&category&&entryClass({i:item})!==category&&!changeClassification(item,category))return false;
  const targetItem=g.items.find(i=>i.id===target.dataset.itemRow);
  if(targetItem&&targetItem!==item){
   if(step===1&&Boolean(item.required)!==Boolean(targetItem.required))return false;
@@ -1089,7 +1138,7 @@ document.addEventListener('keydown',e=>{
  const grip=e.target.closest('[data-drag-item]');
  if(grip&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)){
   e.preventDefault();const group=grip.dataset.dragGroup,g=state.groups[group],item=getItem(grip.dataset.dragItem);
-  if(step===2&&['ArrowLeft','ArrowRight'].includes(e.key)){const next=classificationGroups[(classificationGroups.indexOf(entryClass({i:item}))+(e.key==='ArrowRight'?1:3))%4];changeClassification(item,next);render();document.querySelector(`[data-drag-item="${item.id}"]`)?.focus();}
+  if(step===2&&['ArrowLeft','ArrowRight'].includes(e.key)){const allowed=classificationGroups.filter(c=>canChangeClassification(item,c));const next=allowed[(allowed.indexOf(entryClass({i:item}))+(e.key==='ArrowRight'?1:allowed.length-1))%allowed.length];changeClassification(item,next);render();document.querySelector(`[data-drag-item="${item.id}"]`)?.focus();}
   else if(['ArrowUp','ArrowDown'].includes(e.key)){const peers=g.items.filter(i=>step===2?entryClass({i})===entryClass({i:item}):Boolean(i.required)===Boolean(item.required));const index=peers.indexOf(item)+(e.key==='ArrowDown'?1:-1),target=peers[index];if(target)moveItemDrop({id:item.id,group},document.querySelector(`[data-item-row="${target.id}"]`),e.key==='ArrowDown');}
  }
  const picker=e.target.closest('.item-picker');if(!picker)return;const menu=picker.querySelector('.item-options'),trigger=picker.querySelector('[data-item-menu]');
@@ -1369,23 +1418,28 @@ async function createHwpx(body){
  let header=files['Contents/header.xml'];
  header=header.replace(/textColor="#(?:2E74B5|174DA1)"/g,'textColor="#2154C7"');
  header=header.replace(/<(hh:(?:left|right|top|bottom)Border) type="SOLID"[^>]*\/>/g,'<$1 type="SOLID" width="0.12 mm" color="#000000"/>');
+ const paraIds=[...header.matchAll(/<hh:paraPr id="(\d+)"/g)].map(m=>Number(m[1]));
+ const tableCenter=Math.max(...paraIds)+1,tableLeft=tableCenter+1,tableRight=tableCenter+2;
+ const tableParagraphs=[[20,tableCenter],[21,tableLeft],[23,tableRight]].map(([base,id])=>header.match(new RegExp('<hh:paraPr id="'+base+'"[\\s\\S]*?<\\/hh:paraPr>'))[0].replace('id="'+base+'"','id="'+id+'"').replace(/<hh:lineSpacing[^>]*\/>/g,'<hh:lineSpacing type="PERCENT" value="130" unit="HWPUNIT"/>')).join('');
+ header=header.replace(/(<hh:paraProperties itemCnt=")(\d+)(")/,(_,a,n,b)=>a+(Number(n)+3)+b).replace('</hh:paraProperties>',tableParagraphs+'</hh:paraProperties>');
  const charIds=[...header.matchAll(/<hh:charPr id="(\d+)"/g)].map(m=>Number(m[1]));
- const agencyStyle=Math.max(...charIds)+1,whiteUnderlineStyle=agencyStyle+1;
+ const agencyStyle=Math.max(...charIds)+1,whiteUnderlineStyle=agencyStyle+1,marketingStyle=agencyStyle+2;
  const agencyBase=header.match(/<hh:charPr id="7"[\s\S]*?<\/hh:charPr>/)[0],underlineBase=header.match(/<hh:charPr id="8"[\s\S]*?<\/hh:charPr>/)[0];
  const agency=agencyBase.replace('id="7"',`id="${agencyStyle}"`).replace(/height="\d+"/,'height="1500"').replace(/textColor="[^"]+"/,'textColor="#000000"');
  const underline=underlineBase.replace('id="8"',`id="${whiteUnderlineStyle}"`).replace(/textColor="[^"]+"/,'textColor="#FFFFFF"');
- files['Contents/header.xml']=header.replace(/(<hh:charProperties itemCnt=")(\d+)(")/,(_,a,n,b)=>a+(Number(n)+2)+b).replace('</hh:charProperties>',agency+underline+'</hh:charProperties>');
+ const marketing=agencyBase.replace('id="7"',`id="${marketingStyle}"`).replace(/height="\d+"/,'height="1000"');
+ files['Contents/header.xml']=header.replace(/(<hh:charProperties itemCnt=")(\d+)(")/,(_,a,n,b)=>a+(Number(n)+3)+b).replace('</hh:charProperties>',agency+underline+marketing+'</hh:charProperties>');
  const cellRenderer=(cell,isHeader)=>{
   const lines=[[]];
   function visit(node){
    if(node.nodeType===3){const style=isHeader?9:node.parentElement.closest('.doc-important')?7:cell.tagName==='TH'?9:0;const parts=node.textContent.split(/\r?\n/);parts.forEach((text,n)=>{if(n)lines.push([]);if(text)lines[lines.length-1].push(run(text,style));});}
    else if(node.nodeType===1){if(node.tagName==='BR')lines.push([]);else for(const child of node.childNodes)visit(child);}
   }
-  visit(cell);return lines.map(parts=>richParagraph(parts.join('')||run('',0),20)).join('');
+  visit(cell);return lines.map(parts=>richParagraph(parts.join('')||run('',0),tableCenter)).join('');
  };
  const choiceTable=(question,choices)=>{
   const widths=[28520,14000],texts=[question,choices];
-  const cells=texts.map((text,column)=>`<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="1" borderFillIDRef="1"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">${paragraph(text,column===0?21:23,column===0?0:9)}</hp:subList><hp:cellAddr colAddr="${column}" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${widths[column]}" height="1800"/><hp:cellMargin left="0" right="0" top="0" bottom="0"/></hp:tc>`).join('');
+  const cells=texts.map((text,column)=>`<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="1" borderFillIDRef="1"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">${paragraph(text,column===0?tableLeft:tableRight,column===0?0:9)}</hp:subList><hp:cellAddr colAddr="${column}" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${widths[column]}" height="1800"/><hp:cellMargin left="0" right="0" top="0" bottom="0"/></hp:tc>`).join('');
   return `<hp:p id="${nextId()}" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:tbl id="${nextId()}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="0" rowCnt="1" colCnt="2" cellSpacing="0" borderFillIDRef="1" noAdjust="0"><hp:sz width="42520" widthRelTo="ABSOLUTE" height="1800" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:tr>${cells}</hp:tr></hp:tbl></hp:run></hp:p>`;
  };
  const paragraphs=documents.flatMap(doc=>{let previous=null;return [...doc.querySelectorAll('h1,h3,table,p')].flatMap(node=>{
@@ -1407,7 +1461,7 @@ async function createHwpx(body){
    const note=node.matches('.doc-note');
    const text=node.matches('.doc-choice')?[...node.children].map(child=>child.textContent).join('   '):node.textContent;
    const align=title||node.matches('.doc-agency')?20:note?21:node.closest('.sign')?23:0;
-   const style=title?5:node.matches('.doc-agency')?agencyStyle:node.matches('h3,.doc-marketing')?7:0;
+   const style=title?5:node.matches('.doc-agency')?agencyStyle:node.matches('.doc-marketing')?marketingStyle:node.matches('h3')?7:0;
    return finish(text.split(/\r?\n/).map(line=>{preview.push(line);return paragraph(line,align,style);}));
   });});
  if(!paragraphs.length)throw new Error('No document to export');

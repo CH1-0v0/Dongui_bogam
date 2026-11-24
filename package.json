@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "build": "node scripts/build-cloudflare.cjs",
@@ -16,8 +16,9 @@
     "fast-xml-parser": "5.12.1"
   },
   "devDependencies": {
-    "wrangler": "4.168.0",
+    "esbuild": "0.28.2",
     "miniflare": "5.20261123.1-beta",
-    "esbuild": "0.28.2"
+    "pdfjs-dist": "6.5.438",
+    "wrangler": "4.168.0"
   }
 }

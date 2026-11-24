@@ -8,7 +8,7 @@ const routes={
 };
 const policy={
  'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer',
- 'Content-Security-Policy':"default-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
+ 'Content-Security-Policy':"default-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
 };
 const json=(data,status=200,headers={})=>Response.json(data,{status,headers:{...policy,'Cache-Control':'no-store',...headers}});
 const cookieName='dongui-csrf';
