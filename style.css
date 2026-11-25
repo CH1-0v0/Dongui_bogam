@@ -508,3 +508,5 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .child-choice>p{margin:0 0 12px}.child-choice .actions{margin-top:0}.child-choice legend{line-height:1.4}.child-choice{padding-top:12px}
 .doc .notice-section{border:1px solid #8e9eb5;padding:12px;margin-top:1.5em}.doc .notice-section .doc-notice-heading{border:0;margin:0 0 8px;padding:0}.doc .notice-section .doc-notice{margin:0}.doc .notice-section+.sign{margin-top:1.5em}
 .final-title{display:flex;align-items:center;justify-content:space-between;gap:16px}.final-title>button{flex:none}@media(max-width:570px){.final-title{flex-wrap:wrap}.final-title>button{margin-left:auto}}
+
+.workspace>.stack{grid-template-columns:minmax(0,1fr)}.workspace>.stack>*{min-width:0;max-width:100%}.law-search-panel [role="alert"]{display:block;white-space:normal;overflow-wrap:anywhere;word-break:normal}

@@ -22,6 +22,7 @@ export function inspectAiError(parsed){
  }
  visit(parsed);
  const message=texts.join(' '), reason=
+ /request\s+path\s+cannot\s+be\s+relayed/i.test(message)?'relay_path':
  /invalid.?api.?key|invalid.*token|unauthori[sz]ed|authentication|no (?:auth|user)|user not found/i.test(message)?'auth':
  /insufficient.*(?:credit|balance)|payment required/i.test(message)?'balance':
  /context.{0,40}(?:length|limit|window)|too (?:many|long)|maximum.*token|length.*exceed/i.test(message)?'context':

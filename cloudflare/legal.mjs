@@ -83,6 +83,7 @@ async function serviceFailure(response,isAI,transportStatus=response.status,secr
  else if(isAI&&[400,413,422].includes(status)&&context)advice='AI가 처리할 수 있는 입력 범위를 넘었습니다. 항목이나 설명을 줄여 다시 시도해 주세요.';
  else if(isAI&&status===400&&blocked)advice='AI 서비스가 요청 처리를 제한했습니다. 입력 내용과 서비스 이용 조건을 확인해 주세요.';
  else if(isAI&&[400,422].includes(status)&&bodyFormat!=='json')advice='AI 연결 과정에서 정상 API 형식이 아닌 오류 응답을 받았습니다. 연결 경로를 확인해 주세요.';
+ else if(isAI&&reason==='relay_path')advice='AI 요청을 전달하는 중 중계 경로에서 거부되었습니다. 잠시 후 다시 시도해 주세요.';
  else if(isAI&&[400,422].includes(status)&&reason==='privacy')advice='AI 서비스의 개인정보 보호 조건에 맞는 연결을 찾지 못했습니다. 보호 설정을 유지한 채 연결 설정을 확인해야 합니다.';
  else if(isAI&&[400,422].includes(status)&&reason==='request_validation')advice='AI 서비스가 요청 형식 검증을 거부했습니다. 서버의 요청 구성을 확인해야 합니다.';
  else if(isAI&&[400,422].includes(status)&&reason==='missing_error_message')advice='AI 서비스가 오류 응답에 거부 사유를 제공하지 않았습니다. 응답 구조를 확인해야 합니다.';
@@ -94,7 +95,7 @@ async function serviceFailure(response,isAI,transportStatus=response.status,secr
  let support='';
  if(isAI&&reason==='unrecognized_error'){try{support=await sealSupportText(message,secrets);}catch{}}
  const error=new ApiError(advice+' (오류 '+status+')'+(diagnostic?' [문의 코드: '+diagnostic+'; '+bodyFormat+'/'+reason+(inspection?'; 구조: '+inspection.shape+'; 코드: '+(inspection.codes.join(',')||'없음')+(reason==='unrecognized_error'?'; 단서: '+(inspection.keywords.join(',')||'알려진 오류 용어 없음'):''):'')+']':'')+(support?' [지원 코드: '+support+']':''),status===429?429:[408,504].includes(status)?504:502,status);
- error.requestKind=['auth','balance','context','blocked','privacy','region','model','routing','messages','output_limit','invalid_json','request_validation'].includes(reason)?reason:kind==='unknown'&&bodyFormat==='json'?'parameters':kind;error.parameter=parameter;throw error;
+ error.requestKind=['auth','balance','context','blocked','privacy','region','model','routing','messages','output_limit','invalid_json','request_validation','relay_path'].includes(reason)?reason:kind==='unknown'&&bodyFormat==='json'?'parameters':kind;error.parameter=parameter;throw error;
 }
 const lawCache=new Map(); // Isolate-only official-law cache, never stores submitted items or AI results.
 export class LegalApi {
@@ -159,6 +160,8 @@ export class LegalApi {
     try{const result=JSON.parse(choice.message.content.trim().replace(/^```(?:json)?\s*|\s*```$/g,''));if(!obj(result))throw Error();return result;}catch{const error=new ApiError('AI 답변이 비어 있거나 형식을 확인하지 못했습니다. 다시 시도하세요.',502);error.requestKind='format';throw error;}
    }catch(error){
     if(attempt===0&&deadline-Date.now()>1000){
+     // A relay-path failure precedes model generation. Preserve the entire request.
+     if(error.requestKind==='relay_path'){await new Promise(resolve=>setTimeout(resolve,250));continue;}
      if((error.upstreamStatus===400&&error.requestKind==='parameters')||[500,502,503,504,520,522,524].includes(error.upstreamStatus)||['format','stream'].includes(error.requestKind)){if(payload.provider.order)payload.provider.order=[...payload.provider.order.slice(1),payload.provider.order[0]];}
      if(error.upstreamStatus===400&&error.requestKind==='parameters'){
       // Preserve the model, privacy policy, prompt and output cap. Only optional

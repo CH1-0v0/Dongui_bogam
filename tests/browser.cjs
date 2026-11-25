@@ -33,6 +33,14 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   const candidate=(basisCode,type='collect')=>({...proof(basisCode),type,law:rules[basisCode].needsLaw?'시험법':'개인정보 보호법',article:rules[basisCode].needsLaw?'10':rules[basisCode].article,articleExcerpt:rules[basisCode].needsLaw?'테스트: 시험법 제10조 전체 원문':proof(basisCode).articleExcerpt,paragraph:'1',clause:rules[basisCode].needsLaw?'':rules[basisCode].clause,cite:rules[basisCode].needsLaw?'시험법 제10조 제1항':rules[basisCode].pipa,excerpt:'테스트 근거 원문',reason:'테스트: 해당 업무에 필요한 처리인지 검토합니다.',itemReviews:[{name:'성명',suggested:true,reason:'테스트: 업무상 본인 확인 필요성 검토'}],sourceUrl:'https://www.law.go.kr/',kind:'법률'});
   await stage3();await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();assert.match(await page.getByRole('alert').innerText(),/LAW_API_OC|AI 연결 설정/);
   console.log('PASS API failure is explicit, without pretending results are empty');
+  const longError='AI 요청 전달 오류 [지원 코드: D1.'+'A'.repeat(344)+']';
+  await page.route('**/api/law/search',r=>r.fulfill({status:502,json:{error:longError}}));
+  await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();
+  const overlapGeometry=await page.evaluate(()=>{const card=document.querySelector('.law-search-panel'),side=document.querySelector('.side');return {right:card.getBoundingClientRect().right,side:side.getBoundingClientRect().left,overflow:document.documentElement.scrollWidth>innerWidth};});
+  assert.ok(overlapGeometry.right<=overlapGeometry.side);assert.equal(overlapGeometry.overflow,false);
+  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.setViewportSize({width:1440,height:1100});
+  console.log('PASS long AI support codes wrap within the main panel without covering review status or overflowing mobile');
+
   await page.route('**/api/law/search',r=>r.fulfill({json:{candidates:[candidate('statutory'),candidate('contract'),candidate('provisionEmergency','provide')],rejected:[],note:'테스트 가상 응답'}}));
   await page.route('**/api/law/basis',r=>r.fulfill({json:proof(r.request().postDataJSON().basisCode)}));
   let lastApply;

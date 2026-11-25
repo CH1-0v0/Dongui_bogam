@@ -88,3 +88,11 @@ test('support diagnostics are encrypted and known credentials are removed before
  assert.equal(redactSupportText('Bearer arbitrary-secret'), 'Bearer [redacted]');
 });
 test('unrecognized API failures include an encrypted support code without exposing provider messages',async()=>{const a=new LegalApi(env,async()=>Response.json({error:{code:400,message:'Request refused test-sensitive-value'}},{status:400}));await assert.rejects(a.ai('synthetic',{}),e=>e.message.includes('지원 코드: D1.')&&!e.message.includes('test-sensitive-value'));});
+
+test('relay-path rejection retries the identical request once without stripping generation options or changing privacy',async()=>{
+ let calls=0;const requests=[];const api=new LegalApi(env,async(url,options)=>{calls++;requests.push({url,headers:options.headers,body:options.body});return calls===1?Response.json({error:{code:400,message:'Request path cannot be relayed'}},{status:400}):Response.json({choices:[{message:{content:'{"ok":true}'}}]});});
+ assert.deepEqual(await api.ai('synthetic',{}),{ok:true});assert.equal(calls,2);assert.deepEqual(requests[1],requests[0]);
+ const payload=JSON.parse(requests[1].body);assert.ok(payload.response_format);assert.ok(payload.reasoning);assert.equal(payload.provider.data_collection,'deny');
+ let failedCalls=0;const failed=new LegalApi(env,async()=>{failedCalls++;return Response.json({error:{code:400,message:'Request path cannot be relayed'}},{status:400});});
+ await assert.rejects(failed.ai('synthetic',{}),e=>e.requestKind==='relay_path'&&e.message.includes('중계 경로')&&!e.message.includes('지원 코드'));assert.equal(failedCalls,2);
+});
