@@ -490,6 +490,7 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .candidate-body{background:var(--white);padding:14px 16px}
 .candidate-body .source-citation{background:var(--soft);border-radius:6px;padding:8px 10px;color:var(--blue-dark);font-weight:700;margin:0 0 10px}
 .candidate-body .candidate-citation{font-size:17px;line-height:1.65;color:var(--ink);margin:8px 0}.candidate-body .candidate-reason{font-size:14px;line-height:1.8;margin:8px 0 14px}
+.candidate-block .source-disclosure .law-excerpt{font-size:calc(var(--step-body-size) - 1pt)}
 .candidate-body .source-disclosure>summary{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-weight:750}
 .candidate-body .ground-editor h4{background:var(--wash);border-left:3px solid var(--blue);padding:8px 10px;margin-top:18px;font-size:17px}
 @media(max-width:570px){.candidate-body{padding:12px}.candidate-block>summary .candidate-title{font-size:16px}}

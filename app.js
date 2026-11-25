@@ -911,6 +911,7 @@ async function go(n){
    if(g.enabled&&!g.items.length)add(key);
   }
  }
+ if(n===3&&lawSearch.inputSnapshot===undefined)lawSearch.inputSnapshot=lawInputSnapshot();
  basicsChecked=false;
  step=n;reached=Math.max(reached,Math.min(n,4));message='';render();window.scrollTo(0,0);
  if(n===1)scheduleSensitivity();
@@ -922,9 +923,15 @@ function feedback(text){
  const status=document.querySelector('#ground-status, #output-status')||document.querySelector('#message');
  if(status)status.textContent=text;
 }
+function lawInputSnapshot(){
+ return JSON.stringify(entries().map(e=>({group:e.key,id:e.i.id,name:e.i.name,classification:entryClass(e),purpose:e.g.purpose,period:e.g.period,recipient:e.g.recipient,outside:e.g.outside})).sort((a,b)=>a.id.localeCompare(b.id)));
+}
 function invalidateItems(items){
+ const inputSnapshot=lawInputSnapshot();
+ const hasBaseline=lawSearch.inputSnapshot!==undefined;
+ if(hasBaseline&&lawSearch.inputSnapshot===inputSnapshot)return;
  const keys=new Set(items.map(i=>i.id));
- lawSearch={busy:false,candidates:[],error:'',note:'입력 내용이 바뀌었습니다. 법령을 다시 검색하세요.',mode:lawSearch.mode,rejected:[],version:lawSearch.version+1};
+ lawSearch={busy:false,candidates:[],error:'',note:hasBaseline?'입력 내용이 바뀌었습니다. 법령을 다시 검색하세요.':'',mode:lawSearch.mode,rejected:[],version:lawSearch.version+1,...(hasBaseline?{inputSnapshot}:{})};
  state.grounds=state.grounds.map(b=>({...b,ids:b.ids.filter(key=>!keys.has(key))})).filter(b=>b.ids.length);
  if(state.groundDraft)state.groundDraft=null;
  state.edits={};reached=Math.min(reached,step);
