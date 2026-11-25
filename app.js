@@ -483,7 +483,7 @@ function candidateExcerpt(record){
 function candidateSource(record){
  const isPipa=LawBasis.isPipa(record.law);
  const rule=LawBasis.rules[record.basisCode];
- return `${!isPipa?`${rule?.pipa!==record.cite?`<p class="source-citation">${safe(rule?.pipa)}</p>`:''}<p><strong>${safe(record.cite||cite(record))}</strong></p><p>${safe(record.reason)}</p>`:''}<details class="source-disclosure"><summary>전문 보기</summary><blockquote class="law-excerpt">${candidateExcerpt(record)}</blockquote><a href="${safe(sourceLink(record.sourceUrl))}" target="_blank" rel="noopener noreferrer">법령 원문 보기 ↗</a></details>${['legitimate','provisionLegitimate'].includes(record.basisCode)?'<p class="legitimate-warning" role="note">정당한 이익이 정보주체의 권리보다 명백히 우선한다는 점은 개인정보처리자가 직접 입증해야 합니다.</p>':''}`;
+ return `${!isPipa?`${rule?.pipa!==record.cite?`<p class="source-citation">${safe(rule?.pipa)}</p>`:''}<p class="candidate-citation"><strong>${safe(record.cite||cite(record))}</strong></p><p class="candidate-reason">${safe(record.reason)}</p>`:''}<details class="source-disclosure"><summary>전문 보기</summary><blockquote class="law-excerpt">${candidateExcerpt(record)}</blockquote><a href="${safe(sourceLink(record.sourceUrl))}" target="_blank" rel="noopener noreferrer">법령 원문 보기 ↗</a></details>${['legitimate','provisionLegitimate'].includes(record.basisCode)?'<p class="legitimate-warning" role="note">정당한 이익이 정보주체의 권리보다 명백히 우선한다는 점은 개인정보처리자가 직접 입증해야 합니다.</p>':''}`;
 }
 function groundEditor(draft,inline=false){
  if(inline&&draft.candidateKey)return `<div class="candidate-editor ground-editor">${candidateSource(draft)}${draftScope(draft)}</div>`;

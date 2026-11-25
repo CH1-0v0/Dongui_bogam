@@ -481,3 +481,15 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 @media(max-width:570px){.preview-edit-actions{width:100%;justify-content:flex-end}.a4-page-nav{gap:5px}.a4-page-nav button{font-size:12px;padding:6px 8px}}
 .doc .signature-date{margin-bottom:2em}.doc .doc-agency{margin-top:calc(18px + 1em)}
 .class-item b,.item-picker button,.catalog-result strong,.candidate-title,.doc-text,.final-review p{word-break:keep-all;overflow-wrap:break-word}
+/* Reviewed laws have a distinct title band and clear expanded-content hierarchy. */
+.law-options-group>summary{background:var(--soft);padding:9px 12px;border-radius:7px;font-weight:800}
+.law-options-children .candidate-block{border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:8px;margin:10px 0;overflow:hidden}
+.law-options-children .candidate-block>summary{background:var(--wash);padding:12px 14px;color:var(--blue-dark);min-height:52px;align-items:flex-start}
+.candidate-block>summary .candidate-title{font-size:17px;font-weight:850;line-height:1.6}
+.candidate-block[open]>summary{border-bottom:1px solid var(--line)}
+.candidate-body{background:var(--white);padding:14px 16px}
+.candidate-body .source-citation{background:var(--soft);border-radius:6px;padding:8px 10px;color:var(--blue-dark);font-weight:700;margin:0 0 10px}
+.candidate-body .candidate-citation{font-size:17px;line-height:1.65;color:var(--ink);margin:8px 0}.candidate-body .candidate-reason{font-size:14px;line-height:1.8;margin:8px 0 14px}
+.candidate-body .source-disclosure>summary{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-weight:750}
+.candidate-body .ground-editor h4{background:var(--wash);border-left:3px solid var(--blue);padding:8px 10px;margin-top:18px;font-size:17px}
+@media(max-width:570px){.candidate-body{padding:12px}.candidate-block>summary .candidate-title{font-size:16px}}

@@ -15,6 +15,7 @@ test('native Workers fetch supports AI and canonical law verification without cr
   if(u.hostname==='openrouter.ai'){
    assert.equal(request.headers.get('Authorization'),'Bearer synthetic-runtime-key');
    if(u.pathname==='/redirect')return new Response(null,{status:302,headers:{Location:'https://credentials-must-not-arrive.invalid/'}});
+   assert.equal(request.method,'POST');assert.equal(request.headers.get('Content-Type'),'application/json');const body=await request.json();assert.equal(body.model,'openai/gpt-oss-120b');assert.ok(Number.isInteger(body.max_tokens)&&body.max_tokens>0);assert.ok(body.messages.every(m=>['system','user'].includes(m.role)&&typeof m.content==='string'));assert.equal(body.provider.data_collection,'deny');
    return Response.json({choices:[{message:{content:JSON.stringify({fixture:true})}}]});
   }
   assert.equal(u.hostname,'www.law.go.kr');assert.equal(u.searchParams.get('OC'),'synthetic-runtime-oc');assert.equal(request.headers.get('Authorization'),null);

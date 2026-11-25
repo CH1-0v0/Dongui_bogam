@@ -123,16 +123,21 @@ export class LegalApi {
  async ai(prompt,data,maxTokens=3000){
   if(!this.env.OPENROUTER_API_KEY)fail('AI 기능을 위해 서버에 OPENROUTER_API_KEY를 설정해 주세요.',503);
   const model=this.env.OPENROUTER_MODEL||'openai/gpt-oss-120b';
-  const payload={model,temperature:0.1,max_tokens:maxTokens,response_format:{type:'json_object'},provider:{data_collection:'deny',sort:'latency',require_parameters:true,allow_fallbacks:true},...(model.includes('gpt-oss')?{reasoning:{effort:'low',exclude:true}}:{}),messages:[{role:'system',content:prompt},{role:'user',content:JSON.stringify(data)}]};
+  const order=model==='openai/gpt-oss-120b'?['deepinfra','groq','cerebras']:null;
+  const payload={model,temperature:0.1,max_tokens:maxTokens,response_format:{type:'json_object'},provider:{data_collection:'deny',...(order?{order}:{sort:'latency'}),require_parameters:true,allow_fallbacks:true},...(model.includes('gpt-oss')?{reasoning:{effort:'low',exclude:true}}:{}),messages:[{role:'system',content:prompt},{role:'user',content:JSON.stringify(data)}]};
   const deadline=Date.now()+35000;
   for(let attempt=0;attempt<2;attempt++){
    try{
     const raw=await this.upstream('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+this.env.OPENROUTER_API_KEY,'Content-Type':'application/json','X-Title':'Dongui Bogam'},body:JSON.stringify(payload)},Math.min(25000,Math.max(1,deadline-Date.now())));
     let envelope;try{envelope=JSON.parse(raw);}catch{fail('AI 응답 형식을 확인하지 못했습니다. 다시 시도하세요.',502);}
     if(envelope?.error){const code=Number(envelope.error.code);if(Number.isInteger(code)&&code>=400&&code<=599)await serviceFailure(Response.json(envelope,{status:code}),true);fail('AI 서비스가 답변을 완료하지 못했습니다. 다시 시도하세요.',502);}
-    try{const result=JSON.parse(envelope.choices[0].message.content.trim().replace(/^```(?:json)?\s*|\s*```$/g,''));if(!obj(result))throw Error();return result;}catch{fail('AI 응답 형식을 확인하지 못했습니다. 다시 시도하세요.',502);}
+    const choice=envelope?.choices?.[0];
+    if(choice?.finish_reason==='content_filter')fail('AI 서비스가 응답을 제한했습니다. 입력 내용과 서비스 이용 조건을 확인해 주세요.',502);
+    if(choice?.finish_reason==='length')fail('AI 답변이 완료되기 전에 출력 한도에 도달했습니다. 항목이나 설명을 줄여 다시 시도하세요.',502);
+    try{const result=JSON.parse(choice.message.content.trim().replace(/^```(?:json)?\s*|\s*```$/g,''));if(!obj(result))throw Error();return result;}catch{const error=new ApiError('AI 답변이 비어 있거나 형식을 확인하지 못했습니다. 다시 시도하세요.',502);error.requestKind='format';throw error;}
    }catch(error){
     if(attempt===0&&deadline-Date.now()>1000){
+     if((error.upstreamStatus===400&&error.requestKind==='parameters')||[500,502,503,504,520,522,524].includes(error.upstreamStatus)||error.requestKind==='format'){if(payload.provider.order)payload.provider.order=[...payload.provider.order.slice(1),payload.provider.order[0]];}
      if(error.upstreamStatus===400&&error.requestKind==='parameters'){
       // Preserve the model, privacy policy, prompt and output cap. Only optional
       // generation settings change; official-law and JSON validation still run.
@@ -140,7 +145,7 @@ export class LegalApi {
       else{delete payload.response_format;delete payload.reasoning;delete payload.temperature;}
       continue;
      }
-     if([500,502,503,504,520,522,524].includes(error.upstreamStatus))continue;
+     if([500,502,503,504,520,522,524].includes(error.upstreamStatus)||error.requestKind==='format')continue;
     }
     throw error;
    }
