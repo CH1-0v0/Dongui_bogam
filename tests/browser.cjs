@@ -63,7 +63,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
  await page.route('**/api/law/apply',r=>{applyCalls++;const data=r.request().postDataJSON();lastApply=data;return r.fulfill({json:{...data,verified:true,pipaVerified:true,supportVerified:true,reviewConfirmed:Boolean(data.reviewToken)}});});
   await page.route('**/api/law/verify',r=>{verifyCalls++;const data=r.request().postDataJSON();const actual=rules[data.basisCode].needsLaw?{...data,verified:true,pipaVerified:true,supportVerified:true,excerpt:'테스트: 개별 법령 원문',kind:'법률',cite:'시험법 제10조 제1항'}:{...proof(data.basisCode)};return r.fulfill({json:actual});});
   await page.locator('[data-ai-law]').click();await page.locator('[data-use-law="0"]').waitFor();
-  assert.equal(await page.locator('.web-search-sources a').count(),1);assert.equal(await page.locator('.web-search-sources a').getAttribute('href'),'https://www.nts.go.kr/synthetic');assert.equal(await page.locator('.web-search-sources script').count(),0);assert.equal(await page.locator('[data-search-scope]').count(),0);
+  assert.equal(await page.locator('.web-search-sources').count(),0);assert.equal(await page.locator('[data-search-scope]').count(),0);
   assert.equal(await page.locator('.law-search-panel .law-result').count(),0);
   assert.equal(await page.locator('[data-ground-category="collect"] .law-result').count(),2);
   assert.equal(await page.locator('[data-ground-category="provide"] .law-result').count(),1);

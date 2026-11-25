@@ -436,6 +436,12 @@ class HttpTests(unittest.TestCase):
         self.srv.demo=False
 
 class SearchCacheTests(unittest.TestCase):
+    def test_verified_summary_excludes_rejected_proposals_from_display_count(self):
+        result=server.search_outcome([{}, {}, {}],[{'reason':'not_verified'},{'reason':'not_verified'}],5)
+        self.assertEqual(result['summary'],'확인된 근거는 총 3개입니다. 0개는 조회를 완료하지 못했고, 2개는 검증을 통과하지 못했습니다.')
+        self.assertEqual(result['counts']['checked'],5)
+        self.assertEqual(result['counts']['verified'],3)
+
     def setUp(self):
         with server.LAW_CACHE_LOCK:
             server.LAW_CACHE.clear()

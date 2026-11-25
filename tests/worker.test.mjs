@@ -1,3 +1,4 @@
+import {searchOutcome} from '../cloudflare/search-outcome.mjs';
 import {searchPayload,parseSearchResponse,officialSearchUrl} from '../cloudflare/web-search.mjs';
 import {sealSupportText,redactSupportText} from '../cloudflare/ai-support.mjs';
 import {inspectAiError} from '../cloudflare/ai-diagnostics.mjs';
@@ -163,4 +164,9 @@ test('web research uses bounded server search and accepts official citation anno
 test('web research evidence precedes candidate generation and the UI receives real citations',async()=>{
  const a=api();const calls=[];const original=a.ai.bind(a);a.ai=async(prompt,data,...rest)=>{calls.push(data);return original(prompt,data,...rest);};
  aiReply={candidates:[]};const result=await a.search({items:[item()]});assert.equal(calls.length,1);assert.match(calls[0].research.report,/합성 검색 자료/);assert.equal(result.searchSources[0].url,'https://www.law.go.kr/synthetic');
+});
+
+test('verified summary counts displayed grounds separately from rejected proposals',()=>{
+ const result=searchOutcome([{}, {}, {}],[{reason:'not_verified'},{reason:'not_verified'}],5);
+ assert.equal(result.summary,'확인된 근거는 총 3개입니다. 0개는 조회를 완료하지 못했고, 2개는 검증을 통과하지 못했습니다.');assert.equal(result.counts.checked,5);assert.equal(result.counts.verified,3);
 });
