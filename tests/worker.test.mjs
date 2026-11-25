@@ -1,3 +1,4 @@
+import {discoveryConfig,normalizeLawName,discoveryScope,rankEvidence,groundSelections,hasPermissionText} from '../cloudflare/evidence-discovery.mjs';
 import {searchOutcome} from '../cloudflare/search-outcome.mjs';
 import {searchPayload,parseSearchResponse,officialSearchUrl} from '../cloudflare/web-search.mjs';
 import {sealSupportText,redactSupportText} from '../cloudflare/ai-support.mjs';
@@ -8,7 +9,7 @@ import fs from 'node:fs';
 import worker,{failureDiagnostics} from '../cloudflare/worker.mjs';
 import {ApiError,LegalApi,reviewEvidenceFor,leadingNumber,parseXml,articleNode,validateContext,reviewMaterial,fingerprint,signReview,checkReview} from '../cloudflare/legal.mjs';
 import rules from '../basis-rules.json' with {type:'json'};
-const env={LAW_API_OC:'synthetic-oc',OPENROUTER_API_KEY:'synthetic-ai-key',AI_LIMITER:{limit:async()=>({success:true})},API_LIMITER:{limit:async()=>({success:true})},ASSETS:{fetch:async()=>new Response('synthetic public asset')}};
+const env={OPENROUTER_MODEL:'openai/gpt-oss-120b',LAW_API_OC:'synthetic-oc',OPENROUTER_API_KEY:'synthetic-ai-key',AI_LIMITER:{limit:async()=>({success:true})},API_LIMITER:{limit:async()=>({success:true})},ASSETS:{fetch:async()=>new Response('synthetic public asset')}};
 const base='https://dongui.example';
 const item=(classification='general',id='item-1')=>({id,name:classification==='general'?'성명':classification==='rnn'?'주민등록번호':'검증 항목',purpose:'합성 검증 목적',recipient:'',type:'collect',context:'collect',classification});
 const lawNames={'개인정보 보호법':'101','개인정보 보호법 시행령':'102','법령검증용법':'103'};
@@ -64,7 +65,7 @@ test('AI display and logs never include arbitrary provider text or arbitrary fie
 });
 
 test('interrupted AI response bodies retry once and never parse partial output',async()=>{for(const recover of [true,false]){let calls=0;const a=new LegalApi(env,async()=>{calls++;if(calls===2&&recover)return Response.json({choices:[{message:{content:'{"ok":true}'}}]});return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('{"choices":'));controller.error(new Error('synthetic disconnect'));}}));});if(recover)assert.deepEqual(await a.ai('synthetic',{}),{ok:true});else await assert.rejects(a.ai('synthetic',{}),e=>e.requestKind==='stream');assert.equal(calls,2);}});
-test('incomplete AI law candidates are explained as missing AI output, without asking the user to enter a law',async()=>{const a=new LegalApi(env);a.research=async()=>({report:'합성 자료',sources:[]});a.ai=async()=>({candidates:[{law:'',article:'15'},{law:'검증용법',article:''}]});const result=await a.search({items:[item()]});assert.equal(result.candidates.length,0);assert.equal(result.rejected.length,2);assert.ok(result.rejected.every(r=>r.message.includes('AI 제안')&&!r.message.includes('입력하세요')));});
+test('incomplete AI law candidates are explained as missing AI output, without asking the user to enter a law',async()=>{const a=new LegalApi(env);a.research=async()=>({report:'합성 자료',sources:[]});a.discover=async()=>({candidates:[{law:'',article:'15'},{law:'검증용법',article:''}]});const result=await a.search({items:[item()]});assert.equal(result.candidates.length,0);assert.equal(result.rejected.length,2);assert.ok(result.rejected.every(r=>r.message.includes('AI 제안')&&!r.message.includes('입력하세요')));});
 
 test('deleted article bodies and selected deleted paragraphs or clauses cannot be adopted',()=>{
  for(const marker of ['삭제 <2025. 1. 1.>','전문 삭제 <2025. 1. 1.>']){const root=parseXml(`<법령><조문단위><조문여부>조문</조문여부><조문번호>10</조문번호><조문제목>옛 제목</조문제목><조문내용>제10조(옛 제목) ${marker.replaceAll('<','&lt;').replaceAll('>','&gt;')}</조문내용></조문단위></법령>`);assert.throws(()=>articleNode(root,'10'),/현행|삭제/);}
@@ -110,18 +111,17 @@ test('search rejects unrelated official articles and never promotes uncertain it
 });
 
 test('candidate schema is retried once and never converted to unverified success',async()=>{
- const a=api();let calls=0;
- a.ai=async()=>++calls===1?{items:[]}:{candidates:[]};
+ const a=api();let calls=0;a.ai=async(_prompt,data)=>{if(!data.evidencePool)return {laws:[]};return ++calls===1?{items:[]}:{candidates:[]};};
  assert.equal((await a.search({items:[item()]})).candidates.length,0);assert.equal(calls,2);
- calls=0;a.ai=async()=>{calls++;return {items:[]};};
+ calls=0;a.ai=async(_prompt,data)=>{if(!data.evidencePool)return {laws:[]};calls++;return {items:[]};};
  await assert.rejects(()=>a.search({items:[item()]}),/후보 목록/);assert.equal(calls,2);
 });
 test('AI search verifies all returned proposals without a five-candidate cap',async()=>{
- const a=new LegalApi(env),checked=[];a.research=async()=>({report:'합성 자료',sources:[]});a.reviewEvidence=async(c,items)=>({review:{items:items.map(i=>({...i,verdict:'possible',explanation:'합성 검토',checks:[]}))}});a.ai=async prompt=>{assert.match(prompt,/후보 개수에 별도 제한을 두지 마라/);return {candidates:Array.from({length:7},(_,n)=>({law:'검증용법',article:String(n+1),type:'collect',basisCode:'statutory'}))};};a.verify=async c=>{checked.push(c.article);return {...c,verified:true};};
+ const a=new LegalApi(env),checked=[];a.research=async()=>({report:'합성 자료',sources:[]});a.reviewEvidence=async(c,items)=>({review:{items:items.map(i=>({...i,verdict:'possible',explanation:'합성 검토',checks:[]}))}});a.discover=async()=>{return {candidates:Array.from({length:7},(_,n)=>({law:'검증용법',article:String(n+1),type:'collect',basisCode:'statutory'}))};};a.verify=async c=>{checked.push(c.article);return {...c,verified:true};};
  const result=await a.search({items:[item()]});assert.deepEqual(checked,['1','2','3','4','5','6','7']);assert.equal(result.candidates.length,7);assert.equal(result.limit,null);assert.equal(result.limited,false);assert.equal(result.counts.checked,7);
 });
 test('search distinguishes no proposals, unverified suggestions, unavailable services and partial success',async()=>{
- for(const mode of ['none','invalid','timeout','partial']){const a=new LegalApi(env);a.research=async()=>({report:'합성 자료',sources:[]});a.reviewEvidence=async(c,items)=>({review:{items:items.map(i=>({...i,verdict:'possible',explanation:'합성 검토',checks:[]}))}});a.ai=async()=>({candidates:mode==='none'?[]:[{law:'검증용법',article:'10',type:'collect',basisCode:'statutory'},...(mode==='partial'?[{law:'검증용법',article:'11',type:'collect',basisCode:'statutory'}]:[])]});a.verify=async c=>{if(mode==='partial'&&c.article==='10')return {...c,verified:true};throw new ApiError('synthetic verification failure',mode==='invalid'?422:504);};const result=await a.search({items:[item()]});assert.equal(result.outcome,{none:'no_candidates',invalid:'unverified',timeout:'unavailable',partial:'partial'}[mode]);if(mode==='none')assert.match(result.summary,/同意|동의만 받으면 된다는 뜻은 아닙니다/);if(mode==='timeout')assert.equal(result.rejected[0].reason,'timeout');if(mode==='partial')assert.deepEqual(result.counts,{checked:2,verified:1,unavailable:1,excluded:0});}
+ for(const mode of ['none','invalid','timeout','partial']){const a=new LegalApi(env);a.research=async()=>({report:'합성 자료',sources:[]});a.reviewEvidence=async(c,items)=>({review:{items:items.map(i=>({...i,verdict:'possible',explanation:'합성 검토',checks:[]}))}});a.discover=async()=>({candidates:mode==='none'?[]:[{law:'검증용법',article:'10',type:'collect',basisCode:'statutory'},...(mode==='partial'?[{law:'검증용법',article:'11',type:'collect',basisCode:'statutory'}]:[])]});a.verify=async c=>{if(mode==='partial'&&c.article==='10')return {...c,verified:true};throw new ApiError('synthetic verification failure',mode==='invalid'?422:504);};const result=await a.search({items:[item()]});assert.equal(result.outcome,{none:'no_candidates',invalid:'unverified',timeout:'unavailable',partial:'partial'}[mode]);if(mode==='none')assert.match(result.summary,/同意|동의만 받으면 된다는 뜻은 아닙니다/);if(mode==='timeout')assert.equal(result.rejected[0].reason,'timeout');if(mode==='partial')assert.deepEqual(result.counts,{checked:2,verified:1,unavailable:1,excluded:0});}
 });
 test('official memory cache expires metadata after five minutes and versioned bodies after an hour',async()=>{
  const original=Date.now;let clock=Date.parse('2026-11-25T12:00:00Z');Date.now=()=>clock;
@@ -163,7 +163,7 @@ test('web research uses bounded server search and accepts official citation anno
 });
 test('web research evidence precedes candidate generation without returning unused excerpts to the UI',async()=>{
  const a=api();const calls=[];const original=a.ai.bind(a);a.ai=async(prompt,data,...rest)=>{calls.push(data);return original(prompt,data,...rest);};
- aiReply={candidates:[]};const result=await a.search({items:[item()]});assert.equal(calls.length,1);assert.match(calls[0].research.report,/합성 검색 자료/);assert.equal(calls[0].research.sources[0].url,'https://www.law.go.kr/synthetic');assert.equal(result.searchSources,undefined);
+ aiReply={candidates:[]};const result=await a.search({items:[item()]});assert.equal(calls.length,2);assert.deepEqual(calls[1].evidencePool,[]);assert.match(calls[0].research.report,/합성 검색 자료/);assert.equal(calls[0].research.sources[0].url,'https://www.law.go.kr/synthetic');assert.equal(result.searchSources,undefined);
 });
 
 test('verified summary counts displayed grounds separately from rejected proposals',()=>{
@@ -198,4 +198,32 @@ test('DRF JSON legal body order and branched clause labels survive separate numb
  const a=new LegalApi({...env,LAW_API_OC:'branch-json-'+crypto.randomUUID()},async url=>{const u=new URL(url);if(u.pathname.endsWith('lawSearch.do'))return Response.json({LawSearch:{law:{법령명한글:'합성법',법령일련번호:'8811',시행일자:'20200101',법령구분명:'대통령령'}}});return Response.json({법령:{조문:{조문단위:{호:[{호내용:'3의6. [합성] 진료기록 기록 사무',호번호:'3.',호가지번호:'6'},{호내용:'3의7. [합성] 인증 사무',호번호:'3.'}],조문여부:'조문',조문번호:'42',조문가지번호:'2',조문내용:'[합성] 민감정보 처리 요건과 주체'}}}});});
  const cite=await a.citation({law:'합성법',article:'42의2',clause:'3의6'});assert.match(cite.cite,/제3호의6$/);assert.match(cite.excerpt,/진료기록/);assert.ok(cite.articleExcerpt.startsWith('[합성] 민감정보 처리 요건과 주체'));
  const doc=await a.articles({law:'합성법',mst:'8811'});assert.deepEqual(doc.articles[0].clauses.map(c=>c.value),['3의6','3의7']);
+});
+
+test('discovery ranks real source articles and constrains selections to supplied IDs',()=>{
+ const scope=discoveryScope({items:[{...item(),purpose:'강사료 지급 및 원천징수'}]});assert.ok(scope.laws.includes('소득세법'));
+ const pool=rankEvidence([{value:'145',title:'기타소득 원천징수',text:'[합성] 지급 원천징수'},{value:'112',title:'양도소득세',text:'[합성] 다른 업무'}],scope.terms,'소득세법','123',0);
+ assert.equal(pool[0].article,'145');assert.ok(!pool.some(e=>e.article==='112'));
+ const result=groundSelections([{evidenceId:pool[0].id,article:'999',law:'가짜',basisCode:'statutory'},{evidenceId:'invented',law:'가짜',article:'1',basisCode:'statutory'}],pool,rules);
+ assert.equal(result[0].article,'145');assert.equal(result[0].law,'소득세법');assert.ok(result[1].discoveryError);
+ const mapped=groundSelections([{evidenceId:pool[0].id,permission:'general',type:'collect'},{evidenceId:pool[0].id,permission:'rnn',type:'collect'}],pool,rules);assert.equal(mapped[0].basisCode,'statutory');assert.equal(mapped[1].basisCode,'residentLaw');
+ assert.equal(normalizeLawName('보건복지부령(의료법 시행령)'),'의료법 시행령');
+});
+test('clinical discovery includes identifier permission sources separately from medical records',()=>{
+ const scope=discoveryScope({items:[{...item('rnn'),purpose:'환자 진료기록부 작성'}]});
+ const pool=rankEvidence([{value:'22',title:'진료기록부',text:'[합성] 진료기록부 작성'},{value:'42의2',title:'민감정보 및 고유식별정보의 처리',text:'[합성] 주민등록번호 진료기록 사무'}],scope.terms,'의료법 시행령','123',1);
+ assert.equal(pool.length,2);assert.ok(pool.some(e=>e.article==='42의2'));
+ assert.ok(!JSON.stringify(discoveryConfig).includes('145'));
+});
+
+test('general tax duties do not substitute for explicit identifier permission',()=>{
+ assert.equal(hasPermissionText({basisCode:'residentLaw',articleExcerpt:'[합성] 세액을 원천징수한다.'}),false);
+ assert.equal(hasPermissionText({basisCode:'residentLaw',articleExcerpt:'[합성] 주민등록번호를 처리할 수 있다.'}),true);
+ assert.equal(hasPermissionText({basisCode:'sensitiveLaw',articleExcerpt:'[합성] 민감정보를 처리할 수 있다.'}),true);
+ assert.equal(hasPermissionText({basisCode:'statutory',articleExcerpt:'[합성] 원천징수한다.'}),true);
+});
+
+test('GPT-6 Luna routing omits unsupported temperature while keeping privacy and JSON requirements',async()=>{
+ const a=new LegalApi({...env,OPENROUTER_MODEL:'openai/gpt-6-luna'},async(_url,options)=>{const p=JSON.parse(options.body);assert.equal(p.temperature,undefined);assert.equal(p.reasoning.effort,'low');assert.equal(p.provider.data_collection,'deny');assert.equal(p.provider.require_parameters,true);assert.equal(p.response_format.type,'json_object');return Response.json({choices:[{message:{content:'{"ok":true}'}}]});});
+ assert.deepEqual(await a.ai('합성 검증',{}),{ok:true});assert.equal(searchPayload('openai/gpt-6-luna',{}).reasoning.effort,'low');
 });

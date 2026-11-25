@@ -1,6 +1,6 @@
 import config from './web-search.json' with {type:'json'};
 export function officialSearchUrl(value){try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)&&!u.username&&!u.password&&(!u.port||['80','443'].includes(u.port))&&config.domains.some(d=>u.hostname===d||u.hostname.endsWith('.'+d))?u.href:'';}catch{return '';}}
-export function searchPayload(model,context){return {model,instructions:config.instructions,input:JSON.stringify(context),tools:[{...config.tool,parameters:{...config.tool.parameters,allowed_domains:config.domains}}],max_tool_calls:3,max_output_tokens:config.max_output_tokens,...(model.includes('gpt-oss')?{reasoning:{effort:'low'}}:{}),provider:{data_collection:'deny'}};}
+export function searchPayload(model,context){return {model,instructions:config.instructions,input:JSON.stringify(context),tools:[{...config.tool,parameters:{...config.tool.parameters,allowed_domains:config.domains}}],max_tool_calls:3,max_output_tokens:config.max_output_tokens,...((model.includes('gpt-oss')||/^openai\/gpt-[56](?:[.-]|$)/.test(model))?{reasoning:{effort:'low'}}:{}),provider:{data_collection:'deny'}};}
 export const retrySearchTokens=config.retry_output_tokens;
 export function searchFailureCode(envelope){
  if(!envelope||typeof envelope!=='object'||Array.isArray(envelope))return 'format';

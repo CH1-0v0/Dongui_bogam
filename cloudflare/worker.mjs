@@ -30,7 +30,7 @@ export default {async fetch(request,env,ctx){
  try{
   if(path==='/api/status'&&request.method==='GET'){
    const old=cookieToken(request),csrfToken=validToken(old)?old:nonce();
-   return json({aiConfigured:Boolean(env.OPENROUTER_API_KEY),lawConfigured:Boolean(env.LAW_API_OC),demoAvailable:false,model:env.OPENROUTER_MODEL||'openai/gpt-oss-120b',app:'dongui',apiVersion:8,csrfToken},200,{'Set-Cookie':`${cookieName}=${csrfToken}; Path=/; HttpOnly; SameSite=Strict${url.protocol==='https:'?'; Secure':''}`});
+   return json({aiConfigured:Boolean(env.OPENROUTER_API_KEY),lawConfigured:Boolean(env.LAW_API_OC),demoAvailable:false,model:env.OPENROUTER_MODEL||'openai/gpt-6-luna',app:'dongui',apiVersion:8,csrfToken},200,{'Set-Cookie':`${cookieName}=${csrfToken}; Path=/; HttpOnly; SameSite=Strict${url.protocol==='https:'?'; Secure':''}`});
   }
   if(path.startsWith('/api/')){
    if(!routes[path])return json({error:'요청한 API가 없습니다.'},404);

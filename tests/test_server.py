@@ -354,17 +354,46 @@ class CandidateFormatTests(unittest.TestCase):
         return json.dumps({'choices':[{'finish_reason':finish,'message':{'content':content}}]}).encode()
     def test_malformed_then_valid_retries_without_inventing_candidates(self):
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}), patch.object(server,'request_bytes',side_effect=[self.envelope('{broken'),self.envelope('{"candidates":[],"note":""}')]) as call:
-            self.assertEqual(server.ai_candidates({'items':[]})['candidates'],[])
+            self.assertEqual(server.discovery_json('합성 후보 형식 검사', {'items':[]})['candidates'],[])
         self.assertEqual(call.call_count,2)
     def test_truncation_and_schema_failure_have_distinct_messages(self):
         for content,finish,expected in [('{','length','출력 한도'),('{}','stop','후보 목록')]:
             with self.subTest(finish=finish), patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}), patch.object(server,'request_bytes',return_value=self.envelope(content,finish)) as call:
-                with self.assertRaisesRegex(server.ApiError,expected):server.ai_candidates({'items':[]})
+                with self.assertRaisesRegex(server.ApiError,expected):server.discovery_json('합성 후보 형식 검사', {'items':[]})
                 self.assertEqual(call.call_count,2)
     def test_text_blocks_and_uppercase_fence(self):
         blocks=[{'type':'text','text':'```JSON\n{"candidates":[]}\n```'}]
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}),patch.object(server,'request_bytes',return_value=self.envelope(blocks)):
-            self.assertEqual(server.ai_candidates({'items':[]})['candidates'],[])
+            self.assertEqual(server.discovery_json('합성 후보 형식 검사', {'items':[]})['candidates'],[])
+
+class GroundedDiscoveryTests(unittest.TestCase):
+    def test_luna_omits_unsupported_temperature(self):
+        response=json.dumps({'choices':[{'message':{'content':'{"candidates":[]}'}}]}).encode()
+        with patch.dict(os.environ, {'OPENROUTER_API_KEY':'synthetic','OPENROUTER_MODEL':'openai/gpt-6-luna'}), patch.object(server,'request_bytes',return_value=response) as call:
+            server.discovery_json('합성 검증', {})
+        payload=json.loads(call.call_args.args[1])
+        self.assertNotIn('temperature',payload)
+        self.assertEqual(payload['reasoning']['effort'],'low')
+        self.assertEqual(payload['provider']['data_collection'],'deny')
+
+    def test_identifier_permission_requires_explicit_source_text(self):
+        self.assertFalse(server.has_permission_text({'basisCode':'residentLaw','articleExcerpt':'[합성] 세액을 원천징수한다.'}))
+        self.assertTrue(server.has_permission_text({'basisCode':'residentLaw','articleExcerpt':'[합성] 주민등록번호를 처리할 수 있다.'}))
+
+    def test_source_id_overrides_generated_article_and_missing_source_is_excluded(self):
+        context={'items':[{'name':'성명','purpose':'강사료 원천징수','classification':'general','type':'collect','context':'collect'}]}
+        row=server.ET.fromstring('<law><법령명한글>소득세법</법령명한글></law>')
+        root=server.ET.fromstring('<법령><조문단위><조문여부>조문</조문여부><조문번호>145</조문번호><조문제목>합성 원천징수</조문제목><조문내용>합성 기타소득 원천징수</조문내용></조문단위></법령>')
+        def choose(prompt, material, *args):
+            self.assertTrue(material['evidencePool'])
+            return {'candidates':[{'evidenceId':'L1-A145','law':'가짜','article':'999','permission':'general','type':'collect'}, {'evidenceId':'없는-id','article':'1','basisCode':'statutory'}]}
+        with patch.object(server,'web_research',return_value={'report':'합성','sources':[]}), patch.object(server,'resolve_law',return_value=(row,'123')), patch.object(server,'law_request',return_value=root), patch.object(server,'discovery_json',side_effect=choose):
+            result=server.ai_candidates(context)
+        self.assertEqual(result['candidates'][0]['article'],'145')
+        self.assertEqual(result['candidates'][0]['law'],'소득세법')
+        self.assertEqual(result['candidates'][0]['basisCode'],'statutory')
+        self.assertIn('discoveryError',result['candidates'][1])
+        self.assertEqual(server.normalize_discovery_law('보건복지부령(의료법 시행령)'), '의료법 시행령')
 
 class ContextBundleTests(unittest.TestCase):
     def setUp(self):
@@ -392,7 +421,7 @@ class ContextBundleTests(unittest.TestCase):
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}),patch.object(server,'request_bytes',return_value=json.dumps(response).encode()) as call:
             server.ai_candidates({'items':self.items})
         payload=json.loads(call.call_args.args[1]);prompt=payload['messages'][0]['content']
-        self.assertIn('소득세법',prompt);self.assertIn('주민등록번호',prompt);self.assertIn('구체적 처리 허용',prompt)
+        self.assertIn('evidencePool',prompt);self.assertIn('주민등록번호',prompt);self.assertIn('법정 의무',prompt)
 
 class HttpTests(unittest.TestCase):
     @classmethod
@@ -470,14 +499,16 @@ class HttpTests(unittest.TestCase):
                 if url.endswith('/responses'):
                     self.assertEqual(request['tools'][0]['type'],'openrouter:web_search')
                     return json.dumps({'status':'completed','output':[{'type':'message','content':[{'type':'output_text','text':'합성 자료: 시험법 제10조','annotations':[{'type':'url_citation','url':'https://www.law.go.kr/synthetic','title':'합성 출처'}]}]}]}).encode()
-                self.assertEqual(request['model'],'openai/gpt-oss-120b')
+                self.assertEqual(request['model'],server.MODEL)
                 self.assertEqual(headers['Authorization'],'Bearer server-private-token')
                 self.assertNotIn('server-private-token',payload.decode())
                 plan={'candidates':[{'law':'시험법','article':'10','paragraph':'1','clause':'1','basisCode':'statutory','type':'required','excerpt':'가짜 AI 원문'}]}
                 material=json.loads(request['messages'][1]['content'])
-                if 'officialEvidence' not in material:
-                    self.assertIn('research', material)
+                if 'research' in material:
                     self.assertIn('합성 자료', material['research']['report'])
+                elif 'evidencePool' in material:
+                    self.assertTrue(material['evidencePool'])
+                    self.assertEqual(material['evidencePool'][0]['article'], '10')
                 if 'officialEvidence' in material:
                     self.assertIn('테스트 호', str(material['officialEvidence']))
                     plan={'items':[{'id':i['id'],'verdict':'possible','explanation':'합성 검토','checks':[]} for i in material['items']]}
@@ -487,7 +518,7 @@ class HttpTests(unittest.TestCase):
                 return pipa_search if query['query'][0]=='개인정보 보호법' else SEARCH
             # Both fixture versions use MST 123; use the call order after the second search.
             return pipa_body if query.get('MST')==['456'] else BODY
-        data={'items':[{'name':'성명','type':'required','context':'collect','classification':'general'}]}
+        data={'items':[{'name':'성명','purpose':'테스트 호','type':'required','context':'collect','classification':'general'}]}
         with patch.dict(os.environ,{'LAW_API_OC':'server-private-oc','OPENROUTER_API_KEY':'server-private-token'}),patch.object(server,'request_bytes',side_effect=transport):
             status,body=self.call('/api/law/search',data)
         self.assertEqual(status,200,body)
@@ -495,7 +526,7 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(result['excerpt'],'테스트 호')
         self.assertTrue(result['pipaVerified'])
         self.assertNotIn(b'server-private',body)
-        self.assertEqual(len(seen),7)
+        self.assertEqual(len(seen),8)
 
     def test_catalog_http_needs_no_ai_key(self):
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':''}),patch.object(server,'law_request',return_value=server.xml(SEARCH)):
