@@ -52,19 +52,27 @@ async function readLimited(response,max=8_000_000){const reader=response.body?.g
 // Classify only known conditions. Never forward upstream text: it may echo keys or prompts.
 async function serviceFailure(response,isAI){
  const status=response.status,service=isAI?'AI 서비스':'국가법령정보센터';let message='';
- if(isAI){try{const parsed=JSON.parse(await readLimited(response,16384));message=typeof parsed?.error?.message==='string'?parsed.error.message:'';}catch{}}
+ if(isAI){try{const parsed=JSON.parse(await readLimited(response,16384));message=typeof parsed?.error?.message==='string'?parsed.error.message:'';
+ const raw=parsed?.error?.metadata?.raw;if(typeof raw==='string'){try{const provider=JSON.parse(raw);const detail=provider?.error?.message||provider?.message;if(typeof detail==='string')message+=' '+detail;}catch{message+=' '+raw;}}
+ }catch{}}
+ const context=/context|too (?:many|long)|maximum.*token|length.*exceed/i.test(message);
+ const blocked=/content.?policy|content.?filter|moderation|safety.?policy/i.test(message);
+ const auth=/invalid.*(?:api.?key|token)|unauthorized/i.test(message),balance=/insufficient.*(?:credit|balance)|payment required/i.test(message);
+ const parameter=/response_format|json_object|json.?schema|structured.?output/i.test(message)?'response_format':/reasoning|reasoning_effort/i.test(message)?'reasoning':/temperature/i.test(message)?'temperature':null;
  let advice;
- if([401,403].includes(status))advice=service+' 인증 또는 접근이 거부되었습니다. 서버의 키·이용 권한을 확인하세요.';
- else if(status===402)advice='AI 서비스 사용 잔액과 키 사용 한도를 확인하세요.';
+ if([401,403].includes(status)||isAI&&status===400&&auth)advice=service+' 인증 또는 접근이 거부되었습니다. 서버의 키·이용 권한을 확인하세요.';
+ else if(status===402||isAI&&status===400&&balance)advice='AI 서비스 사용 잔액과 키 사용 한도를 확인하세요.';
  else if(status===429)advice=service+' 호출 한도에 도달했습니다. 잠시 후 다시 시도하세요.';
  else if(isAI&&status===404&&/data.?policy|privacy|data.?collection|zero.?data|zdr/i.test(message))advice='AI 서비스의 개인정보 보호 조건에 맞는 연결을 찾지 못했습니다. AI 연결 설정을 확인해 주세요.';
  else if(isAI&&status===404)advice='현재 사용할 수 있는 AI 연결을 찾지 못했습니다. AI 모델과 연결 설정을 확인해 주세요.';
- else if(isAI&&[400,413,422].includes(status)&&/context|too (?:many|long)|maximum.*token|length.*exceed/i.test(message))advice='AI가 처리할 수 있는 입력 범위를 넘었습니다. 항목이나 설명을 줄여 다시 시도해 주세요.';
+ else if(isAI&&[400,413,422].includes(status)&&context)advice='AI가 처리할 수 있는 입력 범위를 넘었습니다. 항목이나 설명을 줄여 다시 시도해 주세요.';
+ else if(isAI&&status===400&&blocked)advice='AI 서비스가 요청 처리를 제한했습니다. 입력 내용과 서비스 이용 조건을 확인해 주세요.';
  else if(isAI&&[400,422].includes(status))advice='AI 서비스가 요청 설정을 처리하지 못했습니다. AI 연결 설정을 확인해 주세요.';
  else if([408,504].includes(status))advice=service+' 처리 시간이 초과되었습니다. 잠시 후 다시 시도하세요.';
  else if(status>=500)advice=service+'가 일시적으로 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요.';
  else advice=service+' 요청을 처리하지 못했습니다. 연결 설정을 확인해 주세요.';
- throw new ApiError(advice+' (오류 '+status+')',status===429?429:[408,504].includes(status)?504:502,status);
+ const error=new ApiError(advice+' (오류 '+status+')',status===429?429:[408,504].includes(status)?504:502,status);
+ error.requestKind=context?'context':blocked?'blocked':auth?'auth':balance?'balance':'parameters';error.parameter=parameter;throw error;
 }
 const lawCache=new Map(); // Isolate-only official-law cache, never stores submitted items or AI results.
 export class LegalApi {
@@ -124,7 +132,16 @@ export class LegalApi {
     if(envelope?.error){const code=Number(envelope.error.code);if(Number.isInteger(code)&&code>=400&&code<=599)await serviceFailure(Response.json(envelope,{status:code}),true);fail('AI 서비스가 답변을 완료하지 못했습니다. 다시 시도하세요.',502);}
     try{const result=JSON.parse(envelope.choices[0].message.content.trim().replace(/^```(?:json)?\s*|\s*```$/g,''));if(!obj(result))throw Error();return result;}catch{fail('AI 응답 형식을 확인하지 못했습니다. 다시 시도하세요.',502);}
    }catch(error){
-    if(attempt===0&&[500,502,503,504,520,522,524].includes(error.upstreamStatus)&&deadline-Date.now()>1000)continue;
+    if(attempt===0&&deadline-Date.now()>1000){
+     if(error.upstreamStatus===400&&error.requestKind==='parameters'){
+      // Preserve the model, privacy policy, prompt and output cap. Only optional
+      // generation settings change; official-law and JSON validation still run.
+      if(error.parameter)delete payload[error.parameter];
+      else{delete payload.response_format;delete payload.reasoning;delete payload.temperature;}
+      continue;
+     }
+     if([500,502,503,504,520,522,524].includes(error.upstreamStatus))continue;
+    }
     throw error;
    }
   }

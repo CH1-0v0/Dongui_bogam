@@ -1137,6 +1137,11 @@ function validateBasics(){
  app.querySelector(first.selector).focus();
  return false;
 }
+function startBlankConsent(){
+ clearTimeout(sensitivityTimer);state=newDraft();
+ lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};
+ freshLawPicker();editorOpen=false;documentEditing=false;finalDocument=null;basicsChecked=false;message='';tab='collect';reached=0;go(1);
+}
 function positionItemMenu(menu,trigger){const r=trigger.getBoundingClientRect(),height=window.visualViewport?.height||innerHeight,below=height-r.bottom-8,above=r.top-8,up=below<180&&above>below;menu.style.top=up?'auto':'calc(100% + 4px)';menu.style.bottom=up?'calc(100% + 4px)':'auto';menu.style.maxHeight=Math.min(180,Math.max(40,up?above:below))+'px';}
 function closeItemMenus(){document.querySelectorAll('.item-options').forEach(menu=>menu.hidden=true);document.querySelectorAll('[data-item-menu]').forEach(button=>button.setAttribute('aria-expanded','false'));}
 let itemDrag=null,touchDrag=null;
@@ -1184,14 +1189,14 @@ document.addEventListener('click',e=>{
  if(!e.target.closest('.item-picker'))closeItemMenus();
  const b=e.target.closest('button');if(!b)return;const d=b.dataset;
  if(d.previewZoom){const frame=document.querySelector('.a4-document-frame');frame.dataset.zoom=d.previewZoom==='fit'?1:Math.max(.5,Math.min(2,Math.round(((Number(frame.dataset.zoom)||1)+Number(d.previewZoom))*10)/10));fitA4Page();return;}
- if('newConsent' in d){state=newDraft();lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};freshLawPicker();editorOpen=false;documentEditing=false;finalDocument=null;basicsChecked=false;message='';tab='collect';reached=0;go(1);return;}
+ if('newConsent' in d){startBlankConsent();return;}
  if(d.previewMove){showA4Page(Number(document.querySelector('.a4-document-frame')?.dataset.currentPage||1)+Number(d.previewMove));return;}
  if(d.itemMenu){const menu=document.getElementById('item-options-'+d.itemMenu),open=menu.hidden;closeItemMenus();menu.hidden=!open;b.setAttribute('aria-expanded',String(open));if(open)positionItemMenu(menu,b);}
  if(d.selectItem){const select=document.querySelector(`[data-item-preset="${d.selectItem}"]`);select.value=d.value;select.dispatchEvent(new Event('change',{bubbles:true}));}
 
  if('retryClassification' in d)checkSensitivity(true);
  if('guide' in d)document.querySelector('#guide').showModal();
- if('start' in d)go(1);
+ if('start' in d){if(b.id==='workNav'){go(1);return;}if(hasDraftChanges()&&!confirm('현재 작성 중인 내용을 삭제하고 처음부터 새 동의서를 만드시겠습니까?'))return;startBlankConsent();return;}
  if(d.itemSuggestion){
   const input=b.closest('.item-row').querySelector('[data-name]');
   commitItemName(input,d.itemSuggestion).focus({preventScroll:true});
