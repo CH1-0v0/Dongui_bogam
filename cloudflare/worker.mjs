@@ -20,7 +20,7 @@ async function requestData(request){
  const length=Number(request.headers.get('Content-Length'));if(length>24000)throw new ApiError('요청 크기가 너무 큽니다.',413);
  let raw;const reader=request.body?.getReader();if(!reader)throw new ApiError('JSON 요청이 필요합니다.',400);let size=0,parts=[];try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>24000){await reader.cancel();throw new ApiError('요청 크기가 너무 큽니다.',413);}parts.push(value);}}finally{reader.releaseLock();}const data=new Uint8Array(size);let offset=0;for(const part of parts){data.set(part,offset);offset+=part.length;}raw=new TextDecoder().decode(data);try{const parsed=JSON.parse(raw);if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')throw Error();return parsed;}catch{throw new ApiError('JSON 객체가 필요합니다.',400);}
 }
-export default {async fetch(request,env){
+export default {async fetch(request,env,ctx){
  const url=new URL(request.url),path=url.pathname;
  try{
   if(path==='/api/status'&&request.method==='GET'){
@@ -39,7 +39,7 @@ export default {async fetch(request,env){
    if(!(await env.API_LIMITER.limit({key:ip})).success)return json({error:'요청 한도에 도달했습니다. 잠시 후 다시 시도하세요.'},429,{'Retry-After':'60'});
    if(aiPaths.has(path)&&!(await env.AI_LIMITER.limit({key:ip})).success)return json({error:'분당 AI 요청 한도에 도달했습니다. 잠시 후 다시 시도하세요.'},429,{'Retry-After':'60'});
    const data=await requestData(request);if(data.demo===true)return json({error:'운영 서버에서는 시연 모드를 사용할 수 없습니다.'},403);
-   return json(await routes[path](new LegalApi(env),data));
+   return json(await routes[path](new LegalApi(env,fetch,ctx,url.origin),data));
   }
   // Defense in depth: even if dist/ is misbuilt, sensitive paths cannot reach the asset binding.
   const publicFile=path==='/'||['/index.html','/app.js','/style.css','/law-basis.js','/basis-rules.json','/pdf-export.js','/hwpx-template.json'].includes(path)||/^\/export-assets\/[A-Za-z0-9._-]+\.(?:js|ttf|txt)$/.test(path);

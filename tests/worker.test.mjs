@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import worker from '../cloudflare/worker.mjs';
-import {LegalApi,parseXml,articleNode,validateContext,reviewMaterial,fingerprint,signReview,checkReview} from '../cloudflare/legal.mjs';
+import {ApiError,LegalApi,parseXml,articleNode,validateContext,reviewMaterial,fingerprint,signReview,checkReview} from '../cloudflare/legal.mjs';
 import rules from '../basis-rules.json' with {type:'json'};
 const env={LAW_API_OC:'synthetic-oc',OPENROUTER_API_KEY:'synthetic-ai-key',AI_LIMITER:{limit:async()=>({success:true})},API_LIMITER:{limit:async()=>({success:true})},ASSETS:{fetch:async()=>new Response('synthetic public asset')}};
 const base='https://dongui.example';
@@ -96,3 +96,36 @@ test('relay-path rejection retries the identical request once without stripping 
  let failedCalls=0;const failed=new LegalApi(env,async()=>{failedCalls++;return Response.json({error:{code:400,message:'Request path cannot be relayed'}},{status:400});});
  await assert.rejects(failed.ai('synthetic',{}),e=>e.requestKind==='relay_path'&&e.message.includes('중계 경로')&&!e.message.includes('지원 코드'));assert.equal(failedCalls,2);
 });
+
+test('AI search checks at most five ordered proposals even if the model ignores the limit',async()=>{
+ const a=new LegalApi(env),checked=[];a.ai=async prompt=>{assert.match(prompt,/최대 5개/);return {candidates:Array.from({length:7},(_,n)=>({law:'검증용법',article:String(n+1),type:'collect',basisCode:'statutory'}))};};a.verify=async c=>{checked.push(c.article);return {...c,verified:true};};
+ const result=await a.search({items:[item()]});assert.deepEqual(checked,['1','2','3','4','5']);assert.equal(result.candidates.length,5);assert.equal(result.limit,5);assert.equal(result.limited,true);assert.equal(result.counts.checked,5);
+});
+test('search distinguishes no proposals, unverified suggestions, unavailable services and partial success',async()=>{
+ for(const mode of ['none','invalid','timeout','partial']){const a=new LegalApi(env);a.ai=async()=>({candidates:mode==='none'?[]:[{law:'검증용법',article:'10',type:'collect',basisCode:'statutory'},...(mode==='partial'?[{law:'검증용법',article:'11',type:'collect',basisCode:'statutory'}]:[])]});a.verify=async c=>{if(mode==='partial'&&c.article==='10')return {...c,verified:true};throw new ApiError('synthetic verification failure',mode==='invalid'?422:504);};const result=await a.search({items:[item()]});assert.equal(result.outcome,{none:'no_candidates',invalid:'unverified',timeout:'unavailable',partial:'partial'}[mode]);if(mode==='none')assert.match(result.summary,/同意|동의만 받으면 된다는 뜻은 아닙니다/);if(mode==='timeout')assert.equal(result.rejected[0].reason,'timeout');if(mode==='partial')assert.deepEqual(result.counts,{checked:2,verified:1,unavailable:1,excluded:0});}
+});
+test('official memory cache expires metadata after five minutes and versioned bodies after an hour',async()=>{
+ const original=Date.now;let clock=Date.parse('2026-11-25T12:00:00Z');Date.now=()=>clock;
+ const e={...env,LAW_API_OC:'cache-ttl-'+crypto.randomUUID()};let calls=0;const fetcher=async()=>{calls++;return new Response('<법령><기본정보><법령명_한글>검증용법</법령명_한글></기본정보></법령>');};
+ try{await new LegalApi(e,fetcher).law('lawSearch.do',{query:'검증용법'});await new LegalApi(e,fetcher).law('lawSearch.do',{query:'검증용법'});assert.equal(calls,1);clock+=301000;await new LegalApi(e,fetcher).law('lawSearch.do',{query:'검증용법'});assert.equal(calls,2);
+ await new LegalApi(e,fetcher).law('lawService.do',{MST:'123',JO:'001000'});clock+=301000;await new LegalApi(e,fetcher).law('lawService.do',{MST:'123',JO:'001000'});assert.equal(calls,3);clock+=3300000;await new LegalApi(e,fetcher).law('lawService.do',{MST:'123',JO:'001000'});assert.equal(calls,4);
+ const fresh=new LegalApi(e,fetcher);fresh.forceFresh=true;await fresh.law('lawService.do',{MST:'123',JO:'001000'});assert.equal(calls,5);
+ }finally{Date.now=original;}
+});
+test('edge cache is credential-hashed, shared across module instances, and bypassed for fresh verification',async()=>{
+ const descriptor=Object.getOwnPropertyDescriptor(globalThis,'caches'),stored=new Map();Object.defineProperty(globalThis,'caches',{configurable:true,value:{default:{match:async request=>stored.get(request.url)?.clone(),put:async(request,response)=>{stored.set(request.url,response.clone());}}}});
+ let calls=0;const fetcher=async()=>{calls++;return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');};const e={...env,LAW_API_OC:'private-oc-'+crypto.randomUUID()};
+ try{await new LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'});assert.equal(stored.size,1);for(const [key,value]of stored){assert.ok(!key.includes(e.LAW_API_OC)&&!key.includes('공식법령'));assert.equal(value.headers.get('Cache-Control'),'public, max-age=300');}
+ const isolated=await import('../cloudflare/legal.mjs?edge='+crypto.randomUUID());await new isolated.LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'});assert.equal(calls,1);
+ await new isolated.LegalApi({...e,LAW_API_OC:'other-'+crypto.randomUUID()},fetcher).law('lawSearch.do',{query:'공식법령'});assert.equal(calls,2);
+ const fresh=new isolated.LegalApi(e,fetcher);fresh.forceFresh=true;await fresh.law('lawSearch.do',{query:'공식법령'});assert.equal(calls,3);
+ }finally{if(descriptor)Object.defineProperty(globalThis,'caches',descriptor);else delete globalThis.caches;}
+});
+test('concurrent official lookups coalesce but upstream failures are not cached',async()=>{
+ let calls=0;const e={...env,LAW_API_OC:'inflight-'+crypto.randomUUID()};const fetcher=async()=>{calls++;await new Promise(r=>setTimeout(r,15));return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');};await Promise.all([new LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'}),new LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'})]);assert.equal(calls,1);
+ let failed=0;const f={...env,LAW_API_OC:'failure-'+crypto.randomUUID()},failure=async()=>{failed++;return new Response('unavailable',{status:503});};for(let n=0;n<2;n++)await assert.rejects(new LegalApi(f,failure).law('lawSearch.do',{query:'공식법령'}));assert.equal(failed,2);
+});
+
+test('Korean midnight invalidates public-law cache even before TTL expires',async()=>{const original=Date.now;let clock=Date.parse('2026-11-25T14:59:59Z');Date.now=()=>clock;let calls=0;const e={...env,LAW_API_OC:'midnight-'+crypto.randomUUID()},fetcher=async()=>{calls++;return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');};try{await new LegalApi(e,fetcher).law('lawSearch.do',{query:'시험법'});clock+=2000;await new LegalApi(e,fetcher).law('lawSearch.do',{query:'시험법'});assert.equal(calls,2);}finally{Date.now=original;}});
+
+test('expired edge entries and cache storage failures never replace current official data',async()=>{const descriptor=Object.getOwnPropertyDescriptor(globalThis,'caches');let puts=0,calls=0;Object.defineProperty(globalThis,'caches',{configurable:true,value:{default:{match:async()=>new Response('<LawSearch><totalCnt>99</totalCnt></LawSearch>',{headers:{'X-Law-Expires':String(Date.now()-1)}}),put:()=>{puts++;throw Error('synthetic cache failure');}}}});try{const e={...env,LAW_API_OC:'stale-edge-'+crypto.randomUUID()},api=new LegalApi(e,async()=>{calls++;return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');});const root=await api.law('lawSearch.do',{query:'공식법령'});assert.equal(calls,1);assert.equal(puts,1);assert.ok(root);const bad=new LegalApi({...e,LAW_API_OC:'malformed-'+crypto.randomUUID()},async()=>Response.json({error:'upstream failed'}));await assert.rejects(bad.law('lawSearch.do',{query:'공식법령'}),e=>e.status===502);assert.equal(puts,1);}finally{if(descriptor)Object.defineProperty(globalThis,'caches',descriptor);else delete globalThis.caches;}});

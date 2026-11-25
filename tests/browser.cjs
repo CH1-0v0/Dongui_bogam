@@ -40,6 +40,14 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   assert.ok(overlapGeometry.right<=overlapGeometry.side);assert.equal(overlapGeometry.overflow,false);
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.setViewportSize({width:1440,height:1100});
   console.log('PASS long AI support codes wrap within the main panel without covering review status or overflowing mobile');
+  const outcomes=[
+   {outcome:'no_candidates',summary:'동의 외 적용 근거를 찾지 못했습니다. 법적 근거가 없거나 동의만 받으면 된다는 뜻은 아닙니다.',rejected:[]},
+   {outcome:'unverified',summary:'AI 제안이 공식 조문 검증을 통과하지 못했습니다. 법적 근거가 없다는 결론은 아닙니다.',rejected:[{law:'시험법',reason:'not_verified',message:'조문 불일치'}]},
+   {outcome:'unavailable',summary:'법령 조회를 완료하지 못해 근거가 있는지 판단할 수 없습니다.',rejected:[{law:'시험법',reason:'timeout',message:'조회 시간 초과'}]}
+  ];
+  for(const result of outcomes){await page.route('**/api/law/search',r=>r.fulfill({json:{...result,candidates:[],note:''}}));await page.locator('[data-ai-law]').click();await page.waitForFunction(()=>!document.querySelector('[data-ai-law]').disabled);assert.equal(await page.locator('.search-summary').innerText(),result.summary);if(result.outcome==='unavailable'){assert.equal(await page.getByText('조회하지 못한 법령 1건',{exact:true}).count(),1);assert.equal(await page.getByText('공식 검증에서 제외된 제안 1건',{exact:true}).count(),0);await page.locator('.law-search-panel').screenshot({path:'.test-output/search-incomplete.png'});}if(result.outcome==='unverified')assert.equal(await page.getByText('공식 검증에서 제외된 제안 1건',{exact:true}).count(),1);}
+  console.log('PASS search summaries distinguish missing proposals, rejected evidence and failed official lookups');
+
 
   await page.route('**/api/law/search',r=>r.fulfill({json:{candidates:[candidate('statutory'),candidate('contract'),candidate('provisionEmergency','provide')],rejected:[],note:'테스트 가상 응답'}}));
   await page.route('**/api/law/basis',r=>r.fulfill({json:proof(r.request().postDataJSON().basisCode)}));
@@ -260,6 +268,8 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   assert.equal(await page.locator('[data-item-preset]').last().inputValue(),'성명');
   console.log('PASS normalizing a direct item name on blur preserves document height and scroll position');
 
+  await stage3();await page.route('**/api/law/search',r=>r.fulfill({json:{candidates:Array.from({length:7},(_,n)=>({...candidate('contract'),article:String(n+1)})),rejected:[],note:'합성 초과 후보'}}));await page.locator('[data-ai-law]').click();await page.waitForFunction(()=>!document.querySelector('[data-ai-law]').disabled);assert.equal(await page.locator('[data-candidate]').count(),5);
+  console.log('PASS frontend accepts no more than five proposals per search');
   await stage3();await page.route('**/api/status',r=>r.abort('connectionrefused'));await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();assert.match(await page.getByRole('alert').innerText(),/로컬 API 서버와 연결/);
   assert.deepEqual(errors,[]);console.log('Browser acceptance checks passed, including optional AI review and stable loading layout');
  }finally{await browser.close();}

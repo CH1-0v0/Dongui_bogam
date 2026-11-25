@@ -307,8 +307,13 @@ async function lawRequest(path,data){
  let result;try{result=await response.json();}catch{throw new Error('응답을 읽지 못했습니다. server.py 터미널의 API 로그를 확인하세요.');}
  if(!response.ok){const error=new Error(result.error||'요청에 실패했습니다.');error.status=response.status;throw error;}return result;
 }
+function lawSearchDetails(){
+ const unavailable=lawSearch.rejected.filter(r=>['timeout','service_unavailable'].includes(r.reason));
+ const excluded=lawSearch.rejected.filter(r=>!['timeout','service_unavailable'].includes(r.reason));
+ return [[unavailable,'조회하지 못한 법령'],[excluded,'공식 검증에서 제외된 제안']].filter(([rows])=>rows.length).map(([rows,label])=>`<details><summary>${label} ${rows.length}건</summary>${rows.map(r=>`<p>${safe(r.law||'법령명 없는 AI 제안')} · ${safe(r.message)}</p>`).join('')}</details>`).join('');
+}
 function lawSearchPanel(){
- return `<section class="panel law-search-panel"><div class="panelhead"><div><h2>개인정보별로 적용할 근거를 선택하세요</h2></div></div><p>AI가 제안한 근거는 아래 개인정보 유형별로 표시됩니다. <strong>법령을 선택하고 항목을 체크한 뒤, 담당자 확인 후 적용하세요. 직접 추가한 근거는 필요할 때 AI 검토를 진행할 수 있습니다.</strong> 별도 근거를 적용하지 않은 일반 항목은 동의서로 진행합니다. 주민등록번호 등 별도 허용 요건이 있는 정보는 추가 확인이 필요합니다.</p><p class="muted">실제 개인정보는 입력하지 마세요. 조문의 존재와 업무에 적용할 수 있는지는 별도로 검토해야 합니다.</p><div class="actions"><button class="primary" data-ai-law ${lawSearch.busy?'disabled':''}>${lawSearch.busy?'AI가 근거를 찾고 있습니다…':'AI로 적용 근거 찾기'}</button><button data-add-ground>＋ 법령·처리 근거 직접 추가</button>${apiStatus?.demoAvailable?`<label class="field law-mode"><span>검색 방식</span><select data-law-mode ${lawSearch.busy?'disabled':''}><option value="live" ${lawSearch.mode==='live'?'selected':''}>실제 검색</option><option value="demo" ${lawSearch.mode==='demo'?'selected':''}>화면 시연</option></select></label>`:''}</div><p class="notice" role="status">${lawSearch.busy?'AI로 법률 근거로 찾으나, 담당자가 최종 검토하여 반영해야 합니다.':'필요한 항목에만 법령 근거를 적용하세요.'}</p>${lawSearch.mode==='demo'?'<p class="notice">시연 법령은 실제 원문을 확인하지 않아 적용할 수 없습니다.</p>':''}${lawSearch.error?`<div class="info warn" role="alert">${safe(lawSearch.error)}</div>`:''}${lawSearch.note?`<p class="muted">${safe(lawSearch.note)}</p>`:''}${lawSearch.rejected.length?`<details><summary>적용 법령에서 제외된 근거 ${lawSearch.rejected.length}건</summary>${lawSearch.rejected.map(r=>`<p>${safe(r.law||'법령명 없는 AI 제안')} · ${safe(r.message)}</p>`).join('')}</details>`:''}</section>`;
+ return `<section class="panel law-search-panel"><div class="panelhead"><div><h2>개인정보별로 적용할 근거를 선택하세요</h2></div></div><p>AI가 제안한 근거는 아래 개인정보 유형별로 표시됩니다. <strong>법령을 선택하고 항목을 체크한 뒤, 담당자 확인 후 적용하세요. 직접 추가한 근거는 필요할 때 AI 검토를 진행할 수 있습니다.</strong> 별도 근거를 적용하지 않은 일반 항목은 동의서로 진행합니다. 주민등록번호 등 별도 허용 요건이 있는 정보는 추가 확인이 필요합니다.</p><p class="muted">한 번에 최대 5개 근거를 검토합니다. 실제 개인정보는 입력하지 마세요. 조문의 존재와 업무에 적용할 수 있는지는 별도로 검토해야 합니다.</p><div class="actions"><button class="primary" data-ai-law ${lawSearch.busy?'disabled':''}>${lawSearch.busy?'AI가 근거를 찾고 있습니다…':'AI로 적용 근거 찾기'}</button><button data-add-ground>＋ 법령·처리 근거 직접 추가</button>${apiStatus?.demoAvailable?`<label class="field law-mode"><span>검색 방식</span><select data-law-mode ${lawSearch.busy?'disabled':''}><option value="live" ${lawSearch.mode==='live'?'selected':''}>실제 검색</option><option value="demo" ${lawSearch.mode==='demo'?'selected':''}>화면 시연</option></select></label>`:''}</div><p class="notice" role="status">${lawSearch.busy?'AI로 법률 근거로 찾으나, 담당자가 최종 검토하여 반영해야 합니다.':'필요한 항목에만 법령 근거를 적용하세요.'}</p>${lawSearch.mode==='demo'?'<p class="notice">시연 법령은 실제 원문을 확인하지 않아 적용할 수 없습니다.</p>':''}${lawSearch.error?`<div class="info warn" role="alert">${safe(lawSearch.error)}</div>`:''}${lawSearch.note?`<p class="search-summary ${['unavailable','partial'].includes(lawSearch.outcome)?'search-incomplete':'muted'}" role="status">${safe(lawSearch.note)}</p>`:''}${lawSearchDetails()}</section>`;
 }
 const candidateKey=(candidate,index)=>candidate?._key||lawSearch.version+':'+index;
 const candidateIdentity=c=>JSON.stringify([c.type,c.basisCode,c.law,c.article,c.paragraph,c.clause,c.mst,c.excerpt]);
@@ -319,17 +324,18 @@ async function findLaws(){
  lawSearch.candidateOpen??={};lawSearch.drafts??={};
  lawSearch.candidates.forEach((candidate,index)=>{candidate._key??=(version-1)+':'+index;lawSearch.candidateOpen[index]=false;});
  if(state.groundDraft?.candidateKey){lawSearch.drafts[state.groundDraft.candidateKey]=structuredClone(state.groundDraft);state.groundDraft=null;}
- Object.assign(lawSearch,{busy:true,error:'',rejected:[],note:''});render();
+ Object.assign(lawSearch,{busy:true,error:'',rejected:[],note:'',outcome:null});render();
  try{
   const result=await lawRequest('/api/law/search',{items,demo:lawSearch.mode==='demo'});
   if(version!==lawSearch.version)return;
-  for(const resultCandidate of result.candidates){
+  for(const resultCandidate of result.candidates.slice(0,5)){
    const existing=lawSearch.candidates.findIndex(c=>candidateIdentity(c)===candidateIdentity(resultCandidate));
    if(existing>=0){const key=lawSearch.candidates[existing]._key;lawSearch.candidates[existing]={...resultCandidate,_key:key};}
    else{const index=lawSearch.candidates.length;lawSearch.candidates.push({...resultCandidate,_key:version+':'+index});lawSearch.candidateOpen[index]=true;}
   }
   lawSearch.rejected=result.rejected||[];
-  lawSearch.note=result.note||(!result.candidates.length?'확인된 법령가 없습니다. 직접 근거를 선택하거나 처리 목적을 구체화해 다시 검색하세요.':'');
+  lawSearch.outcome=result.outcome||null;
+  lawSearch.note=result.summary||result.note||(!result.candidates.length?'이번 검색에서 확인된 근거가 없습니다. 법적 근거가 없다는 결론은 아니므로 처리 목적을 구체화하거나 직접 확인해 주세요.':'');
  }catch(error){if(version===lawSearch.version)lawSearch.error=apiErrorMessage(error);}
  finally{if(version===lawSearch.version){lawSearch.busy=false;if(step===3)render();}}
 }

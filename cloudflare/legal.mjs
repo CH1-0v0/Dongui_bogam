@@ -1,3 +1,4 @@
+import {searchOutcome} from './search-outcome.mjs';
 import {sealSupportText} from './ai-support.mjs';
 import {inspectAiError} from './ai-diagnostics.mjs';
 // Cloudflare-native asynchronous adapter. No local Python process or filesystem.
@@ -97,11 +98,13 @@ async function serviceFailure(response,isAI,transportStatus=response.status,secr
  const error=new ApiError(advice+' (오류 '+status+')'+(diagnostic?' [문의 코드: '+diagnostic+'; '+bodyFormat+'/'+reason+(inspection?'; 구조: '+inspection.shape+'; 코드: '+(inspection.codes.join(',')||'없음')+(reason==='unrecognized_error'?'; 단서: '+(inspection.keywords.join(',')||'알려진 오류 용어 없음'):''):'')+']':'')+(support?' [지원 코드: '+support+']':''),status===429?429:[408,504].includes(status)?504:502,status);
  error.requestKind=['auth','balance','context','blocked','privacy','region','model','routing','messages','output_limit','invalid_json','request_validation','relay_path'].includes(reason)?reason:kind==='unknown'&&bodyFormat==='json'?'parameters':kind;error.parameter=parameter;throw error;
 }
+const officialLawPayload=root=>Boolean(find(root,'totalCnt')||find(root,'law')||find(root,'법령')||find(root,'기본정보')||find(root,'행정규칙')||find(root,'행정규칙명'));
+const lawPending=new Map();
 const lawCache=new Map(); // Isolate-only official-law cache, never stores submitted items or AI results.
 export class LegalApi {
- constructor(env,fetcher=fetch){this.env=env;this.fetcher=fetcher;this.memo=new Map();this.calls=0;}
+ constructor(env,fetcher=fetch,ctx,cacheOrigin='https://dongui-bogam.dongui-bogam.workers.dev'){this.env=env;this.fetcher=fetcher;this.ctx=ctx;this.cacheOrigin=cacheOrigin;this.memo=new Map();this.calls=0;this.cacheOperations=0;this.forceFresh=false;}
  async upstream(url,options={},timeout=10000){
-  if(++this.calls>40)fail('조회 범위가 넓습니다. 항목이나 검색 범위를 줄여 주세요.',429);
+  if(++this.calls>40||this.calls+this.cacheOperations>48)fail('조회 범위가 넓습니다. 항목이나 검색 범위를 줄여 주세요.',429);
   const service=new URL(url).hostname==='openrouter.ai'?'AI 서비스':'국가법령정보센터';
   // Workers' native fetch requires an unbound call. It supports only manual/follow.
   // Never follow upstream redirects carrying OC or Authorization credentials.
@@ -116,11 +119,32 @@ export class LegalApi {
  }
  async law(endpoint,params={}){
   const oc=this.env.LAW_API_OC;if(!oc)fail('법령 검색을 위해 서버에 LAW_API_OC를 설정해 주세요.',503);
-  // Credentials appear only in the upstream request, never in a public cache URL or a log.
-  const query=new URLSearchParams({OC:oc,target:'law',type:'JSON',...params});const key=endpoint+'?'+query;
-  const hit=lawCache.get(key);if(hit&&hit.expires>Date.now())return hit.root;
+  const query=new URLSearchParams({OC:oc,target:'law',type:'JSON',...params});query.sort();
+  // Hash credentials and parameters before using any persistent cache key. The day
+  // partitions freshness at Korean midnight; versioned bodies retain their MST.
+  const key=hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('v3|'+today()+'|'+endpoint+'?'+query)));
+  const ttl=endpoint==='lawService.do'&&params.MST?3600:300;
   if(this.memo.has(key))return this.memo.get(key);
-  const pending=(async()=>{const raw=await this.upstream('https://www.law.go.kr/DRF/'+endpoint+'?'+query);const root=parseLaw(raw);while(lawCache.size>=16||([...lawCache.values()].reduce((s,v)=>s+v.bytes,0)+raw.length*2>16_000_000&&lawCache.size))lawCache.delete(lawCache.keys().next().value);if(raw.length*2<=16_000_000)lawCache.set(key,{root,bytes:raw.length*2,expires:Date.now()+300000});return root;})();this.memo.set(key,pending);return pending;
+  const hit=lawCache.get(key);if(!this.forceFresh&&hit&&hit.expires>Date.now())return hit.root;
+  if(!this.forceFresh&&lawPending.has(key))return lawPending.get(key);
+  const cacheRequest=new Request(this.cacheOrigin+'/__law_cache/v3/'+key);
+  const remember=(raw,root,expires)=>{while(lawCache.size>=16||([...lawCache.values()].reduce((sum,v)=>sum+v.bytes,0)+raw.length*2>16_000_000&&lawCache.size))lawCache.delete(lawCache.keys().next().value);if(raw.length*2<=16_000_000)lawCache.set(key,{root,bytes:raw.length*2,expires});};
+  const pending=(async()=>{
+   const edge=globalThis.caches?.default;
+   const canUseEdge=()=>edge&&this.cacheOperations<24&&this.calls+this.cacheOperations<46;
+   if(!this.forceFresh&&canUseEdge()){this.cacheOperations++;try{const cached=await edge.match(cacheRequest);if(cached&&Number(cached.headers.get('X-Law-Expires'))>Date.now()){const raw=await readLimited(cached);const root=parseLaw(raw);if(!officialLawPayload(root))throw Error('invalid cached law');remember(raw,root,Number(cached.headers.get('X-Law-Expires')));return root;}}catch{}}
+   const raw=await this.upstream('https://www.law.go.kr/DRF/'+endpoint+'?'+query);const root=parseLaw(raw);
+   // Cache only recognized successful public-law payloads, never errors, user
+   // submissions, AI decisions, or credentials. Expired entries are never served.
+   const cacheable=officialLawPayload(root);
+   if(!cacheable)fail('국가법령정보센터 응답 형식을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',502);
+   if(cacheable){const expires=Date.now()+ttl*1000;remember(raw,root,expires);
+    if(canUseEdge()&&raw.length*2<=16_000_000){this.cacheOperations++;const write=(async()=>{try{await edge.put(cacheRequest,new Response(raw,{headers:{'Cache-Control':'public, max-age='+ttl,'X-Law-Expires':String(expires)}}));}catch{}})();if(this.ctx?.waitUntil)this.ctx.waitUntil(write);else await write;}
+   }
+   return root;
+  })();
+  this.memo.set(key,pending);if(!this.forceFresh)lawPending.set(key,pending);
+  try{return await pending;}finally{if(lawPending.get(key)===pending)lawPending.delete(key);}
  }
  async resolve(name){const root=await this.law('lawSearch.do',{query:name,search:'1',display:'20',nw:'1'});const matches=descendants(root,'law').filter(r=>compact(text(r,'법령명한글'))===compact(name)&&digits(text(r,'시행일자')).length===8&&digits(text(r,'시행일자'))<=today()).sort((a,b)=>digits(text(b,'시행일자')).localeCompare(digits(text(a,'시행일자'))));if(!matches.length)fail('해당 이름의 현행 법령을 확인하지 못했습니다. 정식 법령명을 확인하세요.');const row=matches[0],mst=text(row,'법령일련번호');if(!/^\d+$/.test(mst))fail('법령 API 응답에 유효한 법령 식별자가 없습니다.',502);return {row,mst};}
  async citation(candidate){const name=String(candidate.law??'').trim().slice(0,100);if(!name)fail('법령명을 입력하세요.',400);const article=number(candidate.article),paragraph=candidate.paragraph?number(candidate.paragraph,'항'):'',clause=candidate.clause?number(candidate.clause,'호'):'';const {row,mst}=await this.resolve(name);if(candidate.mst&&String(candidate.mst)!==mst)fail('법령 버전이 변경되었습니다. 법령을 다시 검색해 선택하세요.');const [major,sub='0']=article.split('의');const root=await this.law('lawService.do',{MST:mst,JO:major.padStart(4,'0')+sub.padStart(2,'0')});const official=content(find(root,'법령명_한글')).trim();if(official&&compact(official)!==compact(name))fail('조회된 법령 본문과 검색 결과의 법령명이 다릅니다.',502);
@@ -177,15 +201,15 @@ export class LegalApi {
   }
  }
 
- async search(data){const context=validateContext(data);if(!this.env.LAW_API_OC)fail('법령 원문 조회를 위해 서버에 LAW_API_OC를 설정해 주세요.',503);const planned=await this.ai(prompts.ai_candidates+'\n처리 근거 코드: '+JSON.stringify(Object.fromEntries(Object.entries(rules).filter(([,r])=>r.effect!=='consent'))),context);if(!Array.isArray(planned.candidates)||planned.candidates.length>6||planned.candidates.some(c=>!obj(c)))fail('AI 응답 형식을 확인하지 못했습니다.',502);const candidates=[],rejected=[];
+ async search(data){const context=validateContext(data);if(!this.env.LAW_API_OC)fail('법령 원문 조회를 위해 서버에 LAW_API_OC를 설정해 주세요.',503);const planned=await this.ai(prompts.ai_candidates+'\n처리 근거 코드: '+JSON.stringify(Object.fromEntries(Object.entries(rules).filter(([,r])=>r.effect!=='consent'))),context);if(!Array.isArray(planned.candidates)||planned.candidates.slice(0,5).some(c=>!obj(c)))fail('AI 응답 형식을 확인하지 못했습니다.',502);const candidates=[],rejected=[];
  // Sequential candidates keep peak memory/subrequests bounded on the free tier.
- for(const candidate of planned.candidates){try{if(typeof candidate.law!=='string'||!candidate.law.trim()||!candidate.article)fail('AI 제안에 법령명 또는 조문 번호가 없어 확인할 수 없습니다. 다시 검색해 주세요.',422);const scope=context.items.filter(i=>i.type===candidate.type),rule=rules[candidate.basisCode];if(!scope.length||!rule||!scope.some(i=>rule.contexts.includes(i.context)&&(!rule.supplement||rule.supplement===i.classification)))fail('법령의 개인정보 보호법 연결 조항이 처리 유형과 맞지 않습니다.');const actual=await this.verify(candidate);const proposed=candidate.itemNames||[],reasons=candidate.itemReasons||{};actual.itemReviews=Array.isArray(proposed)&&obj(reasons)?scope.filter(i=>!rule.supplement||i.classification===rule.supplement).map(i=>({name:i.name,suggested:proposed.includes(i.name),reason:String(reasons[i.name]??candidate.reason??'적용 요건을 확인해 주세요.').slice(0,500)})):[];candidates.push(actual);}catch(e){if(!(e instanceof ApiError))throw e;rejected.push({law:String(candidate.law??'').slice(0,100),message:e.message});}}
- return {candidates,rejected,note:String(planned.note??'').slice(0,1800),mode:'live'};
+ for(const candidate of planned.candidates.slice(0,5)){try{if(typeof candidate.law!=='string'||!candidate.law.trim()||!candidate.article)fail('AI 제안에 법령명 또는 조문 번호가 없어 확인할 수 없습니다. 다시 검색해 주세요.',422);const scope=context.items.filter(i=>i.type===candidate.type),rule=rules[candidate.basisCode];if(!scope.length||!rule||!scope.some(i=>rule.contexts.includes(i.context)&&(!rule.supplement||rule.supplement===i.classification)))fail('법령의 개인정보 보호법 연결 조항이 처리 유형과 맞지 않습니다.');const actual=await this.verify(candidate);const proposed=candidate.itemNames||[],reasons=candidate.itemReasons||{};actual.itemReviews=Array.isArray(proposed)&&obj(reasons)?scope.filter(i=>!rule.supplement||i.classification===rule.supplement).map(i=>({name:i.name,suggested:proposed.includes(i.name),reason:String(reasons[i.name]??candidate.reason??'적용 요건을 확인해 주세요.').slice(0,500)})):[];candidates.push(actual);}catch(e){if(!(e instanceof ApiError))throw e;rejected.push({law:String(candidate.law??'').slice(0,100),message:e.message,reason:e.status===504?'timeout':e.status>=500||e.status===429?'service_unavailable':'not_verified'});}}
+ return {candidates,rejected,...searchOutcome(candidates,rejected,Math.min(planned.candidates.length,5)),limit:5,limited:planned.candidates.length>5,note:String(planned.note??'').slice(0,1800),mode:'live'};
  }
  async classify(data){const {items}=validateContext(data);if(items.length>20||items.some(i=>i.name.trim().length<2||i.name.trim().length>100))fail('분류할 항목명은 2~100자, 한 번에 20개까지 입력하세요.',400);const ids=data.items.map(i=>i.id);if(ids.some(id=>typeof id!=='string'||!/^[-\w]{1,80}$/.test(id))||new Set(ids).size!==ids.length)fail('분류할 항목을 다시 확인하세요.',400);if(!this.env.OPENROUTER_API_KEY||!this.env.LAW_API_OC)fail('민감정보 API 분류를 위한 서버 연결 설정을 확인하세요.',503);const sources=await Promise.all([this.citation({law:'개인정보 보호법',article:'23'}),this.citation({law:'개인정보 보호법 시행령',article:'18'})]);const officialEvidence=sources.map(s=>({cite:s.cite,text:s.articleExcerpt||s.excerpt}));if(officialEvidence.reduce((s,e)=>s+e.text.length,0)>40000)fail('민감정보 분류의 기준 조문을 확인하지 못했습니다.',502);const planned=await this.ai(prompts.classify_privacy_items,{officialEvidence,items:items.map((i,n)=>({id:ids[n],name:i.name,purpose:i.purpose}))},1800);const indexed=new Map();if(!Array.isArray(planned.items))fail('민감정보 분류 응답을 확인하지 못했습니다.',502);for(const row of planned.items){if(!obj(row)||!ids.includes(row.id)||indexed.has(row.id)||!['high','general','uncertain'].includes(row.verdict))fail('민감정보 분류 응답을 확인하지 못했습니다.',502);indexed.set(row.id,row);}const allowed=['건강','사상·신념','정치적 견해','가입·탈퇴','성생활','유전','범죄경력','생체인식','인종·민족','사생활'];return {items:items.map((i,n)=>{const r=indexed.get(ids[n])||{};return {id:ids[n],name:i.name,verdict:r.verdict||'uncertain',reason:String(r.reason??'항목의 구체적인 의미를 담당자가 확인하세요.').slice(0,400),included:Array.isArray(r.included)?r.included.filter(v=>allowed.includes(v)).slice(0,2):[]};})};
  }
  async review(data){const items=reviewMaterial(data),candidate=await this.withAdditional(data,items);const officialEvidence=Object.fromEntries(['cite','excerpt','articleExcerpt','basisCode','pipa','support','additionalGrounds'].map(k=>[k,candidate[k]]));if(JSON.stringify(officialEvidence).length>45000)fail('검토할 조문이 너무 깁니다. 적용할 항·호를 구체적으로 선택하세요.');const planned=await this.ai(prompts.ai_application_review,{officialEvidence,items},4000);if(!Array.isArray(planned.items))fail('AI 검토 결과를 읽지 못했습니다.',502);const indexed=new Map();for(const r of planned.items){if(!obj(r)||typeof r.id!=='string'||indexed.has(r.id))fail('AI 검토 결과를 읽지 못했습니다.',502);indexed.set(r.id,r);}const normalized=items.map(i=>{const r=indexed.get(i.id)||{};return {id:i.id,name:i.name,verdict:['possible','needs_information','not_supported'].includes(r.verdict)?r.verdict:'needs_information',explanation:String(r.explanation??'해당 항목의 검토 결과가 부족합니다.').slice(0,800),checks:Array.isArray(r.checks)?r.checks.slice(0,3).map(c=>String(c).slice(0,300)):[]};});const review={items:normalized,summary:String(planned.summary??'선택 항목의 검토 결과를 확인하세요.').slice(0,1600),canApply:normalized.every(i=>i.verdict==='possible'),model:this.env.OPENROUTER_MODEL||'openai/gpt-oss-120b',checkedAt:new Date().toISOString()};if(review.canApply){review.token=await signReview(this.env.OPENROUTER_API_KEY,await fingerprint(candidate,items));review.validForSeconds=300;}return {candidate,review};}
- async apply(data){const items=reviewMaterial(data),actual=await this.withAdditional(data,items);if(data.reviewToken)await checkReview(this.env.OPENROUTER_API_KEY,data.reviewToken,await fingerprint(actual,items));return {...actual,reviewConfirmed:Boolean(data.reviewToken)};}
+ async apply(data){this.forceFresh=true;this.memo.clear();const items=reviewMaterial(data),actual=await this.withAdditional(data,items);if(data.reviewToken)await checkReview(this.env.OPENROUTER_API_KEY,data.reviewToken,await fingerprint(actual,items));return {...actual,reviewConfirmed:Boolean(data.reviewToken)};}
 }
 const enc=new TextEncoder();
 const hex=buffer=>[...new Uint8Array(buffer)].map(b=>b.toString(16).padStart(2,'0')).join('');

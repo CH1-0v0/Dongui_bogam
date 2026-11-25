@@ -389,4 +389,66 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(status,200);self.assertFalse(json.loads(body)['candidates'][0]['verified'])
         self.srv.demo=False
 
+class SearchCacheTests(unittest.TestCase):
+    def setUp(self):
+        with server.LAW_CACHE_LOCK:
+            server.LAW_CACHE.clear()
+
+    def tearDown(self):
+        with server.LAW_CACHE_LOCK:
+            server.LAW_CACHE.clear()
+
+    def test_search_never_verifies_more_than_five_proposals(self):
+        candidates = [{'law':'시험법','article':str(n+1),'basisCode':'statutory','type':'collect'} for n in range(7)]
+        context = {'items':[{'name':'성명','purpose':'합성 업무','type':'collect','context':'collect','classification':'general'}]}
+        with patch.dict(os.environ, {'LAW_API_OC':'synthetic-five'}), patch.object(server,'ai_candidates',return_value={'candidates':candidates}), patch.object(server,'verify_with_basis',side_effect=lambda c:{**c,'verified':True}) as verify:
+            result = server.search(context)
+        self.assertEqual(verify.call_count,5)
+        self.assertEqual([c['article'] for c in result['candidates']],['1','2','3','4','5'])
+        self.assertEqual(result['outcome'],'verified')
+        self.assertTrue(result['limited'])
+
+    def test_empty_and_failed_verification_are_not_the_same_as_no_legal_basis(self):
+        for rejected, checked, expected in [([],0,'no_candidates'),([{'reason':'not_verified'}],1,'unverified'),([{'reason':'timeout'}],1,'unavailable')]:
+            result = server.search_outcome([],rejected,checked)
+            self.assertEqual(result['outcome'],expected)
+            self.assertNotEqual(result['summary'],'법적 근거가 없습니다.')
+        partial = server.search_outcome([{}],[{'reason':'service_unavailable'}],2)
+        self.assertEqual(partial['outcome'],'partial')
+        self.assertEqual(partial['counts']['unavailable'],1)
+
+    def test_cache_ttl_and_fresh_application_scope(self):
+        clock=[1000.0]
+        def fetch(url, **kwargs):
+            return BODY if 'lawService.do' in url else SEARCH
+        with patch.dict(os.environ, {'LAW_API_OC':'synthetic-ttl'}), patch.object(server,'request_bytes',side_effect=fetch) as network, patch.object(server.time,'monotonic',side_effect=lambda:clock[0]):
+            server.law_request('lawSearch.do',query='시험법')
+            server.law_request('lawSearch.do',query='시험법')
+            self.assertEqual(network.call_count,1)
+            clock[0]+=301
+            server.law_request('lawSearch.do',query='시험법')
+            self.assertEqual(network.call_count,2)
+            server.law_request('lawService.do',MST='123')
+            clock[0]+=301
+            server.law_request('lawService.do',MST='123')
+            self.assertEqual(network.call_count,3)
+            with server.fresh_law_requests():
+                server.law_request('lawService.do',MST='123')
+                server.law_request('lawService.do',MST='123')
+            self.assertEqual(network.call_count,4)
+            clock[0]+=3601
+            server.law_request('lawService.do',MST='123')
+            self.assertEqual(network.call_count,5)
+        self.assertFalse(getattr(server.LAW_CONTEXT,'fresh',False))
+
+    def test_failed_law_request_is_not_cached_and_timeout_stays_distinct(self):
+        with patch.dict(os.environ, {'LAW_API_OC':'synthetic-failure'}), patch.object(server,'request_bytes',side_effect=server.ApiError('조회 시간 초과',504)) as network:
+            for _ in range(2):
+                with self.assertRaises(server.ApiError):server.law_request('lawSearch.do',query='시험법')
+            self.assertEqual(network.call_count,2)
+        with patch.object(server.urllib.request,'urlopen',side_effect=TimeoutError()):
+            with self.assertRaises(server.ApiError) as error:server.request_bytes('https://www.law.go.kr/DRF/lawSearch.do')
+            self.assertEqual(error.exception.status,504)
+
+
 if __name__=='__main__':unittest.main()
