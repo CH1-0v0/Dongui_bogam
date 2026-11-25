@@ -43,7 +43,7 @@ const itemNames = new Map(
   ['연령','나이'],
   ['국적'],
   ['소속','소속명'],
-  ['소속 업체명','소속 회사명','소속 기업명'],
+  ['소속 기관명','소속 업체명','소속 회사명','소속 기업명'],
   ['부서명','소속 부서','부서 이름'],
   ['직위'],
   ['직급'],
@@ -216,7 +216,7 @@ function home(){
 }
 const canSetRequired = key => Object.hasOwn(groupNames,key)&&key!=='marketing';
 const itemPresetGroups = [
- ['일반 개인정보', ['성명','휴대전화번호','전화번호','생년월일','이메일 주소','성별','주소','부서명','소속 업체명','업무용 연락처','은행명','계좌번호','예금주명']],
+ ['일반 개인정보', ['성명','휴대전화번호','전화번호','생년월일','이메일 주소','성별','주소','부서명','소속 기관명','업무용 연락처','은행명','계좌번호','예금주명']],
  ['민감정보', ['건강정보','범죄경력']],
  ['고유식별정보', ['주민등록번호','외국인등록번호','운전면허번호','여권번호']]
 ];
@@ -608,7 +608,7 @@ const refusalText = (s,preview) => {
  return preview?'<em class="doc-refusal-missing">아직 입력하지 않았습니다</em>':'';
 };
 const note = text => `<p class="doc-note"><span class="doc-note-marker" aria-hidden="true">※</span> <span>${text}</span></p>`;
-const refusalPrefix = s => `${s.required==='공통'?'':'['+(s.required||'선택')+'] '}동의를 거부할 수 있습니다. 그러나 동의를 거부할 경우, `;
+const refusalPrefix = s => `${s.required==='공통'?'':'['+(s.required||'선택')+'] '}동의를 거부할 수 있습니다. 그러나 동의를 거부할 경우 `;
 const marketingContact = '<p class="doc-marketing"><strong>제공하신 연락처로 마케팅 안내나 홍보 연락을 받을 수 있습니다.</strong></p>';
 const editableText = (label,key,value,editable) => `<span class="doc-text" ${editable?`contenteditable="plaintext-only" role="textbox" aria-label="${safe(label)}" data-edit="${key}"`:''}>${safe(state.edits[key]??value)}</span>`;
 const noticeBasisText=item=>[...new Set((item.bases||[]).filter(b=>LawBasis.rules[b.basisCode]?.effect!=='consent').map(b=>[...new Set([LawBasis.rules[b.basisCode]?.pipa,b.cite].filter(Boolean))].join(' · ')))].join(' / ');
@@ -647,7 +647,7 @@ function noticeTable(sections,editable){
 }
 const signatureLine = '_'.repeat(24);
 function signatureBlock(){
- return `<article class="sign"><p>　　　　년　　 월　　 일</p><p>정보주체: <span class="signature-line">${signatureLine}</span> (서명)</p>${state.child?`<p class="guardian-heading"><strong>만 14세 미만 아동의 법정대리인 동의</strong></p><p>법정대리인: <span class="signature-line">${signatureLine}</span> (서명)</p><p class="guardian-relationship">아동과의 관계: <span class="signature-line relationship-line">${'_'.repeat(16)}</span></p>`:''}</article>`;
+ return `<article class="sign"><p class="signature-date">　　　　년　　 월　　 일</p><p>정보주체: <span class="signature-line">${signatureLine}</span> (서명)</p>${state.child?`<p class="guardian-heading"><strong>만 14세 미만 아동의 법정대리인 동의</strong></p><p>법정대리인: <span class="signature-line">${signatureLine}</span> (서명)</p><p class="guardian-relationship">아동과의 관계: <span class="signature-line relationship-line">${'_'.repeat(16)}</span></p>`:''}</article>`;
 }
 function documentHTML(editable=false){
  const rows=sections();if(!rows.length)return '';
@@ -656,9 +656,13 @@ function documentHTML(editable=false){
  const title=state.title.trim()||suggestedTitle(),intro=state.intro.trim()||defaultIntro();
  return `<section class="doc"><h1>${safe(title)}</h1><p class="doc-intro">${safe(intro)}</p>${[...consentGroups.values()].map(group=>categoryTable(group,editable)).join('')}${noticeGroups.size?`<section class="notice-section"><h3 class="doc-notice-heading">고지사항</h3>${[...noticeGroups.values()].map(group=>noticeTable(group,editable)).join('')}</section>`:''}${consentGroups.size?signatureBlock():''}<p class="doc-agency"><strong>${safe(state.agency||'기관명 미입력')} 귀중</strong></p></section>`;
 }
-function previewMarkup(html,editing=false){
- return `<p class="a4-preview-status muted" role="status">${editing?'표 수정 중입니다. 저장하면 A4 쪽 미리보기가 갱신됩니다.':'A4 미리보기를 준비하고 있습니다…'}</p><div class="a4-document-frame" role="region" aria-label="A4 문서 쪽 미리보기" ${editing?'hidden':''}></div><nav class="a4-page-nav" aria-label="미리보기 쪽 이동" ${editing?'hidden':''}><button data-preview-move="-1" disabled>← 이전 쪽</button><output class="a4-page-counter" aria-live="polite">1 / 1쪽</output><button data-preview-move="1" disabled>다음 쪽 →</button></nav><div id="preview-docs" class="document-source" ${editing?'':'hidden'}>${html}</div>`;
+function previewControls(editing,top=false){
+ return `<nav class="a4-page-nav ${top?'a4-nav-top':''}" aria-label="미리보기 ${top?'상단':'하단'} 쪽 이동" ${editing?'hidden':''}><button data-preview-move="-1" disabled>← 이전 쪽</button><output class="a4-page-counter" aria-live="polite">1 / 1쪽</output><button data-preview-move="1" disabled>다음 쪽 →</button>${top?'<span class="preview-zoom"><button data-preview-zoom="-0.1" aria-label="미리보기 축소">−</button><output class="preview-zoom-value">100%</output><button data-preview-zoom="0.1" aria-label="미리보기 확대">＋</button><button data-preview-zoom="fit">가로 맞춤</button></span>':''}</nav>`;
 }
+function previewMarkup(html,editing=false){
+ return `<p class="a4-preview-status muted" role="status">${editing?'표 수정 중입니다. 저장하면 A4 쪽 미리보기가 갱신됩니다.':'A4 미리보기를 준비하고 있습니다…'}</p>${previewControls(editing,true)}<div class="a4-document-frame" role="region" aria-label="A4 문서 쪽 미리보기" data-zoom="1" ${editing?'hidden':''}></div>${previewControls(editing)}<div id="preview-docs" class="document-source" ${editing?'':'hidden'}>${html}</div>`;
+}
+
 let a4PreviewVersion=0,a4PreviewTimer,pdfViewer;
 function scheduleA4Preview(){
  clearTimeout(a4PreviewTimer);const version=++a4PreviewVersion;
@@ -692,17 +696,17 @@ function scheduleA4Preview(){
 
 function fitA4Page(){
  const frame=document.querySelector('.a4-document-frame'),paper=frame?.querySelector('.a4-paper:not([hidden])');if(!paper)return;
- const position=frame.getBoundingClientRect().top,top=position>=innerHeight?180:Math.max(16,position),available=Math.max(210,Math.min(1000,innerHeight-top-78));
- frame.style.height=available+'px';
- const labelHeight=paper.querySelector('.a4-page-label').getBoundingClientRect().height;
- const width=Math.max(1,Math.min(frame.clientWidth-24,(available-28-labelHeight)*210/297));paper.style.width=width+'px';
+ const zoom=Number(frame.dataset.zoom)||1;frame.classList.toggle('preview-magnified',zoom>1);
+ const width=Math.max(1,frame.clientWidth-24)*zoom;paper.style.width=width+'px';
+ document.querySelectorAll('.preview-zoom-value').forEach(n=>n.textContent=Math.round(zoom*100)+'%');
 }
+
 function showA4Page(page){
  const frame=document.querySelector('.a4-document-frame');if(!frame)return;
  const pages=[...frame.querySelectorAll('.a4-paper')];page=Math.max(1,Math.min(pages.length,page));if(!pages.length)return;
  pages.forEach((paper,n)=>paper.hidden=n+1!==page);frame.dataset.currentPage=page;
- document.querySelector('.a4-page-counter').textContent=page+' / '+pages.length+'쪽';
- document.querySelector('[data-preview-move="-1"]').disabled=page===1;document.querySelector('[data-preview-move="1"]').disabled=page===pages.length;
+ document.querySelectorAll('.a4-page-counter').forEach(n=>n.textContent=page+' / '+pages.length+'쪽');
+ document.querySelectorAll('[data-preview-move="-1"]').forEach(n=>n.disabled=page===1);document.querySelectorAll('[data-preview-move="1"]').forEach(n=>n.disabled=page===pages.length);
  fitA4Page();
 }
 window.addEventListener('resize',fitA4Page);
@@ -710,11 +714,11 @@ window.addEventListener('resize',fitA4Page);
 function output(){
  const rows=hasConsent()?refusalSections():[];
  const docs=documentHTML(documentEditing);
- return `<div class="output-layout"><div class="stack output-settings"><section class="panel review-status">${reviewStatus()}</section><section class="panel stack"><h2>문서 기본 설정</h2>${field('문서 제목','title',state.title,suggestedTitle(),false,true)}<div><button data-title>${hasConsent()?'제목 후보 적용':'고지서 제목 후보 적용'}</button></div>${field('제목 아래 안내사항','intro',state.intro,defaultIntro(),true,true)}<div><button data-intro>${hasConsent()?'안내사항 후보 적용':'고지사항 안내문 적용'}</button></div></section>
+ return `<div class="output-layout"><div class="stack output-settings"><section class="panel stack"><h2>문서 기본 설정</h2>${field('문서 제목','title',state.title,suggestedTitle(),false,true)}<div><button data-title>${hasConsent()?'제목 후보 적용':'고지서 제목 후보 적용'}</button></div>${field('제목 아래 안내사항','intro',state.intro,defaultIntro(),true,true)}<div><button data-intro>${hasConsent()?'안내사항 후보 적용':'고지사항 안내문 적용'}</button></div></section>
  ${hasConsent()?`<fieldset class="panel child-choice"><legend>만 14세 미만 아동 대상 여부${requiredMark}</legend><p class="muted">아동 대상이면 동의서에 법정대리인 동의·서명란을 추가합니다.</p><div class="actions"><label class="check"><input type="radio" name="child" required data-child value="yes" ${state.child?'checked':''}> 대상</label><label class="check"><input type="radio" name="child" required data-child value="no" ${state.child===false?'checked':''}> 대상 아님</label></div></fieldset>`:''}
  <section class="panel stack"><h2>동의 거부 시 불이익</h2>${rows.length?'<p class="muted">동의를 거부하거나 정보를 제공하지 않았을 때의 영향을 적어 주세요.</p>':''}${rows.length?rows.map(s=>field(sectionTitle(s)+(s.classification==='rnn'?' · 번호 미제공 시 안내':''),'refusals.'+s.k.replaceAll('.',':'),state.refusals[s.k],'해당하는 불이익 또는 안내 내용을 입력하세요.',true,true)).join(''):'<p class="not-applicable">동의를 받아 개인정보를 수집하지 않기 때문에 해당사항 없습니다.</p>'}</section>
 </div>
- <section class="panel preview-panel"><div class="panelhead"><h2>A4 문서 미리보기</h2><button data-toggle-document-edit aria-pressed="${documentEditing}">${documentEditing?'저장하기':'표 내용 직접 수정'}</button></div><div class="actions export"><button class="primary" data-finish ${docs?'':'disabled'}>완성하기 →</button></div><p class="notice" id="output-status" role="status"></p>${previewMarkup(docs||'<p>문서에 표시할 항목이 없습니다.</p>',documentEditing)}</section></div>`;
+ <section class="panel preview-panel"><div class="panelhead"><h2>A4 문서 미리보기</h2><div class="preview-edit-actions"><button data-toggle-document-edit aria-pressed="${documentEditing}">${documentEditing?'저장하기':'내용 직접 수정하기'}</button><button class="primary" data-finish ${docs?'':'disabled'}>완성하기</button></div></div><p class="notice" id="output-status" role="status"></p>${previewMarkup(docs||'<p>문서에 표시할 항목이 없습니다.</p>',documentEditing)}</section></div>`;
 }
 function validateDraft(){
  const missingRefusal=hasConsent()?refusalSections().find(s=>!state.refusals[s.k]?.trim()):null;
@@ -778,15 +782,16 @@ function finalPage(){
  const pill=status=>`<span class="pill ${['확인','해당 없음','반영'].includes(status)?'':'pending'}">${status}</span>`;
  const row=([title,status,description])=>`<li><div><strong>${safe(title)}</strong> ${status==='담당자 확인 필요'?'':pill(status)}</div><p>${safe(description)}</p></li>`;
  const auditBody=choices=>audit.length?audit.map(section=>`<section><h3>${safe(section.title)}</h3><ul>${section.checks.filter(([label])=>/독립된 동의|동의란의/.test(label)===choices).map(([label,ok])=>`<li><label><input type="checkbox" disabled ${ok?'checked':''}>${safe(label)} <span>${ok?'확인':'보완 필요'}</span></label></li>`).join('')}</ul></section>`).join(''):'<p class="not-applicable">동의 항목이 없는 고지서입니다. 동의란 점검은 해당사항 없습니다.</p>';
- const pending=items.filter(([,status])=>!['확인','해당 없음','반영'].includes(status));
+ const collectionRisk=entries().some(contextualRisk);
+ const pending=[...items.filter(([,status])=>!['확인','해당 없음','반영'].includes(status)),['과다 수집 가능성',collectionRisk?'담당자 확인 필요':'확인',collectionRisk?'수집 목적에 비해 과다 수집 가능성이 있습니다. 항목의 필요성은 담당자가 최종 판단해 주세요.':'간단한 점검에서 과다 수집 가능성이 적습니다. 목적에 필요한 항목인지 담당자가 최종 확인해 주세요.']];
  return `<div class="title"><h1 tabindex="-1">최종본</h1><p>최종본을 확인하고 저장하거나 인쇄하세요.</p></div>
  <div class="final-layout"><section class="panel final-review" aria-labelledby="final-review-title"><h2 id="final-review-title">최종 점검 결과</h2>
- <p class="muted">자동 점검은 기재 여부를 확인합니다. 법적 근거와 동의 범위의 적정성은 담당자가 확인해 주세요.</p><section class="final-status">${reviewStatus()}</section>
+ <p class="muted">자동 점검은 기재 여부를 확인합니다. 법적 근거와 동의 범위의 적정성은 담당자가 확인해 주세요.</p>
  <section class="human-review"><h3>담당자가 확인할 사항</h3><ul>${pending.map(row).join('')}</ul></section>
  <details class="review-checks" data-audit-kind="fields"><summary><span class="review-check-title"><strong>${items[0][0]}</strong><span class="review-toggle" aria-hidden="true"></span>${pill(items[0][1])}</span><span class="review-check-description">${items[0][2]}</span></summary><div class="consent-audit">${auditBody(false)}</div></details>
  <details class="review-checks" data-audit-kind="choices"><summary><span class="review-check-title"><strong>동의란 구분</strong><span class="review-toggle" aria-hidden="true"></span>${pill(items[1][1])}</span><span class="review-check-description">${items[1][2]}</span></summary><div class="choice-audit">${auditBody(true)}</div></details>
  <ul>${items.slice(2).filter(([,status])=>['확인','반영'].includes(status)).map(row).join('')}</ul><a href="${reference}" target="_blank" rel="noopener">개인정보 보호법 원문</a><ul class="not-applicable-review">${items.slice(2).filter(([,status])=>status==='해당 없음').map(row).join('')}</ul></section>
- <section class="panel preview-panel final-preview"><div class="panelhead"><h2>A4 최종본</h2></div><div class="actions export"><button data-go="4">← 문서 수정</button><button data-pdf>PDF 저장</button><button data-hwpx>한글(HWPX) 저장</button><button class="primary" data-print>즉시 인쇄</button></div><p class="notice" id="output-status" role="status"></p>${previewMarkup(html)}</section></div>`;
+ <section class="panel preview-panel final-preview"><div class="panelhead"><h2>A4 최종본</h2></div><div class="actions export"><button data-new-consent>새 동의서 만들기</button><button data-go="4">← 문서 수정</button><button data-pdf>PDF 저장</button><button data-hwpx>한글(HWPX) 저장</button><button class="primary" data-print>즉시 인쇄</button></div><p class="notice" id="output-status" role="status"></p>${previewMarkup(html)}</section></div>`;
 }
 
 function refreshPreview(){
@@ -874,7 +879,7 @@ const quickTemplates = [
   title:'용역·유지보수 인력 보안 및 출입 동의서',
   purpose:'용역·유지보수 인력의 출입 권한 발급·회수 및 출입 관리',
   period:'출입 권한 회수 완료 시까지',
-  items:['성명','소속 업체명','업무용 연락처'],
+  items:['성명','소속 기관명','업무용 연락처'],
   note:'자동 입력 기간은 출입 등록 정보 기준입니다. 출입기록을 함께 처리하면 기관의 기록 보존 기준과 연락처 수집 필요 여부를 확인하세요.'
  },
  {
@@ -1178,6 +1183,8 @@ document.addEventListener('click',e=>{
  const group=e.target.closest('.law-options-group>summary');if(group){const type=group.parentElement.dataset.lawGroup;lawSearch.groupOpen??={};lawSearch.groupOpen[type]=!group.parentElement.open;if(!group.parentElement.open){e.preventDefault();lawSearch.showAlternatives??={};lawSearch.showAlternatives[type]=true;lawSearch.hidden=(lawSearch.hidden||[]).filter(n=>lawSearch.candidates[n]?.type!==type);render();} }
  if(!e.target.closest('.item-picker'))closeItemMenus();
  const b=e.target.closest('button');if(!b)return;const d=b.dataset;
+ if(d.previewZoom){const frame=document.querySelector('.a4-document-frame');frame.dataset.zoom=d.previewZoom==='fit'?1:Math.max(.5,Math.min(2,Math.round(((Number(frame.dataset.zoom)||1)+Number(d.previewZoom))*10)/10));fitA4Page();return;}
+ if('newConsent' in d){state=newDraft();lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};freshLawPicker();editorOpen=false;documentEditing=false;finalDocument=null;basicsChecked=false;message='';tab='collect';reached=0;go(1);return;}
  if(d.previewMove){showA4Page(Number(document.querySelector('.a4-document-frame')?.dataset.currentPage||1)+Number(d.previewMove));return;}
  if(d.itemMenu){const menu=document.getElementById('item-options-'+d.itemMenu),open=menu.hidden;closeItemMenus();menu.hidden=!open;b.setAttribute('aria-expanded',String(open));if(open)positionItemMenu(menu,b);}
  if(d.selectItem){const select=document.querySelector(`[data-item-preset="${d.selectItem}"]`);select.value=d.value;select.dispatchEvent(new Event('change',{bubbles:true}));}
@@ -1409,8 +1416,8 @@ function documentTableGrid(table){
 
 // Values below use HWPUNIT (1/100 pt). The width matches the A4 template's text area.
 function hwpxTable(table,paragraph,nextId,preview,cellRenderer){
- const rows=[...table.rows],width=42520,rowHeight=1800;
- const weights=[...rows[0].cells].map(cell=>['구분','처리 방식'].includes(cell.textContent.trim())?0.55:1);
+ const rows=[...table.rows],width=42520,rowHeight=2500;
+ const weights=[...rows[0].cells].map(cell=>['구분','처리 방식'].includes(cell.textContent.trim())?0.32:1);
  const total=weights.reduce((sum,weight)=>sum+weight,0);
  const widths=weights.map(weight=>Math.floor(width*weight/total));
  widths[widths.length-1]+=width-widths.reduce((sum,part)=>sum+part,0);
@@ -1421,10 +1428,10 @@ function hwpxTable(table,paragraph,nextId,preview,cellRenderer){
   return `<hp:tr>${row.filter(entry=>entry.start===rowIndex).map(({cell,column,span})=>{
    const emphasis=!header&&(cell.tagName==='TH'||cell.querySelector('strong'));
    const content=cellRenderer?cellRenderer(cell,header):cell.textContent.trim().split(/\r?\n/).map(line=>paragraph(line,20,header?9:emphasis?7:0)).join('');
-   return `<hp:tc name="" header="${Number(header)}" hasMargin="0" protect="0" editable="0" dirty="1" borderFillIDRef="${header||cell.tagName==='TH'?4:3}"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">${content}</hp:subList><hp:cellAddr colAddr="${column}" rowAddr="${rowIndex}"/><hp:cellSpan colSpan="1" rowSpan="${span}"/><hp:cellSz width="${widths[column]}" height="${rowHeight*span}"/><hp:cellMargin left="510" right="510" top="141" bottom="141"/></hp:tc>`;
+   return `<hp:tc name="" header="${Number(header)}" hasMargin="0" protect="0" editable="0" dirty="1" borderFillIDRef="${header||cell.tagName==='TH'?4:3}"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">${content}</hp:subList><hp:cellAddr colAddr="${column}" rowAddr="${rowIndex}"/><hp:cellSpan colSpan="1" rowSpan="${span}"/><hp:cellSz width="${widths[column]}" height="${rowHeight*span}"/><hp:cellMargin left="510" right="510" top="420" bottom="420"/></hp:tc>`;
   }).join('')}</hp:tr>`;
  }).join('');
- return `<hp:p id="${nextId()}" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:tbl id="${id}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1" rowCnt="${rows.length}" colCnt="${widths.length}" cellSpacing="0" borderFillIDRef="3" noAdjust="0"><hp:sz width="${width}" widthRelTo="ABSOLUTE" height="${rowHeight*rows.length}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:inMargin left="510" right="510" top="141" bottom="141"/>${cells}</hp:tbl></hp:run></hp:p>`;
+ return `<hp:p id="${nextId()}" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:tbl id="${id}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1" rowCnt="${rows.length}" colCnt="${widths.length}" cellSpacing="0" borderFillIDRef="3" noAdjust="0"><hp:sz width="${width}" widthRelTo="ABSOLUTE" height="${rowHeight*rows.length}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:inMargin left="510" right="510" top="420" bottom="420"/>${cells}</hp:tbl></hp:run></hp:p>`;
 }
 
 async function createHwpx(body){
@@ -1440,6 +1447,7 @@ async function createHwpx(body){
  const richParagraph=(runs,align)=>`<hp:p id="${nextId()}" paraPrIDRef="${align}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">${runs}</hp:p>`;
  const paragraph=(text,align,style)=>richParagraph(run(text,style),align);
  let header=files['Contents/header.xml'];
+ header=header.replace(/breakNonLatinWord="BREAK_WORD"/g,'breakNonLatinWord="KEEP_WORD"');
  header=header.replace(/textColor="#(?:2E74B5|174DA1)"/g,'textColor="#2154C7"');
  header=header.replace(/<(hh:(?:left|right|top|bottom)Border) type="SOLID"[^>]*\/>/g,'<$1 type="SOLID" width="0.12 mm" color="#000000"/>');
  const paraIds=[...header.matchAll(/<hh:paraPr id="(\d+)"/g)].map(m=>Number(m[1]));
@@ -1467,8 +1475,8 @@ async function createHwpx(body){
   return `<hp:p id="${nextId()}" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:tbl id="${nextId()}" zOrder="0" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="0" rowCnt="1" colCnt="2" cellSpacing="0" borderFillIDRef="1" noAdjust="0"><hp:sz width="42520" widthRelTo="ABSOLUTE" height="1800" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:tr>${cells}</hp:tr></hp:tbl></hp:run></hp:p>`;
  };
  const paragraphs=documents.flatMap(doc=>{let previous=null;return [...doc.querySelectorAll('h1,h3,table,p')].flatMap(node=>{
-   const gap=(node.matches('h3,.guardian-heading,.sign > p:first-child,.doc-agency')&&previous&&!previous.matches('.doc-intro'))?[paragraph('',0,0)]:[];previous=node;
-   const finish=content=>[...gap,...(Array.isArray(content)?content:[content]),...(node.matches('h1,.doc-intro')?[paragraph('',0,0)]:[])];
+   const gap=(node.matches('h3,.guardian-heading,.sign > p:first-child,.doc-agency')&&previous&&!previous.matches('.doc-intro'))?[paragraph('',0,0),...(node.matches('.doc-agency')?[paragraph('',0,0)]:[])]:[];previous=node;
+   const finish=content=>[...gap,...(Array.isArray(content)?content:[content]),...(node.matches('h1,.doc-intro,.signature-date')?[paragraph('',0,0)]:[])];
    if(node.matches('table'))return finish(hwpxTable(node,paragraph,nextId,preview,cellRenderer));
    if(node.matches('.doc-choice')){
     const [question,choices]=[...node.children].map(child=>child.textContent);

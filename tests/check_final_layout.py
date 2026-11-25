@@ -10,6 +10,25 @@ for paragraph in body.findall('.//p:tc//p:p',ns):
     assert spacings and all(s.get('type')=='PERCENT' and s.get('value')=='130' for s in spacings)
 props=head.find('.//h:paraProperties',ns);assert int(props.get('itemCnt'))==len(props)
 text=lambda n:''.join(n.itertext())
+for table in body.findall('.//p:tbl',ns):
+    cells=table.findall('p:tr/p:tc',ns)
+    if not cells: continue
+    if text(cells[0]).strip()=='구분':
+        width=int(table.find('p:sz',ns).get('width'))
+        assert int(cells[0].find('p:cellSz',ns).get('width'))<width*.12
+    if table.get('borderFillIDRef')=='3':
+        margin=table.find('p:inMargin',ns)
+        assert int(margin.get('top'))>=400 and int(margin.get('bottom'))>=400
+assert all(p.get('breakNonLatinWord')=='KEEP_WORD' for p in head.findall('.//h:breakSetting',ns))
+children=list(body)
+normalized=lambda n:''.join(text(n).split())
+date=next(i for i,p in enumerate(children) if normalized(p)=='년월일')
+assert not text(children[date+1]).strip()
+agency=next(i for i,p in enumerate(children) if normalized(p)=='최종서식검증기관귀중')
+assert not text(children[agency-1]).strip() and not text(children[agency-2]).strip()
+assert '거부할 경우,' not in text(body)
+print('PASS HWPX narrow classification column, generous vertical margins, word wrapping and extra date/agency spacing')
+
 questions=[p for p in body.findall('.//p:p',ns) if '☞' in text(p) and '동의하십니까?' in text(p) and p.find('.//p:tbl',ns) is None]
 assert len(questions)==7,len(questions)
 assert all(text(q).startswith((' ☞','\u00a0☞')) for q in questions)
@@ -26,6 +45,7 @@ except ImportError:
     print('SKIP PDF page/text checks: PyMuPDF unavailable')
 else:
     pdf=fitz.open('.test-output/final-layout.pdf');assert len(pdf)>=2
+    assert any(d['rect'].width>510 and d['rect'].y0<50 for d in pdf[0].get_drawings())
     all_text=''.join(''.join(p.get_text().split()) for p in pdf)
     assert all_text.count('동의하십니까?')==7
     assert '목적외이용에동의하십니까?' in all_text and '목적외제공에동의하십니까?' in all_text

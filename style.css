@@ -465,3 +465,19 @@
 .review-check-description{display:block;color:var(--muted);font-size:13px;line-height:1.75;margin-top:8px}
 .not-applicable-review{margin-top:16px!important;padding:12px!important;list-style:none;background:#edf0f4;border:1px solid #d3dae3;border-radius:8px;color:#697586}
 .not-applicable-review:empty{display:none}.not-applicable-review .pill{background:#e0e5eb;color:#697586}.not-applicable-review li{border:0!important}
+/* Width-based sizing is independent of scroll position and remains stable on first paint. */
+.a4-document-frame{height:auto!important;max-height:none!important;display:block;overflow:hidden;min-height:0!important}
+.a4-document-frame:empty{aspect-ratio:210/305}
+.a4-paper{max-width:none;margin-inline:auto!important}
+.a4-document-frame.preview-magnified{max-height:85vh!important;overflow:auto}
+.preview-magnified .a4-paper{margin-left:0!important;margin-right:0!important}
+.a4-page-nav{gap:8px;margin:10px 0;justify-content:center}.a4-nav-top{margin-bottom:12px}
+.preview-zoom{display:flex;gap:5px;align-items:center;flex-wrap:wrap}.preview-zoom-value{min-width:43px;text-align:center;font-size:12px}
+.preview-edit-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.preview-panel>.panelhead{align-items:flex-start;flex-wrap:wrap}
+.preview-edit-actions button{white-space:nowrap}
+body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{word-break:keep-all;overflow-wrap:break-word}
+.final-review li{padding-block:8px}.final-review li p{margin:5px 0 0;line-height:1.65}.final-review ul{margin-block:8px}.final-review .human-review{margin:12px 0;padding:12px}.final-review .review-checks{padding-block:11px}.final-review .review-check-description{margin-top:5px}
+@media print{#print .doc h1{border:1px solid #8e9eb5;padding:10px;word-break:keep-all}}
+@media(max-width:570px){.preview-edit-actions{width:100%;justify-content:flex-end}.a4-page-nav{gap:5px}.a4-page-nav button{font-size:12px;padding:6px 8px}}
+.doc .signature-date{margin-bottom:2em}.doc .doc-agency{margin-top:calc(18px + 1em)}
+.class-item b,.item-picker button,.catalog-result strong,.candidate-title,.doc-text,.final-review p{word-break:keep-all;overflow-wrap:break-word}

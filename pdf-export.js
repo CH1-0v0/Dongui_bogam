@@ -197,11 +197,11 @@ export async function createPdf(body,tableGrid){
  for(const doc of documents){
   nextPage();
   for(const node of doc.querySelectorAll('h1,h3,table,p')){
-   if(node.matches('h1'))paragraph(nodeText(node),{font:bold,size:17,color:blue,align:'center',after:12,keep:20});
+   if(node.matches('h1')){const titleHeight=wrapText(nodeText(node),bold,17,contentWidth).length*25.5;room(titleHeight+32);page.drawRectangle({x:margin-4,y:y-titleHeight-6,width:contentWidth+8,height:titleHeight+12,borderWidth:.5,borderColor:border});paragraph(nodeText(node),{font:bold,size:17,color:blue,align:'center',after:16,keep:20});}
    else if(node.matches('h3'))paragraph(nodeText(node),{font:bold,size:13,color:blue,after:5,keep:58});
    else if(node.matches('table'))table(node);
-   else if(node.matches('.doc-agency'))paragraph(nodeText(node),{font:bold,size:15,align:'center'});
-   else if(node.closest('.sign'))paragraph(nodeText(node),{align:'right'});
+   else if(node.matches('.doc-agency')){y-=16.5;paragraph(nodeText(node),{font:bold,size:15,align:'center'});}
+   else if(node.closest('.sign'))paragraph(nodeText(node),{align:'right',after:node.matches('.signature-date')?24.5:8});
    else if(node.matches('.doc-marketing'))paragraph(nodeText(node),{font:bold,size:11,color:blue});
    else if(node.matches('.doc-note'))paragraph(nodeText(node).replace(/^※\s*/,''),{prefix:'※',keep:node.nextElementSibling?.matches('.doc-marketing')?50:29});
    else if(node.matches('.doc-choice')){
