@@ -179,3 +179,9 @@ test('review evidence keeps selected text and full legal conditions without dupl
  const source={law:'합성법',cite:'합성법 제10조',excerpt:'선택한 호',articleExcerpt:'조건이 포함된 전체 조문',paragraphSegments:Array(100).fill('duplicate'),verifiedAt:'timestamp',pipa:{excerpt:'연결 근거',articleExcerpt:'연결 근거',paragraphSegments:Array(100).fill('duplicate')}};
  const result=reviewEvidenceFor(source);assert.equal(result.articleExcerpt,source.articleExcerpt);assert.equal(result.pipa.excerpt,'연결 근거');assert.equal(result.pipa.articleExcerpt,undefined);assert.ok(!JSON.stringify(result).includes('paragraphSegments'));assert.ok(JSON.stringify(result).length<JSON.stringify(source).length/2);
 });
+
+test('AI research retries only a known output limit once and preserves tool restrictions',async()=>{
+ const bodies=[];const a=new LegalApi(env,async(url,opts)=>{bodies.push(JSON.parse(opts.body));return bodies.length===1?Response.json({status:'incomplete',incomplete_details:{reason:'max_output_tokens'}}):upstream(url,opts);});
+ assert.ok((await a.research({items:[item()]})).sources.length);assert.deepEqual(bodies.map(b=>b.max_output_tokens),[8000,12000]);assert.deepEqual(bodies[0].tools,bodies[1].tools);assert.equal(bodies[1].provider.data_collection,'deny');assert.equal(bodies[0].reasoning.effort,'low');
+ let calls=0;const bad=new LegalApi(env,async()=>{calls++;return Response.json({status:'failed',error:{code:'synthetic-private-code',message:'synthetic-private-key'}});});await assert.rejects(bad.research({items:[item()]}),e=>e.message.includes('ai-search/service')&&!e.message.includes('private'));assert.equal(calls,1);
+});

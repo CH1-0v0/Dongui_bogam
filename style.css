@@ -512,3 +512,14 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .workspace>.stack{grid-template-columns:minmax(0,1fr)}.workspace>.stack>*{min-width:0;max-width:100%}.law-search-panel [role="alert"]{display:block;white-space:normal;overflow-wrap:anywhere;word-break:normal}
 
 .search-summary{padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--soft);line-height:1.7}.search-summary.search-incomplete{background:var(--warn-bg);color:var(--warn)}
+
+/* Align controls to the actual input row, excluding its label and hint. */
+.item-row>.item-name{display:contents}
+.item-row .item-name-label{grid-column:2;grid-row:1}
+.item-row .item-input-line{grid-column:2;grid-row:2}
+.item-row>.drag-handle{grid-column:1;grid-row:2;align-self:center}
+.item-row>.item-controls{grid-column:3;grid-row:2;align-self:center}
+.item-row>.item-hint{grid-row:3}
+.workspace>.stack>.rrn-notice{margin:0}
+.workspace>.stack>#message:empty{display:none}
+.workspace>.stack:has(>.rrn-notice)>.bar{margin-top:0}

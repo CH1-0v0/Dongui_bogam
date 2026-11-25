@@ -502,44 +502,68 @@ def verify_with_basis(candidate):
             'reason': str(candidate.get('reason', ''))[:1400]}
 
 
+def search_failure_code(envelope):
+    if not isinstance(envelope, dict):
+        return 'format'
+    if not envelope.get('error') and envelope.get('status') not in ('failed', 'incomplete', 'queued', 'in_progress'):
+        return ''
+    details = envelope.get('incomplete_details') or {}
+    error = envelope.get('error') or {}
+    reason = details.get('reason') if isinstance(details, dict) else None
+    if not reason and isinstance(error, dict):
+        reason = error.get('code')
+    if reason in ('max_output_tokens', 'length'): return 'output_limit'
+    if reason in ('max_tool_calls', 'max_tool_calls_exceeded'): return 'tool_limit'
+    if reason in (402, 'insufficient_quota', 'insufficient_credits'): return 'balance'
+    if reason in (429, 'rate_limit_exceeded'): return 'rate_limit'
+    if reason in ('no_allowed_providers', 'model_not_found', 'unsupported_tool'): return 'provider'
+    return 'incomplete' if envelope.get('status') == 'incomplete' else 'service'
+
 def web_research(context):
     key = os.environ.get('OPENROUTER_API_KEY')
     if not key:
-        raise ApiError('웹 검색을 위해 OPENROUTER_API_KEY를 설정해 주세요.', 503)
+        raise ApiError('AI 근거 검색을 위해 OPENROUTER_API_KEY를 설정해 주세요.', 503)
     config = json.loads((ROOT / 'cloudflare' / 'web-search.json').read_text(encoding='utf-8'))
     payload = {'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'instructions': config['instructions'],
                'input': json.dumps(context, ensure_ascii=False), 'tools': [dict(config['tool'], parameters={**config['tool']['parameters'], 'allowed_domains': config['domains']})],
-               'max_tool_calls': 3, 'max_output_tokens': 4000, 'provider': {'data_collection': 'deny'}}
-    raw = request_bytes('https://openrouter.ai/api/v1/responses', json.dumps(payload).encode(),
-                        {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'X-Title': 'Dongui Bogam'}, timeout=90)
-    try:
-        envelope = json.loads(raw)
-        if envelope.get('error') or envelope.get('status') in ('failed', 'incomplete'):
-            raise ApiError('웹 검색이 완료되지 않았습니다. 검색 도구 설정과 OpenRouter 연결을 확인하세요.', 502)
-        sources, seen, report = [], set(), ''
-        for item in envelope.get('output', []):
-            if item.get('type') != 'message':
+               'max_tool_calls': 3, 'max_output_tokens': config['max_output_tokens'], 'provider': {'data_collection': 'deny'}}
+    if 'gpt-oss' in payload['model']:
+        payload['reasoning'] = {'effort': 'low'}
+    for attempt in range(2):
+        raw = request_bytes('https://openrouter.ai/api/v1/responses', json.dumps(payload).encode(),
+                            {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'X-Title': 'Dongui Bogam'}, timeout=90)
+        try:
+            envelope = json.loads(raw)
+            failure = search_failure_code(envelope)
+            if failure == 'output_limit' and attempt == 0:
+                payload['max_output_tokens'] = config['retry_output_tokens']
                 continue
-            for part in item.get('content', []):
-                if part.get('type') != 'output_text':
+            if failure:
+                raise ApiError('AI 근거 검색이 완료되지 않았습니다. 검색 도구 설정과 AI 서비스 연결을 확인하세요. [문의 코드: ai-search/' + failure + ']', 502)
+            sources, seen, report = [], set(), ''
+            for item in envelope.get('output', []):
+                if item.get('type') != 'message':
                     continue
-                report += str(part.get('text', '')) + '\n'
-                for annotation in part.get('annotations', []):
-                    if annotation.get('type') != 'url_citation':
+                for part in item.get('content', []):
+                    if part.get('type') != 'output_text':
                         continue
-                    citation = annotation.get('url_citation', annotation)
-                    url = str(citation.get('url', ''))
-                    parsed = urllib.parse.urlsplit(url)
-                    host = parsed.hostname or ''
-                    if parsed.scheme not in ('http', 'https') or parsed.username or parsed.password or parsed.port not in (None, 80, 443) or not any(host == d or host.endswith('.' + d) for d in config['domains']) or url in seen or len(sources) >= 15:
-                        continue
-                    seen.add(url)
-                    sources.append({'url': url, 'title': str(citation.get('title') or url)[:200], 'excerpt': str(citation.get('content') or '')[:4000]})
-        if not sources or not report.strip():
-            raise ApiError('공식 웹 검색 출처를 확보하지 못했습니다. 검색 도구 설정을 확인하거나 다시 시도하세요.', 502)
-        return {'report': report[:16000], 'sources': sources}
-    except (ValueError, TypeError, AttributeError, KeyError):
-        raise ApiError('웹 검색 API 응답 형식을 확인하지 못했습니다.', 502) from None
+                    report += str(part.get('text', '')) + '\n'
+                    for annotation in part.get('annotations', []):
+                        if annotation.get('type') != 'url_citation':
+                            continue
+                        citation = annotation.get('url_citation', annotation)
+                        url = str(citation.get('url', ''))
+                        parsed = urllib.parse.urlsplit(url)
+                        host = parsed.hostname or ''
+                        if parsed.scheme not in ('http', 'https') or parsed.username or parsed.password or parsed.port not in (None, 80, 443) or not any(host == d or host.endswith('.' + d) for d in config['domains']) or url in seen or len(sources) >= 15:
+                            continue
+                        seen.add(url)
+                        sources.append({'url': url, 'title': str(citation.get('title') or url)[:200], 'excerpt': str(citation.get('content') or '')[:4000]})
+            if not sources or not report.strip():
+                raise ApiError('공식 AI 근거 검색 출처를 확보하지 못했습니다. 검색 도구 설정을 확인하거나 다시 시도하세요.', 502)
+            return {'report': report[:16000], 'sources': sources}
+        except (ValueError, TypeError, AttributeError, KeyError):
+            raise ApiError('AI 근거 검색 API 응답 형식을 확인하지 못했습니다.', 502) from None
 
 def ai_candidates(context):
     key = os.environ.get('OPENROUTER_API_KEY')

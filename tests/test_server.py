@@ -311,6 +311,21 @@ class WebResearchTests(unittest.TestCase):
         self.assertEqual(result['sources'][0]['excerpt'],'합성 발췌')
         self.assertTrue(call.call_args.args[0].endswith('/api/v1/responses'))
         payload=json.loads(call.call_args.args[1]);self.assertEqual(payload['tools'][0]['type'],'openrouter:web_search');self.assertEqual(payload['max_tool_calls'],3);self.assertEqual(payload['provider']['data_collection'],'deny')
+    def test_search_output_limit_retries_once_and_retains_tool_privacy(self):
+        incomplete=json.dumps({'status':'incomplete','incomplete_details':{'reason':'max_output_tokens'}}).encode()
+        complete=self.response([{'type':'url_citation','url':'https://www.nts.go.kr/synthetic'}])
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic'}),patch.object(server,'request_bytes',side_effect=[incomplete,complete]) as call:
+            self.assertTrue(server.web_research({'items':[]})['sources'])
+        bodies=[json.loads(c.args[1]) for c in call.call_args_list];self.assertEqual([b['max_output_tokens'] for b in bodies],[8000,12000]);self.assertEqual(bodies[0]['tools'],bodies[1]['tools']);self.assertEqual(bodies[1]['provider']['data_collection'],'deny');self.assertEqual(bodies[0]['reasoning']['effort'],'low')
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic'}),patch.object(server,'request_bytes',return_value=incomplete) as call:
+            with self.assertRaisesRegex(server.ApiError,'ai-search/output_limit'):server.web_research({'items':[]})
+            self.assertEqual(call.call_count,2)
+    def test_search_error_diagnostics_never_echo_provider_secrets(self):
+        raw=json.dumps({'status':'failed','error':{'code':'unknown-secret-value','message':'synthetic-private-key'}}).encode()
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic'}),patch.object(server,'request_bytes',return_value=raw) as call:
+            with self.assertRaisesRegex(server.ApiError,'AI 근거 검색이 완료되지 않았습니다') as got:server.web_research({'items':[]})
+            self.assertEqual(call.call_count,1);self.assertNotIn('secret',str(got.exception));self.assertNotIn('private-key',str(got.exception));self.assertIn('ai-search/service',str(got.exception))
+
     def test_missing_search_evidence_never_falls_back_to_memory(self):
         for annotations,status in [([], 'completed'), ([{'type':'url_citation','url':'https://www.nts.go.kr/synthetic'}], 'incomplete')]:
             with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic'}), patch.object(server,'request_bytes',return_value=self.response(annotations,status)) as call:
