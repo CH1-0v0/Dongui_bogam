@@ -984,6 +984,10 @@ function updateItemNameHelp(item){
  document.getElementById('hint-'+item.id).innerHTML=itemNameHelp(item);
 }
 function commitItemName(input,name=standardItemName(input.value)){
+ // Keep the row footprint when blur removes spelling help or replaces the input.
+ // Otherwise the document shrinks and browsers clamp the scroll position near its end.
+ const row=input.closest('.item-row');
+ if(row)row.style.minHeight=row.getBoundingClientRect().height+'px';
  const item=getItem(input.dataset.name);
  const previous=input.value.trim();
  if(item.name!==name){

@@ -240,6 +240,18 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   assert.equal(await page.locator('[data-candidate],.applied-basis,.manual-ground').count(),0);
   await page.locator('[data-next]').click();assert.equal(await page.locator('.doc-notice-row').count(),0);
   console.log('PASS latest main quick templates, item selectors and fresh-document law review reset');
+  await page.locator('.stepper [data-go="1"]').click();
+  for(let n=0;n<5;n++)await page.locator('[data-add="collect"]').click();
+  await page.locator('[data-item-preset]').last().selectOption('custom');
+  const normalizedName=page.locator('[data-name]').last();await normalizedName.fill('이름');
+  await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
+  const beforeBlur=await page.evaluate(()=>({y:scrollY,height:document.documentElement.scrollHeight}));
+  await normalizedName.blur();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  const afterBlur=await page.evaluate(()=>({y:scrollY,height:document.documentElement.scrollHeight}));
+  assert.equal(afterBlur.height,beforeBlur.height);assert.ok(Math.abs(afterBlur.y-beforeBlur.y)<=1);
+  assert.equal(await page.locator('[data-item-preset]').last().inputValue(),'성명');
+  console.log('PASS normalizing a direct item name on blur preserves document height and scroll position');
+
   await stage3();await page.route('**/api/status',r=>r.abort('connectionrefused'));await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();assert.match(await page.getByRole('alert').innerText(),/로컬 API 서버와 연결/);
   assert.deepEqual(errors,[]);console.log('Browser acceptance checks passed, including optional AI review and stable loading layout');
  }finally{await browser.close();}
