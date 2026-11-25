@@ -84,3 +84,7 @@ TEST_BASE_URL=http://127.0.0.1:8787 node tests/guideline-flow.cjs
 실패 재시도 시 다음 우선 제공자로 이동합니다. 기존 개인정보 보호 조건과 필수 매개변수 지원 필터는 유지하고, 사용자가 다른 모델을 설정하면 이 모델 전용 우선순위를 적용하지 않습니다. HTTP 200이어도 빈 답변·JSON 형식 오류는 최대 한 번 재시도합니다. 출력 한도에 잘린 답변과 이용 제한 응답은 성공으로 처리하거나 자동 재시도하지 않습니다. 총 요청 시도는 최대 2회이고 출력 토큰 한도를 자동으로 늘리지 않습니다.
 
 공개 지원·가격 정보: https://openrouter.ai/api/v1/models/openai/gpt-oss-120b/endpoints
+
+## 현재 기본 모델
+
+기본 모델은 `openai/gpt-6-luna`입니다. 로컬 `.env`의 `OPENROUTER_MODEL` 값이 있으면 해당 값이 우선합니다. Luna는 temperature를 보내지 않고 JSON 응답과 낮은 reasoning effort를 요청합니다. 위 OSS 제공자 우선순위는 OSS 모델을 명시했을 때만 적용됩니다.
