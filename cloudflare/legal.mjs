@@ -1,3 +1,4 @@
+import {inspectAiError} from './ai-diagnostics.mjs';
 // Cloudflare-native asynchronous adapter. No local Python process or filesystem.
 import {XMLParser, XMLValidator} from 'fast-xml-parser';
 import rules from '../basis-rules.json' with {type:'json'};
@@ -51,14 +52,10 @@ export function reviewMaterial(data){const {items}=validateContext(data),rule=ru
 async function readLimited(response,max=8_000_000){const reader=response.body?.getReader();if(!reader)return '';let size=0,parts=[];try{for(;;){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();fail('외부 API 응답이 너무 큽니다. 검색 범위를 줄여 주세요.',502);}parts.push(value);}}finally{reader.releaseLock();}const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}return new TextDecoder().decode(bytes);}
 // Classify only known conditions. Never forward upstream text: it may echo keys or prompts.
 async function serviceFailure(response,isAI,transportStatus=response.status){
- const status=response.status,service=isAI?'AI 서비스':'국가법령정보센터';let message='',bodyFormat='unreadable';
+ const status=response.status,service=isAI?'AI 서비스':'국가법령정보센터';let message='',bodyFormat='unreadable',inspection=null;
  if(isAI){try{const body=await readLimited(response,16384);bodyFormat=!body.trim()?'empty':/^\s*</.test(body)?'html':'text';
  try{const parsed=JSON.parse(body);bodyFormat='json';
- const error=parsed?.error;
- message=typeof error==='string'?error:typeof error?.message==='string'?error.message:typeof parsed?.message==='string'?parsed.message:typeof parsed?.detail==='string'?parsed.detail:'';
- const raw=error?.metadata?.raw;
- if(raw){let provider=raw;if(typeof raw==='string'){try{provider=JSON.parse(raw);}catch{provider=null;message+=' '+raw;}}
- const detail=provider?.error?.message||provider?.message;if(typeof detail==='string')message+=' '+detail;}
+ inspection=inspectAiError(parsed);message=inspection.message;
  }catch{message=body;}
  }catch{}}
  const context=/context|too (?:many|long)|maximum.*token|length.*exceed/i.test(message);
@@ -67,12 +64,12 @@ async function serviceFailure(response,isAI,transportStatus=response.status){
  const parameter=/response_format|json_object|json.?schema|structured.?output/i.test(message)?'response_format':/reasoning|reasoning_effort/i.test(message)?'reasoning':/temperature/i.test(message)?'temperature':null;
  const diagnostic=isAI?'AI-'+transportStatus+'-'+status+'-'+crypto.randomUUID().slice(0,8):null;
  const kind=context?'context':blocked?'blocked':auth?'auth':balance?'balance':parameter?'parameters':'unknown';
- const reason=/invalid.*(?:json|body)|json.*(?:invalid|parse|decode)|malformed.*(?:json|request)/i.test(message)?'invalid_json':/messages|message.*role/i.test(message)?'messages':/provider|routing|endpoint/i.test(message)?'routing':/region|country|geograph/i.test(message)?'region':/max_tokens|max_completion_tokens/i.test(message)?'output_limit':parameter||kind;
+ const reason=inspection?.reason||kind;
  // Compact, fixed vocabulary survives truncated dashboard trails; never log raw provider
  // text because it may contain submitted information or credentials.
- if(isAI)console.warn(`${diagnostic} format=${bodyFormat} reason=${reason} parameter=${parameter||'none'}`);
+ if(isAI)console.warn(`${diagnostic} format=${bodyFormat} reason=${reason} parameter=${parameter||'none'} shape=${inspection?.shape||'non_json'} codes=${inspection?.codes.join(',')||'none'}`);
  let advice;
- if([401,403].includes(status)||isAI&&status===400&&auth)advice=service+' 인증 또는 접근이 거부되었습니다. 서버의 키·이용 권한을 확인하세요.';
+ if([401,403].includes(status)||isAI&&status===400&&(auth||reason==='auth'))advice=service+' 인증 또는 접근이 거부되었습니다. 서버의 키·이용 권한을 확인하세요.';
  else if(status===402||isAI&&status===400&&balance)advice='AI 서비스 사용 잔액과 키 사용 한도를 확인하세요.';
  else if(status===429)advice=service+' 호출 한도에 도달했습니다. 잠시 후 다시 시도하세요.';
  else if(isAI&&status===404&&/data.?policy|privacy|data.?collection|zero.?data|zdr/i.test(message))advice='AI 서비스의 개인정보 보호 조건에 맞는 연결을 찾지 못했습니다. AI 연결 설정을 확인해 주세요.';
@@ -80,12 +77,16 @@ async function serviceFailure(response,isAI,transportStatus=response.status){
  else if(isAI&&[400,413,422].includes(status)&&context)advice='AI가 처리할 수 있는 입력 범위를 넘었습니다. 항목이나 설명을 줄여 다시 시도해 주세요.';
  else if(isAI&&status===400&&blocked)advice='AI 서비스가 요청 처리를 제한했습니다. 입력 내용과 서비스 이용 조건을 확인해 주세요.';
  else if(isAI&&[400,422].includes(status)&&bodyFormat!=='json')advice='AI 연결 과정에서 정상 API 형식이 아닌 오류 응답을 받았습니다. 연결 경로를 확인해 주세요.';
+ else if(isAI&&[400,422].includes(status)&&reason==='privacy')advice='AI 서비스의 개인정보 보호 조건에 맞는 연결을 찾지 못했습니다. 보호 설정을 유지한 채 연결 설정을 확인해야 합니다.';
+ else if(isAI&&[400,422].includes(status)&&reason==='request_validation')advice='AI 서비스가 요청 형식 검증을 거부했습니다. 서버의 요청 구성을 확인해야 합니다.';
+ else if(isAI&&[400,422].includes(status)&&reason==='missing_error_message')advice='AI 서비스가 오류 응답에 거부 사유를 제공하지 않았습니다. 응답 구조를 확인해야 합니다.';
+ else if(isAI&&[400,422].includes(status)&&reason==='unrecognized_error')advice='AI 서비스의 오류 설명을 자동 분류하지 못했습니다. 문의 코드의 응답 구조를 확인해야 합니다.';
  else if(isAI&&[400,422].includes(status))advice='AI 서비스가 요청 설정을 처리하지 못했습니다. AI 연결 설정을 확인해 주세요.';
  else if([408,504].includes(status))advice=service+' 처리 시간이 초과되었습니다. 잠시 후 다시 시도하세요.';
  else if(status>=500)advice=service+'가 일시적으로 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요.';
  else advice=service+' 요청을 처리하지 못했습니다. 연결 설정을 확인해 주세요.';
- const error=new ApiError(advice+' (오류 '+status+')'+(diagnostic?' [문의 코드: '+diagnostic+'; '+bodyFormat+'/'+reason+']':''),status===429?429:[408,504].includes(status)?504:502,status);
- error.requestKind=kind==='unknown'&&bodyFormat==='json'?'parameters':kind;error.parameter=parameter;throw error;
+ const error=new ApiError(advice+' (오류 '+status+')'+(diagnostic?' [문의 코드: '+diagnostic+'; '+bodyFormat+'/'+reason+(inspection?'; 구조: '+inspection.shape+'; 코드: '+(inspection.codes.join(',')||'없음'):'')+']':''),status===429?429:[408,504].includes(status)?504:502,status);
+ error.requestKind=['auth','balance','context','blocked','privacy','region','model','routing','messages','output_limit','invalid_json','request_validation'].includes(reason)?reason:kind==='unknown'&&bodyFormat==='json'?'parameters':kind;error.parameter=parameter;throw error;
 }
 const lawCache=new Map(); // Isolate-only official-law cache, never stores submitted items or AI results.
 export class LegalApi {

@@ -1,3 +1,4 @@
+import {inspectAiError} from '../cloudflare/ai-diagnostics.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -41,3 +42,20 @@ test('AI diagnostics distinguish HTTP rejection from HTTP-200 error envelope wit
 
 test('non-JSON AI rejections identify the response format and avoid useless parameter retries',async()=>{for(const [body,format] of [['<html>private echo</html>','html'],['private echo','text'],['','empty']]){let calls=0;const a=new LegalApi(env,async()=>{calls++;return new Response(body,{status:400});});await assert.rejects(a.ai('synthetic',{}),e=>e.message.includes(format+'/')&&!e.message.includes('private echo'));assert.equal(calls,1);}});
 test('AI reads alternate JSON error shapes without exposing or logging raw text',async()=>{const saved=console.warn,logs=[];console.warn=value=>logs.push(value);try{for(const body of [{message:'temperature unsupported private echo'},{error:'temperature unsupported private echo'},{error:{metadata:{raw:{message:'temperature unsupported private echo'}}}}]){const a=new LegalApi(env,async()=>Response.json(body,{status:400}));await assert.rejects(a.ai('synthetic',{}),e=>e.parameter==='temperature'&&e.message.includes('json/temperature')&&!e.message.includes('private echo'));}assert.ok(logs.every(value=>!value.includes('private echo')&&value.includes('parameter=temperature')));}finally{console.warn=saved;}});
+
+test('nested and validation-array AI errors are inspected through bounded known fields only',()=>{
+ const cases=[
+  [{errors:[{code:10000,message:'authentication error private secret'}]},'auth'],
+  [{detail:[{loc:['body','messages'],msg:'untrusted',type:'missing required field'}]},'messages'],
+  [{error:{data:{error:{message:'unsupported response_format private secret'}}}},'response_format'],
+  [{error:{metadata:{raw:JSON.stringify({errors:[{message:'country not supported'}]})}}},'region'],
+  [{error:{message:'Provider returned error',metadata:{raw:'unsupported optional settings'}}},'unrecognized_error'],
+  [{success:false},'missing_error_message']
+ ];
+ for(const [body,reason]of cases){const result=inspectAiError(body);assert.equal(result.reason,reason);assert.ok(!result.shape.includes('private'));}
+ const result=inspectAiError({errors:[{code:10000,message:'authentication error'}],request:{api_key:'secret',messages:['secret']}});assert.deepEqual(result.codes,[10000]);assert.ok(!result.message.includes('secret'));
+});
+test('AI display and logs never include arbitrary provider text or arbitrary field names',async()=>{
+ const logs=[],save=console.warn;console.warn=x=>logs.push(x);
+ try{const api=new LegalApi(env,async()=>Response.json({errors:[{code:10000,message:'authentication error sk-private customer@example.test'}],secret_field:'private'},{status:400}));await assert.rejects(api.ai('synthetic',{}),e=>e.message.includes('json/auth')&&e.message.includes('10000')&&!/sk-private|customer@|secret_field/.test(e.message));assert.ok(logs.every(x=>!/sk-private|customer@|secret_field/.test(x)));}finally{console.warn=save;}
+});
