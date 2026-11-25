@@ -1,6 +1,7 @@
 const assets = new URL('./export-assets/', import.meta.url);
 const [pageWidth, pageHeight] = [595.28, 841.89];
-const margin = 45.35;
+const margin = 56.69; // 20 mm left/right
+const topMargin = 70.87, bottomMargin = 70.87; // top+header and bottom+footer: 25 mm
 const contentWidth = pageWidth - 2 * margin;
 
 function loadScript(name, globalName){
@@ -67,8 +68,8 @@ export async function createPdf(body,tableGrid){
  ]);
  const ink=rgb(.10,.15,.23), blue=rgb(33/255,84/255,199/255), border=rgb(.56,.62,.71), fill=rgb(.94,.96,.99);
  let page,y;
- function nextPage(){page=pdf.addPage([pageWidth,pageHeight]);y=pageHeight-margin;}
- function room(height){if(y-height<margin)nextPage();}
+ function nextPage(){page=pdf.addPage([pageWidth,pageHeight]);y=pageHeight-topMargin;}
+ function room(height){if(y-height<bottomMargin)nextPage();}
  function draw(text,x,baseline,font,size,color,width=0,align='left'){
   if(!text)return;
   if(align==='center')x+=(width-font.widthOfTextAtSize(text,size))/2;
@@ -79,7 +80,7 @@ export async function createPdf(body,tableGrid){
   const indent=prefix?font.widthOfTextAtSize(prefix+' ',size):0;
   const lines=wrapText(text,font,size,contentWidth-indent);
   const leading=size*1.5;
-  room(Math.min(lines.length*leading+keep,pageHeight-2*margin));
+  room(Math.min(lines.length*leading+keep,pageHeight-topMargin-bottomMargin));
   for(const [index,line] of lines.entries()){
    room(leading);
    if(prefix&&index===0)draw(prefix,margin,y-size,font,size,color);
@@ -156,7 +157,7 @@ export async function createPdf(body,tableGrid){
    if(cell.lines.length>available)rowLines[last]+=cell.lines.length-available;
   }));
   room(headHeight+height(1));repeatHead();
-  const cursors=new Map();let fragments=[],budget=y-margin;
+  const cursors=new Map();let fragments=[],budget=y-bottomMargin;
   function flush(){
    if(!fragments.length)return;
    const top=y;
@@ -183,7 +184,7 @@ export async function createPdf(body,tableGrid){
    let remaining=rowLines[row];
    while(remaining){
     const available=Math.floor((budget-2*padding)/leading);
-    if(available<1){flush();nextPage();repeatHead();budget=y-margin;continue;}
+    if(available<1){flush();nextPage();repeatHead();budget=y-bottomMargin;continue;}
     const lines=Math.min(remaining,available),part={row,height:height(lines)};
     fragments.push(part);budget-=part.height;remaining-=lines;
    }
@@ -197,10 +198,24 @@ export async function createPdf(body,tableGrid){
  pdf.setTitle(nodeText(documents[0].querySelector('h1')));
  pdf.setLanguage('ko-KR');
  for(const doc of documents){
-  nextPage();
+  nextPage();let noticeStart=null;
+  function finishNotice(){
+   if(!noticeStart)return;
+   const pages=pdf.getPages(),end=pages.indexOf(page);
+   for(let index=noticeStart.index;index<=end;index++){
+    const top=index===noticeStart.index?noticeStart.top:pageHeight-topMargin+6;
+    const bottom=index===end?y-4:bottomMargin-4;
+    pages[index].drawRectangle({x:margin-6,y:bottom,width:contentWidth+12,height:Math.max(1,top-bottom),borderWidth:.7,borderColor:border});
+   }
+   noticeStart=null;y-=16.5;
+  }
   for(const node of doc.querySelectorAll('h1,h3,table,p')){
+   const isNotice=Boolean(node.closest('.notice-section'));
+   if(noticeStart&&!isNotice)finishNotice();
+   if(node.matches('.doc-notice-heading')){room(90);noticeStart={index:pdf.getPages().indexOf(page),top:y+6};}
+
    if(node.matches('h1')){const titleHeight=wrapText(nodeText(node),bold,17,contentWidth).length*25.5;room(titleHeight+32);page.drawRectangle({x:margin-4,y:y-titleHeight-6,width:contentWidth+8,height:titleHeight+12,borderWidth:.5,borderColor:border,color:fill});paragraph(nodeText(node),{font:bold,size:17,color:blue,align:'center',after:24.5,keep:20});}
-   else if(node.matches('h3')){y-=16.5;paragraph(nodeText(node),{font:bold,size:13,color:blue,after:8,keep:58});}
+   else if(node.matches('h3')){if(!node.matches('.doc-notice-heading'))y-=16.5;paragraph(nodeText(node),{font:bold,size:13,color:blue,after:node.matches('.doc-notice-heading')?1:8,keep:58});}
    else if(node.matches('table'))table(node);
    else if(node.matches('.doc-agency')){y-=16.5;paragraph(nodeText(node),{font:bold,size:15,align:'center'});}
    else if(node.matches('.guardian-heading')){y-=16.5;paragraph(nodeText(node),{font:bold,align:'right'});}

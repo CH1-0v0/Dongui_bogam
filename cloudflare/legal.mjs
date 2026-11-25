@@ -31,15 +31,20 @@ function parseLaw(raw){
  const root=convert('root',value);if(content(root).includes('사용자 정보 검증'))fail('법령 API 인증을 확인할 수 없습니다. 승인된 OC를 확인하세요.',502);return root;
 }
 const excerpt=n=>[n,...descendants(n)].filter(p=>['조문내용','항내용','호내용','목내용'].includes(p.tag)).map(p=>content(p).trim()).filter(Boolean).join('\n');
+const deletedNode=n=>{
+ const body=children(n).filter(c=>['조문내용','항내용','호내용','목내용'].includes(c.tag)).map(content).join(' ').trim();
+ return text(n,'조문제목')==='삭제'||/^(?:(?:제\d+조(?:의\d+)?(?:\([^)]*\))?|[①-⑳]|\d+\.|[가-힣]\.)\s*)?(?:전문\s*)?삭제(?:\s*[<〈(][^>〉)]*[>〉)])?\s*[.。]?$/.test(body);
+};
 export function leadingNumber(value){const circles='①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';for(let i=0;i<circles.length;i++)if(value.includes(circles[i]))return String(i+1);const m=value.normalize('NFKC').match(/\d+/);return m?String(Number(m[0])):'';}
 const number=(value,unit='')=>{const s=compact(value).replace(/^제/,'').replace(new RegExp(unit+'$'),'');if(!/^\d{1,4}(?:의\d{1,3})?$/.test(s))fail('조·항·호 번호를 확인해 주세요.',400);return s;};
 const articleLabel=n=>String(Number(text(n,'조문번호')))+(Number(text(n,'조문가지번호'))?'의'+Number(text(n,'조문가지번호')):'');
-const clauses=n=>children(n,'호').map(c=>({value:leadingNumber(text(c,'호번호')),text:excerpt(c),points:children(c,'목').map(m=>({value:text(m,'목번호').replace(/\.$/,''),text:excerpt(m)}))})).filter(c=>c.value);
+const clauses=n=>children(n,'호').filter(c=>!deletedNode(c)).map(c=>({value:leadingNumber(text(c,'호번호')),text:excerpt(c),points:children(c,'목').filter(m=>!deletedNode(m)).map(m=>({value:text(m,'목번호').replace(/\.$/,''),text:excerpt(m)}))})).filter(c=>c.value);
 export function articleNode(root,article,paragraph='',clause=''){
  const [major,sub='0']=article.split('의');const matches=descendants(root,'조문단위').filter(n=>text(n,'조문여부')==='조문'&&Number(text(n,'조문번호'))===Number(major)&&Number(text(n,'조문가지번호'))===Number(sub));
- if(matches.length!==1||text(matches[0],'조문제목')==='삭제')fail('요청한 조문이 현행 법령 원문에 없습니다.');let node=matches[0];
+ if(matches.length!==1||deletedNode(matches[0]))fail('요청한 조문이 현행 법령 원문에 없습니다.');let node=matches[0];
  if(paragraph){const ps=children(node,'항').filter(p=>leadingNumber(text(p,'항번호'))===paragraph);if(ps.length)node=ps[0];else if(paragraph!=='1'||children(node,'항').some(p=>leadingNumber(text(p,'항번호'))))fail('요청한 항이 현행 조문에 없습니다.');}
- if(clause){const hs=descendants(node,'호').filter(h=>leadingNumber(text(h,'호번호'))===clause);if(hs.length!==1)fail('요청한 호가 없거나 항 지정이 필요합니다.');node=hs[0];}return node;
+ if(deletedNode(node))fail('선택한 조문은 삭제되어 법령 근거로 사용할 수 없습니다.');
+ if(clause){const hs=descendants(node,'호').filter(h=>leadingNumber(text(h,'호번호'))===clause);if(hs.length!==1)fail('요청한 호가 없거나 항 지정이 필요합니다.');node=hs[0];}if(deletedNode(node))fail('선택한 조문은 삭제되어 법령 근거로 사용할 수 없습니다.');return node;
 }
 const extract=(root,a,p='',c='')=>{const result=excerpt(articleNode(root,a,p,c));if(!result)fail('요청한 조문의 본문을 확인하지 못했습니다.');return result;};
 function segments(node){const result=[];function visit(n,clause='',label=''){if(n.tag==='호')clause=leadingNumber(text(n,'호번호'));if(['항','호','목'].includes(n.tag))label=text(n,{항:'항번호',호:'호번호',목:'목번호'}[n.tag]);if(['조문내용','항내용','호내용','목내용'].includes(n.tag)&&content(n).trim())result.push({text:content(n).trim(),clause,label});for(const c of n.children)visit(c,clause,label);}visit(node);return result;}
@@ -132,7 +137,7 @@ export class LegalApi {
  if(!/^\d{1,20}$/.test(mst))fail('행정규칙 검색 결과를 다시 선택하세요.',400);const root=await this.law('lawService.do',{target:'admrul',ID:mst}),official=content(find(root,'행정규칙명')).trim();if(!official||compact(official)!==compact(name))fail('행정규칙의 공식 명칭을 확인하지 못했습니다.');let raw=['조문내용','본문내용','행정규칙내용','본문'].map(k=>content(find(root,k))).find(Boolean)||excerpt(root);if(!raw)fail('행정규칙 본문이 제공되지 않았습니다. 국가법령정보센터 원문에서 확인하세요.');raw=raw.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi,'').replace(/<(?:br|p|div|li)\b[^>]*>/gi,'\n').replace(/<[^>]*>/g,'');return {law:official,mst,target:'admrul',articles:[],referenceOnly:true,text:raw.trim(),sourceUrl:'https://www.law.go.kr/행정규칙/'+encodeURIComponent(official)};
  }
  const {row,mst:current}=await this.resolve(name);if(current!==mst)fail('법령 버전이 변경되었거나 검색 결과와 다릅니다. 법령을 다시 검색하세요.');const root=await this.law('lawService.do',{MST:mst});const official=content(find(root,'법령명_한글'));if(official&&compact(official)!==compact(name))fail('검색 결과와 본문의 법령명이 다릅니다.',502);
- const articles=descendants(root,'조문단위').filter(n=>text(n,'조문여부')==='조문'&&text(n,'조문제목')!=='삭제'&&excerpt(n)).map(n=>{const paragraphs=children(n,'항').map(p=>({value:leadingNumber(text(p,'항번호')),text:excerpt(p),clauses:clauses(p)})).filter(p=>p.value);return {value:articleLabel(n),title:text(n,'조문제목'),text:excerpt(n),paragraphs,clauses:[...clauses(n),...(!paragraphs.length?children(n,'항').flatMap(clauses):[])]};});if(!articles.length)fail('선택할 수 있는 조문 본문을 확인하지 못했습니다.');return {law:text(row,'법령명한글'),mst,effectiveDate:text(row,'시행일자'),articles,sourceUrl:'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq='+mst};
+ const articles=descendants(root,'조문단위').filter(n=>text(n,'조문여부')==='조문'&&!deletedNode(n)&&excerpt(n)).map(n=>{const paragraphs=children(n,'항').filter(p=>!deletedNode(p)).map(p=>({value:leadingNumber(text(p,'항번호')),text:excerpt(p),clauses:clauses(p)})).filter(p=>p.value);return {value:articleLabel(n),title:text(n,'조문제목'),text:excerpt(n),paragraphs,clauses:[...clauses(n),...(!paragraphs.length?children(n,'항').flatMap(clauses):[])]};});if(!articles.length)fail('선택할 수 있는 조문 본문을 확인하지 못했습니다.');return {law:text(row,'법령명한글'),mst,effectiveDate:text(row,'시행일자'),articles,sourceUrl:'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq='+mst};
  }
  async ai(prompt,data,maxTokens=3000){
   if(!this.env.OPENROUTER_API_KEY)fail('AI 기능을 위해 서버에 OPENROUTER_API_KEY를 설정해 주세요.',503);

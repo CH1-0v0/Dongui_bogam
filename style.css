@@ -503,3 +503,8 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .document-source:has([contenteditable]) [contenteditable]:focus{outline:2px solid var(--blue);background:#fff}
 .human-review>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none}.human-review>summary::before{content:'+'}.human-review[open]>summary::before{content:'−'}.human-review>summary::-webkit-details-marker{display:none}
 .human-check{display:flex;align-items:flex-start;gap:8px}.human-check input{flex:none;margin:4px 0 0}.final-review .human-review ul{margin:8px 0 0}.final-review .human-review li:last-child{padding-bottom:0}.final-review .human-review li p{margin-bottom:0}.final-review .human-review{margin-bottom:10px}
+
+.review-confirmations .check{font-size:16px;line-height:1.65;font-weight:650;align-items:flex-start}.review-confirmations .check input{flex:none;margin-top:5px}
+.child-choice>p{margin:0 0 12px}.child-choice .actions{margin-top:0}.child-choice legend{line-height:1.4}.child-choice{padding-top:12px}
+.doc .notice-section{border:1px solid #8e9eb5;padding:12px;margin-top:1.5em}.doc .notice-section .doc-notice-heading{border:0;margin:0 0 8px;padding:0}.doc .notice-section .doc-notice{margin:0}.doc .notice-section+.sign{margin-top:1.5em}
+.final-title{display:flex;align-items:center;justify-content:space-between;gap:16px}.final-title>button{flex:none}@media(max-width:570px){.final-title{flex-wrap:wrap}.final-title>button{margin-left:auto}}

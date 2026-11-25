@@ -210,8 +210,8 @@ def node_excerpt(node):
 
 def child_clauses(parent):
     return [{'value': leading_number(text(c, '호번호')), 'text': node_excerpt(c),
-             'points': [{'value': text(m, '목번호').strip().rstrip('.'), 'text': node_excerpt(m)} for m in c.findall('목')]}
-            for c in parent.findall('호') if leading_number(text(c, '호번호'))]
+             'points': [{'value': text(m, '목번호').strip().rstrip('.'), 'text': node_excerpt(m)} for m in c.findall('목') if not deleted_node(m)]}
+            for c in parent.findall('호') if leading_number(text(c, '호번호')) and not deleted_node(c)]
 
 
 def admin_document(data):
@@ -296,7 +296,7 @@ def law_article_catalog(data):
         raise ApiError('검색 결과와 본문의 법령명이 다릅니다.')
     articles = []
     for node in root.findall('.//조문단위'):
-        if text(node, '조문여부') != '조문' or text(node, '조문제목') == '삭제':
+        if text(node, '조문여부') != '조문' or deleted_node(node):
             continue
         article = article_label(node)
         if not re.fullmatch(r'\d+(?:의\d+)?', article):
@@ -305,7 +305,7 @@ def law_article_catalog(data):
         if not excerpt:
             continue
         paragraphs = [{'value': leading_number(text(part, '항번호')), 'text': node_excerpt(part), 'clauses': child_clauses(part)}
-                      for part in node.findall('항') if leading_number(text(part, '항번호'))]
+                      for part in node.findall('항') if leading_number(text(part, '항번호')) and not deleted_node(part)]
         implicit_clauses = child_clauses(node)
         if not paragraphs:
             for part in node.findall('항'):
@@ -317,12 +317,17 @@ def law_article_catalog(data):
     return {'law': text(row, '법령명한글'), 'mst': mst, 'effectiveDate': text(row, '시행일자'), 'articles': articles, 'sourceUrl': 'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=' + mst}
 
 
+def deleted_node(node):
+    body = ' '.join((child.text or '').strip() for child in node if child.tag in ['조문내용', '항내용', '호내용', '목내용']).strip()
+    return text(node, '조문제목') == '삭제' or bool(re.fullmatch(r'(?:(?:제\d+조(?:의\d+)?(?:\([^)]*\))?|[①-⑳]|\d+\.|[가-힣]\.)\s*)?(?:전문\s*)?삭제(?:\s*[<〈(][^>〉)]*[>〉)])?\s*[.。]?', body))
+
+
 def article_node(root, article, paragraph='', clause=''):
     major, _, sub = article.partition('의')
     matches = [n for n in root.findall('.//조문단위')
                if text(n, '조문여부') == '조문' and text(n, '조문번호').lstrip('0') == major.lstrip('0')
                and (text(n, '조문가지번호').lstrip('0') or '') == (sub.lstrip('0') or '')]
-    if len(matches) != 1 or '삭제' == text(matches[0], '조문제목'):
+    if len(matches) != 1 or deleted_node(matches[0]):
         raise ApiError('요청한 조문이 현행 법령 원문에 없습니다.', 422)
     node = matches[0]
     if paragraph:
@@ -333,11 +338,15 @@ def article_node(root, article, paragraph='', clause=''):
                 raise ApiError('요청한 항이 현행 조문에 없습니다.', 422)
         else:
             node = ps[0]
+    if deleted_node(node):
+        raise ApiError('선택한 조문은 삭제되어 법령 근거로 사용할 수 없습니다.', 422)
     if clause:
         candidates = [h for h in node.findall('.//호') if leading_number(text(h, '호번호')) == clause]
         if len(candidates) != 1:
             raise ApiError('요청한 호가 없거나 항 지정이 필요합니다.', 422)
         node = candidates[0]
+    if deleted_node(node):
+        raise ApiError('선택한 조문은 삭제되어 법령 근거로 사용할 수 없습니다.', 422)
     return node
 
 

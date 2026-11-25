@@ -62,3 +62,9 @@ test('AI display and logs never include arbitrary provider text or arbitrary fie
 
 test('interrupted AI response bodies retry once and never parse partial output',async()=>{for(const recover of [true,false]){let calls=0;const a=new LegalApi(env,async()=>{calls++;if(calls===2&&recover)return Response.json({choices:[{message:{content:'{"ok":true}'}}]});return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('{"choices":'));controller.error(new Error('synthetic disconnect'));}}));});if(recover)assert.deepEqual(await a.ai('synthetic',{}),{ok:true});else await assert.rejects(a.ai('synthetic',{}),e=>e.requestKind==='stream');assert.equal(calls,2);}});
 test('incomplete AI law candidates are explained as missing AI output, without asking the user to enter a law',async()=>{const a=new LegalApi(env);a.ai=async()=>({candidates:[{law:'',article:'15'},{law:'검증용법',article:''}]});const result=await a.search({items:[item()]});assert.equal(result.candidates.length,0);assert.equal(result.rejected.length,2);assert.ok(result.rejected.every(r=>r.message.includes('AI 제안')&&!r.message.includes('입력하세요')));});
+
+test('deleted article bodies and selected deleted paragraphs or clauses cannot be adopted',()=>{
+ for(const marker of ['삭제 <2025. 1. 1.>','전문 삭제 <2025. 1. 1.>']){const root=parseXml(`<법령><조문단위><조문여부>조문</조문여부><조문번호>10</조문번호><조문제목>옛 제목</조문제목><조문내용>제10조(옛 제목) ${marker.replaceAll('<','&lt;').replaceAll('>','&gt;')}</조문내용></조문단위></법령>`);assert.throws(()=>articleNode(root,'10'),/현행|삭제/);}
+ const root=parseXml('<법령><조문단위><조문여부>조문</조문여부><조문번호>10</조문번호><조문제목>처리</조문제목><조문내용>제10조(처리)</조문내용><항><항번호>①</항번호><항내용>① 처리할 수 있다.</항내용><호><호번호>1.</호번호><호내용>1. 삭제 &lt;2025. 1. 1.&gt;</호내용></호></항><항><항번호>②</항번호><항내용>② 삭제</항내용></항></조문단위></법령>');
+ assert.ok(articleNode(root,'10','1'));assert.throws(()=>articleNode(root,'10','2'),/삭제/);assert.throws(()=>articleNode(root,'10','1','1'),/삭제/);
+});
