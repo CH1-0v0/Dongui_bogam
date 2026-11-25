@@ -483,8 +483,8 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .class-item b,.item-picker button,.catalog-result strong,.candidate-title,.doc-text,.final-review p{word-break:keep-all;overflow-wrap:break-word}
 /* Reviewed laws have a distinct title band and clear expanded-content hierarchy. */
 .law-options-group>summary{background:var(--soft);padding:9px 12px;border-radius:7px;font-weight:800}
-.law-options-children .candidate-block{border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:8px;margin:10px 0;overflow:hidden}
-.law-options-children .candidate-block>summary{background:var(--wash);padding:12px 14px;color:var(--blue-dark);min-height:52px;align-items:flex-start}
+.law-options-children .candidate-block{border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:8px;margin:10px 0;padding:0;overflow:hidden}
+.law-options-children .candidate-block>summary{background:var(--wash);padding:10px 14px;color:var(--blue-dark);min-height:44px;align-items:center;gap:10px}
 .candidate-block>summary .candidate-title{font-size:17px;font-weight:850;line-height:1.6}
 .candidate-block[open]>summary{border-bottom:1px solid var(--line)}
 .candidate-body{background:var(--white);padding:14px 16px}
@@ -493,3 +493,5 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .candidate-body .source-disclosure>summary{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-weight:750}
 .candidate-body .ground-editor h4{background:var(--wash);border-left:3px solid var(--blue);padding:8px 10px;margin-top:18px;font-size:17px}
 @media(max-width:570px){.candidate-body{padding:12px}.candidate-block>summary .candidate-title{font-size:16px}}
+
+.law-options-children .candidate-block>summary .pill{margin:0;line-height:1.5;min-width:0}.law-options-children .candidate-block>summary .candidate-title{min-width:0}
