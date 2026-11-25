@@ -59,6 +59,8 @@ async function serviceFailure(response,isAI){
  const blocked=/content.?policy|content.?filter|moderation|safety.?policy/i.test(message);
  const auth=/invalid.*(?:api.?key|token)|unauthorized/i.test(message),balance=/insufficient.*(?:credit|balance)|payment required/i.test(message);
  const parameter=/response_format|json_object|json.?schema|structured.?output/i.test(message)?'response_format':/reasoning|reasoning_effort/i.test(message)?'reasoning':/temperature/i.test(message)?'temperature':null;
+ // Operator-only diagnostics for `wrangler tail`; never returned to the browser. Truncated because providers may echo input.
+ if(isAI)console.warn(JSON.stringify({aiUpstreamStatus:status,kind:context?'context':blocked?'blocked':auth?'auth':balance?'balance':'parameters',parameter,detail:message.slice(0,300)}));
  let advice;
  if([401,403].includes(status)||isAI&&status===400&&auth)advice=service+' 인증 또는 접근이 거부되었습니다. 서버의 키·이용 권한을 확인하세요.';
  else if(status===402||isAI&&status===400&&balance)advice='AI 서비스 사용 잔액과 키 사용 한도를 확인하세요.';
