@@ -24,6 +24,8 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parent
 MODEL = 'openai/gpt-oss-120b'
 LAW_KINDS = ('법률', '대통령령', '총리령', '부령')
+def is_law_kind(kind):
+    return kind in LAW_KINDS or str(kind).endswith(('부령', '총리령'))
 MAX_BODY = 24000
 MAX_RESPONSE = 8_000_000
 LAW_CACHE = {}
@@ -164,7 +166,7 @@ def number(value, unit=''):
 def resolve_law(name):
     root = law_request('lawSearch.do', query=name, search='1', display='20', nw='1')
     # Exact official title match only: never pick the first fuzzy result (e.g. an enforcement decree).
-    matches = [row for row in root.findall('.//law') if compact(text(row, '법령명한글')) == compact(name) and text(row, '법령구분명') in LAW_KINDS]
+    matches = [row for row in root.findall('.//law') if compact(text(row, '법령명한글')) == compact(name) and is_law_kind(text(row, '법령구분명'))]
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime('%Y%m%d')
     matches = [row for row in matches if re.sub(r'\D', '', text(row, '시행일자')) <= today]
     if not matches:
@@ -205,7 +207,7 @@ def search_law_catalog(data):
             mst = text(row, '법령일련번호' if target == 'law' else '행정규칙일련번호')
             effective = re.sub(r'\D', '', text(row, '시행일자'))
             kind = text(row, '법령구분명') if target == 'law' else '행정규칙'
-            if target == 'law' and kind not in LAW_KINDS:
+            if target == 'law' and not is_law_kind(kind):
                 continue
             if not mst.isdigit() or len(effective) != 8 or effective > today:
                 continue
@@ -301,7 +303,7 @@ def count_law_catalog(data):
     for row in rows:
         mst = text(row, '법령일련번호' if target == 'law' else '행정규칙일련번호')
         effective = re.sub(r'\D', '', text(row, '시행일자'))
-        if target == 'law' and text(row, '법령구분명') not in LAW_KINDS:
+        if target == 'law' and not is_law_kind(text(row, '법령구분명')):
             continue
         if mst.isdigit() and len(effective) == 8 and effective <= today:
             count += 1
@@ -479,7 +481,7 @@ def verify_with_basis(candidate):
             basis_task = pool.submit(verify_basis, candidate)
             actual = actual_task.result()
             basis = basis_task.result()
-        if actual.get('kind') not in LAW_KINDS:
+        if not is_law_kind(actual.get('kind')):
             raise ApiError('법률·시행령·시행규칙에서 근거를 선택하세요.', 422)
         if code == 'residentLaw' and actual.get('kind') not in ('법률', '대통령령'):
             raise ApiError('시행규칙만으로 주민등록번호 처리 근거를 적용할 수 없습니다. 구체적인 법률·대통령령의 허용 근거를 확인하세요.', 422)
