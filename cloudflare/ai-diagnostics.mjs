@@ -33,10 +33,14 @@ export function inspectAiError(parsed){
  /max_tokens|max_completion_tokens/i.test(message)?'output_limit':
  /messages|message.*role/i.test(message)?'messages':
  /invalid.*(?:json|body)|json.*(?:invalid|parse|decode)|malformed.*(?:json|request)/i.test(message)?'invalid_json':
- /region|country|geograph/i.test(message)?'region':
+ /region|country|geograph|location|territor/i.test(message)?'region':
  /no (?:available )?(?:provider|endpoint)|routing|endpoint.*(?:not found|unavailable)|provider.*(?:unavailable|not found)/i.test(message)?'routing':
- /model.*(?:invalid|not found|not available)|unknown.*model|model_not_found/i.test(message)?'model':
+ /model.*(?:invalid|not found|not available|not supported|does not exist)|unknown.*model|model_not_found/i.test(message)?'model':
  /invalid_request|bad.?request|invalid.*request|validation|field required|missing.*required/i.test(message)?'request_validation':
  texts.length?'unrecognized_error':'missing_error_message';
- return {message,reason,shape:[...paths].slice(0,12).join(',')||'no_known_error_fields',codes:[...codes].slice(0,4)};
+ // Return an unordered set from a fixed vocabulary, never an excerpt. Tokens that
+ // do not belong to this dictionary (including keys, names and values) are discarded.
+ const vocabulary=new Set('api authentication authorization bearer account user session cookie header referer origin content-type content-length content-encoding application/json body request response model models provider providers endpoint router routing gateway proxy upstream downstream service error errors returned unknown internal invalid unsupported support supported allowed denied forbidden disabled enabled required missing malformed validation validate valid json parse decoding serialization schema object array string null undefined empty messages message role system developer assistant tool tools function functions reasoning effort temperature response_format max_tokens max_completion_tokens token tokens context limit quota balance credit credits insufficient payment billing rate timeout streaming stream completion completions chat prompt prompts parameters parameter privacy collection policy data cache transform transforms version not found available unavailable exist exists location country region geography'.split(' '));
+ const keywords=[...new Set((message.toLowerCase().match(/[a-z][a-z_-]*(?:\/[a-z]+)?/g)||[]).filter(word=>vocabulary.has(word)))].sort().slice(0,24);
+ return {message,reason,keywords,shape:[...paths].slice(0,12).join(',')||'no_known_error_fields',codes:[...codes].slice(0,4)};
 }

@@ -68,3 +68,11 @@ test('deleted article bodies and selected deleted paragraphs or clauses cannot b
  const root=parseXml('<법령><조문단위><조문여부>조문</조문여부><조문번호>10</조문번호><조문제목>처리</조문제목><조문내용>제10조(처리)</조문내용><항><항번호>①</항번호><항내용>① 처리할 수 있다.</항내용><호><호번호>1.</호번호><호내용>1. 삭제 &lt;2025. 1. 1.&gt;</호내용></호></항><항><항번호>②</항번호><항내용>② 삭제</항내용></항></조문단위></법령>');
  assert.ok(articleNode(root,'10','1'));assert.throws(()=>articleNode(root,'10','2'),/삭제/);assert.throws(()=>articleNode(root,'10','1','1'),/삭제/);
 });
+
+test('unrecognized AI errors expose only unordered fixed diagnostic terms, never excerpts or arbitrary values',async()=>{
+ const parsed=inspectAiError({error:{message:'Provider returned error: private-customer sk-or-private api-person@example.test 010-1234-5678'}});
+ assert.equal(parsed.reason,'unrecognized_error');assert.deepEqual(parsed.keywords,['error','provider','returned']);
+ const logs=[],save=console.warn;console.warn=x=>logs.push(x);try{const a=new LegalApi(env,async()=>Response.json({error:{code:400,message:'Provider returned error: sk-or-private private-customer'}},{status:400}));await assert.rejects(a.ai('synthetic',{}),e=>e.message.includes('단서: error,provider,returned')&&!/private-customer|sk-or-private/.test(e.message));assert.ok(logs.every(x=>!/private-customer|sk-or-private/.test(x)));}finally{console.warn=save;}
+ assert.equal(inspectAiError({error:{message:'This model is not supported'}}).reason,'model');
+ assert.equal(inspectAiError({error:{message:'Requests are denied from your location'}}).reason,'region');
+});

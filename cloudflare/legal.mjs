@@ -72,7 +72,7 @@ async function serviceFailure(response,isAI,transportStatus=response.status){
  const reason=inspection?.reason||kind;
  // Compact, fixed vocabulary survives truncated dashboard trails; never log raw provider
  // text because it may contain submitted information or credentials.
- if(isAI)console.warn(`${diagnostic} format=${bodyFormat} reason=${reason} parameter=${parameter||'none'} shape=${inspection?.shape||'non_json'} codes=${inspection?.codes.join(',')||'none'}`);
+ if(isAI)console.warn(`${diagnostic} format=${bodyFormat} reason=${reason} parameter=${parameter||'none'} shape=${inspection?.shape||'non_json'} codes=${inspection?.codes.join(',')||'none'} terms=${inspection?.keywords.join(',')||'none'}`);
  let advice;
  if([401,403].includes(status)||isAI&&status===400&&(auth||reason==='auth'))advice=service+' 인증 또는 접근이 거부되었습니다. 서버의 키·이용 권한을 확인하세요.';
  else if(status===402||isAI&&status===400&&balance)advice='AI 서비스 사용 잔액과 키 사용 한도를 확인하세요.';
@@ -90,7 +90,7 @@ async function serviceFailure(response,isAI,transportStatus=response.status){
  else if([408,504].includes(status))advice=service+' 처리 시간이 초과되었습니다. 잠시 후 다시 시도하세요.';
  else if(status>=500)advice=service+'가 일시적으로 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요.';
  else advice=service+' 요청을 처리하지 못했습니다. 연결 설정을 확인해 주세요.';
- const error=new ApiError(advice+' (오류 '+status+')'+(diagnostic?' [문의 코드: '+diagnostic+'; '+bodyFormat+'/'+reason+(inspection?'; 구조: '+inspection.shape+'; 코드: '+(inspection.codes.join(',')||'없음'):'')+']':''),status===429?429:[408,504].includes(status)?504:502,status);
+ const error=new ApiError(advice+' (오류 '+status+')'+(diagnostic?' [문의 코드: '+diagnostic+'; '+bodyFormat+'/'+reason+(inspection?'; 구조: '+inspection.shape+'; 코드: '+(inspection.codes.join(',')||'없음')+(reason==='unrecognized_error'?'; 단서: '+(inspection.keywords.join(',')||'알려진 오류 용어 없음'):''):'')+']':''),status===429?429:[408,504].includes(status)?504:502,status);
  error.requestKind=['auth','balance','context','blocked','privacy','region','model','routing','messages','output_limit','invalid_json','request_validation'].includes(reason)?reason:kind==='unknown'&&bodyFormat==='json'?'parameters':kind;error.parameter=parameter;throw error;
 }
 const lawCache=new Map(); // Isolate-only official-law cache, never stores submitted items or AI results.
