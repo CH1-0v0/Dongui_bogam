@@ -267,7 +267,7 @@ const groundTypes={collect:'일반 수집',provide:'목적 내 제공',outside:'
 const groundType=entry=>entry.key==='extra'||entry.key==='provide'&&entry.g.outside?'outside':entry.key==='provide'?'provide':'collect';
 const groundEntries=type=>entries().filter(entry=>groundType(entry)===type);
 const groundInitial=type=>({type,basisCode:'',law:'',article:'',paragraph:'',clause:'',excerpt:'',reason:'',ids:[],specific:false,conditionsConfirmed:false,authorityConfirmed:false,verified:false,pipaVerified:false,supportVerified:false});
-let lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:0,dismissed:[]};
+let lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],searchSources:[],version:0,dismissed:[]};
 let apiStatus=null,lawActionBusy=false,editorOpen=false;
 const lawContext=entry=>groundType(entry);
 const lawClassification=i=>rnn(i.name)?'rnn':kind(i);
@@ -303,12 +303,17 @@ async function readApiStatus(){
 }
 async function lawRequest(path,data){
  await readApiStatus();let response;
- try{response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':apiStatus.csrfToken},body:JSON.stringify(data),signal:AbortSignal.timeout(path.endsWith('/search')?75000:path.endsWith('/review')?65000:path.endsWith('/classify')?40000:45000)});}catch(error){throw new Error(apiErrorMessage(error));}
+ try{response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':apiStatus.csrfToken},body:JSON.stringify(data),signal:AbortSignal.timeout(path.endsWith('/search')?660000:path.endsWith('/review')?120000:path.endsWith('/classify')?120000:90000)});}catch(error){throw new Error(apiErrorMessage(error));}
  let result;try{result=await response.json();}catch{throw new Error('응답을 읽지 못했습니다. server.py 터미널의 API 로그를 확인하세요.');}
  if(!response.ok){const error=new Error(result.error||'요청에 실패했습니다.');error.status=response.status;throw error;}return result;
 }
+function webSearchSources(sources){
+ const allowed=['law.go.kr','nts.go.kr','mohw.go.kr','pipc.go.kr','privacy.go.kr','easylaw.go.kr'];
+ const links=(Array.isArray(sources)?sources:[]).slice(0,15).flatMap(source=>{try{const u=new URL(source.url);if(!['https:','http:'].includes(u.protocol)||u.username||u.password||!allowed.some(d=>u.hostname===d||u.hostname.endsWith('.'+d)))return [];return [`<li><a href="${safe(u.href)}" target="_blank" rel="noopener noreferrer">${safe(source.title||u.hostname)}</a></li>`];}catch{return [];}});
+ return links.length?`<details class="web-search-sources"><summary>웹 검색 참고 출처 ${links.length}건</summary><p class="muted">후보를 찾을 때 참고한 자료입니다. 각 근거의 현행 조문은 법령 원문에서 따로 확인하세요.</p><ul>${links.join('')}</ul></details>`:'';
+}
 function lawSearchPanel(){
- return `<section class="panel law-search-panel"><div class="panelhead"><div><h2>개인정보별로 적용할 근거를 선택하세요</h2></div></div><p>AI가 제안한 근거는 아래 개인정보 유형별로 표시됩니다. <strong>법령을 선택하고 항목을 체크한 뒤, 담당자 확인 후 적용하세요. 직접 추가한 근거는 필요할 때 AI 검토를 진행할 수 있습니다.</strong> 별도 근거를 적용하지 않은 일반 항목은 동의서로 진행합니다. 주민등록번호 등 별도 허용 요건이 있는 정보는 추가 확인이 필요합니다.</p><p class="muted">실제 개인정보는 입력하지 마세요. 조문의 존재와 업무에 적용할 수 있는지는 별도로 검토해야 합니다.</p><div class="actions"><button class="primary" data-ai-law ${lawSearch.busy?'disabled':''}>${lawSearch.busy?'AI가 근거를 찾고 있습니다…':'AI로 적용 근거 찾기'}</button><button data-add-ground>＋ 법령·처리 근거 직접 추가</button>${apiStatus?.demoAvailable?`<label class="field law-mode"><span>검색 방식</span><select data-law-mode ${lawSearch.busy?'disabled':''}><option value="live" ${lawSearch.mode==='live'?'selected':''}>실제 검색</option><option value="demo" ${lawSearch.mode==='demo'?'selected':''}>화면 시연</option></select></label>`:''}</div><p class="notice" role="status">${lawSearch.busy?'AI로 법률 근거로 찾으나, 담당자가 최종 검토하여 반영해야 합니다.':'필요한 항목에만 법령 근거를 적용하세요.'}</p>${lawSearch.mode==='demo'?'<p class="notice">시연 법령은 실제 원문을 확인하지 않아 적용할 수 없습니다.</p>':''}${lawSearch.error?`<div class="info warn" role="alert">${safe(lawSearch.error)}</div>`:''}${lawSearch.note?`<p class="muted">${safe(lawSearch.note)}</p>`:''}${lawSearch.rejected.length?`<details><summary>적용 법령에서 제외된 근거 ${lawSearch.rejected.length}건</summary>${lawSearch.rejected.map(r=>`<p>${safe(r.law||'법령명 없는 AI 제안')} · ${safe(r.message)}</p>`).join('')}</details>`:''}</section>`;
+ return `<section class="panel law-search-panel"><div class="panelhead"><div><h2>개인정보별로 적용할 근거를 선택하세요</h2></div></div><p>AI가 제안한 근거는 아래 개인정보 유형별로 표시됩니다. <strong>법령을 선택하고 항목을 체크한 뒤, 담당자 확인 후 적용하세요. 직접 추가한 근거는 필요할 때 AI 검토를 진행할 수 있습니다.</strong> 별도 근거를 적용하지 않은 일반 항목은 동의서로 진행합니다. 주민등록번호 등 별도 허용 요건이 있는 정보는 추가 확인이 필요합니다.</p><p class="muted">실제 개인정보는 입력하지 마세요. 조문의 존재와 업무에 적용할 수 있는지는 별도로 검토해야 합니다.</p><div class="actions"><button class="primary" data-ai-law ${lawSearch.busy?'disabled':''}>${lawSearch.busy?'웹 검색·공식 원문 대조 중…':'AI로 적용 근거 찾기'}</button><button data-add-ground>＋ 법령·처리 근거 직접 추가</button>${apiStatus?.demoAvailable?`<label class="field law-mode"><span>검색 방식</span><select data-law-mode ${lawSearch.busy?'disabled':''}><option value="live" ${lawSearch.mode==='live'?'selected':''}>실제 검색</option><option value="demo" ${lawSearch.mode==='demo'?'selected':''}>화면 시연</option></select></label>`:''}</div><p class="notice" role="status">${lawSearch.busy?'AI로 법률 근거로 찾으나, 담당자가 최종 검토하여 반영해야 합니다.':'필요한 항목에만 법령 근거를 적용하세요.'}</p>${lawSearch.mode==='demo'?'<p class="notice">시연 법령은 실제 원문을 확인하지 않아 적용할 수 없습니다.</p>':''}${lawSearch.error?`<div class="info warn" role="alert">${safe(lawSearch.error)}</div>`:''}${lawSearch.note?`<p class="muted">${safe(lawSearch.note)}</p>`:''}${webSearchSources(lawSearch.searchSources)}${lawSearch.rejected.length?`<details><summary>적용 법령에서 제외된 근거 ${lawSearch.rejected.length}건</summary>${lawSearch.rejected.map(r=>`<p>${safe(r.law||'법령명 없는 AI 제안')} · ${safe(r.message)}</p>`).join('')}</details>`:''}</section>`;
 }
 const candidateKey=(candidate,index)=>candidate?._key||lawSearch.version+':'+index;
 const candidateIdentity=c=>JSON.stringify([c.type,c.basisCode,c.law,c.article,c.paragraph,c.clause,c.mst,c.excerpt]);
@@ -319,7 +324,7 @@ async function findLaws(){
  lawSearch.candidateOpen??={};lawSearch.drafts??={};
  lawSearch.candidates.forEach((candidate,index)=>{candidate._key??=(version-1)+':'+index;lawSearch.candidateOpen[index]=false;});
  if(state.groundDraft?.candidateKey){lawSearch.drafts[state.groundDraft.candidateKey]=structuredClone(state.groundDraft);state.groundDraft=null;}
- Object.assign(lawSearch,{busy:true,error:'',rejected:[],note:''});render();
+ Object.assign(lawSearch,{busy:true,error:'',rejected:[],note:'',searchSources:[]});render();
  try{
   const result=await lawRequest('/api/law/search',{items,demo:lawSearch.mode==='demo'});
   if(version!==lawSearch.version)return;
@@ -328,7 +333,7 @@ async function findLaws(){
    if(existing>=0){const key=lawSearch.candidates[existing]._key;lawSearch.candidates[existing]={...resultCandidate,_key:key};}
    else{const index=lawSearch.candidates.length;lawSearch.candidates.push({...resultCandidate,_key:version+':'+index});lawSearch.candidateOpen[index]=true;}
   }
-  lawSearch.rejected=result.rejected||[];
+  lawSearch.rejected=result.rejected||[];lawSearch.searchSources=result.searchSources||[];
   lawSearch.note=result.note||(!result.candidates.length?'확인된 법령가 없습니다. 직접 근거를 선택하거나 처리 목적을 구체화해 다시 검색하세요.':'');
  }catch(error){if(version===lawSearch.version)lawSearch.error=apiErrorMessage(error);}
  finally{if(version===lawSearch.version){lawSearch.busy=false;if(step===3)render();}}
@@ -871,7 +876,7 @@ function feedback(text){
 }
 function invalidateItems(items){
  const keys=new Set(items.map(i=>i.id));
- lawSearch={busy:false,candidates:[],error:'',note:'입력 내용이 바뀌었습니다. 법령을 다시 검색하세요.',mode:lawSearch.mode,rejected:[],version:lawSearch.version+1};
+ lawSearch={busy:false,candidates:[],error:'',note:'입력 내용이 바뀌었습니다. 법령을 다시 검색하세요.',mode:lawSearch.mode,rejected:[],searchSources:[],version:lawSearch.version+1};
  state.grounds=state.grounds.map(b=>({...b,ids:b.ids.filter(key=>!keys.has(key))})).filter(b=>b.ids.length);
  if(state.groundDraft)state.groundDraft=null;
  state.edits={};reached=Math.min(reached,step);
@@ -965,7 +970,7 @@ quickForm.addEventListener('submit',e=>{
  if(!template)return;
  if(hasDraftChanges()&&!confirm('현재 작성 중인 내용을 선택한 양식으로 바꾸시겠습니까?'))return;
  state = newDraft();
- lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};
+ lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],searchSources:[],version:lawSearch.version+1};
  freshLawPicker();editorOpen=false;message='';
  state.title = template.title;
  state.groups.collect.purpose = template.purpose;
@@ -1078,7 +1083,7 @@ document.addEventListener('change',e=>{
  if('pickParagraph' in d){lawPicker.paragraph=value;lawPicker.clause='';setPickedCitation();}
  if('pickClause' in d){lawPicker.clause=value;setPickedCitation();}
  if('groundType' in d){freshLawPicker();state.groundDraft=groundInitial(value);editorOpen=true;render();}
- if('lawMode' in d){lawSearch.mode=value;lawSearch.candidates=[];lawSearch.error='';lawSearch.note='';lawSearch.rejected=[];render();}
+ if('lawMode' in d){lawSearch.mode=value;lawSearch.candidates=[];lawSearch.error='';lawSearch.note='';lawSearch.rejected=[];lawSearch.searchSources=[];render();}
  if('basisCode' in d)chooseBasis(value);
  if('includeAdmin' in d){lawPicker.includeAdmin=checked;lawPicker.version++;lawPicker.laws=[];lawPicker.hasNext=false;lawPicker.searchActive=false;lawPicker.cursor=null;lawPicker.total=null;render();}
  if('lawConditions' in d)state.groundDraft.conditionsConfirmed=checked;
@@ -1149,7 +1154,7 @@ function validateBasics(){
 }
 function startBlankConsent(){
  clearTimeout(sensitivityTimer);state=newDraft();
- lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};
+ lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],searchSources:[],version:lawSearch.version+1};
  freshLawPicker();editorOpen=false;documentEditing=false;a4PreviewCache=null;finalDocument=null;basicsChecked=false;message='';tab='collect';reached=0;go(1);
 }
 function positionItemMenu(menu,trigger){const r=trigger.getBoundingClientRect(),height=window.visualViewport?.height||innerHeight,below=height-r.bottom-8,above=r.top-8,up=below<180&&above>below;menu.style.top=up?'auto':'calc(100% + 4px)';menu.style.bottom=up?'calc(100% + 4px)':'auto';menu.style.maxHeight=Math.min(180,Math.max(40,up?above:below))+'px';}

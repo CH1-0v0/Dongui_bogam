@@ -14,7 +14,7 @@ const lawNames={'개인정보 보호법':'101','개인정보 보호법 시행령
 const article=(number,paragraphs)=>`<조문단위><조문여부>조문</조문여부><조문번호>${number.split('의')[0]}</조문번호><조문가지번호>${number.split('의')[1]||''}</조문가지번호><조문제목>합성 제목</조문제목><조문내용>[합성] 제${number}조</조문내용>${paragraphs.map(p=>`<항><항번호>${p}</항번호><항내용>[합성] ${p}항</항내용>${Array.from({length:10},(_,n)=>`<호><호번호>${n+1}.</호번호><호내용>[합성] ${n+1}호</호내용><목><목번호>가.</목번호><목내용>[합성] 하위 목</목내용></목></호>`).join('')}</항>`).join('')}</조문단위>`;
 const bodies=Object.fromEntries(Object.entries(lawNames).map(([name,id])=>[id,`<법령><기본정보><법령명_한글>${name}</법령명_한글></기본정보><조문>${[...new Set(['10','15','17','18','23','24','24의2',...Object.values(rules).map(r=>r.article)])].map(n=>article(n,['1','2','3','4'])).join('')}</조문></법령>`]));
 let aiReply={};
-const upstream=async(url,options)=>{const u=new URL(url);if(u.hostname==='openrouter.ai'){assert.equal(options.headers.Authorization,'Bearer synthetic-ai-key');return Response.json({choices:[{message:{content:JSON.stringify(aiReply)}}]});}assert.equal(u.hostname,'www.law.go.kr');assert.equal(u.searchParams.get('OC'),'synthetic-oc');if(u.pathname.endsWith('lawSearch.do')){const name=u.searchParams.get('query'),id=lawNames[name];return new Response(`<LawSearch><totalCnt>${id?1:0}</totalCnt>${id?`<law><법령명한글>${name}</법령명한글><법령일련번호>${id}</법령일련번호><시행일자>20200101</시행일자><법령구분명>법률</법령구분명></law>`:''}</LawSearch>`);}return new Response(bodies[u.searchParams.get('MST')]);};
+const upstream=async(url,options)=>{const u=new URL(url);if(u.hostname==='openrouter.ai'){assert.equal(options.headers.Authorization,'Bearer synthetic-ai-key');if(u.pathname==='/api/v1/responses'){const payload=JSON.parse(options.body);assert.equal(payload.tools[0].type,'openrouter:web_search');return Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:'합성 검색 자료: 법령검증용법 제10조',annotations:[{type:'url_citation',url:'https://www.law.go.kr/synthetic',title:'합성 검색 출처'}]}]}]});}return Response.json({choices:[{message:{content:JSON.stringify(Array.isArray(aiReply.candidates)&&JSON.parse(options.body).messages[1].content.includes('"officialEvidence"')?{items:JSON.parse(JSON.parse(options.body).messages[1].content).items.map(i=>({id:i.id,verdict:"possible",explanation:"합성 검토",checks:[]}))}:aiReply)}}]});}assert.equal(u.hostname,'www.law.go.kr');assert.equal(u.searchParams.get('OC'),'synthetic-oc');if(u.pathname.endsWith('lawSearch.do')){const name=u.searchParams.get('query'),id=lawNames[name];return new Response(`<LawSearch><totalCnt>${id?1:0}</totalCnt>${id?`<law><법령명한글>${name}</법령명한글><법령일련번호>${id}</법령일련번호><시행일자>20200101</시행일자><법령구분명>법률</법령구분명></law>`:''}</LawSearch>`);}return new Response(bodies[u.searchParams.get('MST')]);};
 const api=()=>new LegalApi(env,upstream);
 test('XML hierarchy, clauses, points, invalid entities and deleted articles',()=>{const root=parseXml(bodies['101']);assert.ok(articleNode(root,'15','1','4'));assert.throws(()=>articleNode(root,'15','9'),/항/);assert.throws(()=>parseXml('<!DOCTYPE x [<!ENTITY x "x">]><x>&x;</x>'),/XML/);assert.throws(()=>parseXml('<x>'),/XML/);});
 test('context rejects raw values and cross-context/supplement mismatch',()=>{assert.throws(()=>validateContext({items:[{name:'010-1234-5678'}]}),/원문/);assert.throws(()=>reviewMaterial({basisCode:'uniqueLaw',type:'collect',items:[item()]}),/유형/);assert.throws(()=>reviewMaterial({basisCode:'contract',type:'collect',items:[{...item(),context:'provide'}]}),/유형/);});
@@ -62,7 +62,7 @@ test('AI display and logs never include arbitrary provider text or arbitrary fie
 });
 
 test('interrupted AI response bodies retry once and never parse partial output',async()=>{for(const recover of [true,false]){let calls=0;const a=new LegalApi(env,async()=>{calls++;if(calls===2&&recover)return Response.json({choices:[{message:{content:'{"ok":true}'}}]});return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('{"choices":'));controller.error(new Error('synthetic disconnect'));}}));});if(recover)assert.deepEqual(await a.ai('synthetic',{}),{ok:true});else await assert.rejects(a.ai('synthetic',{}),e=>e.requestKind==='stream');assert.equal(calls,2);}});
-test('incomplete AI law candidates are explained as missing AI output, without asking the user to enter a law',async()=>{const a=new LegalApi(env);a.ai=async()=>({candidates:[{law:'',article:'15'},{law:'검증용법',article:''}]});const result=await a.search({items:[item()]});assert.equal(result.candidates.length,0);assert.equal(result.rejected.length,2);assert.ok(result.rejected.every(r=>r.message.includes('AI 제안')&&!r.message.includes('입력하세요')));});
+test('incomplete AI law candidates are explained as missing AI output, without asking the user to enter a law',async()=>{const a=new LegalApi(env);a.research=async()=>({report:'합성 자료',sources:[]});a.ai=async()=>({candidates:[{law:'',article:'15'},{law:'검증용법',article:''}]});const result=await a.search({items:[item()]});assert.equal(result.candidates.length,0);assert.equal(result.rejected.length,2);assert.ok(result.rejected.every(r=>r.message.includes('AI 제안')&&!r.message.includes('입력하세요')));});
 
 test('deleted article bodies and selected deleted paragraphs or clauses cannot be adopted',()=>{
  for(const marker of ['삭제 <2025. 1. 1.>','전문 삭제 <2025. 1. 1.>']){const root=parseXml(`<법령><조문단위><조문여부>조문</조문여부><조문번호>10</조문번호><조문제목>옛 제목</조문제목><조문내용>제10조(옛 제목) ${marker.replaceAll('<','&lt;').replaceAll('>','&gt;')}</조문내용></조문단위></법령>`);assert.throws(()=>articleNode(root,'10'),/현행|삭제/);}
@@ -95,4 +95,22 @@ test('relay-path rejection retries the identical request once without stripping 
  const payload=JSON.parse(requests[1].body);assert.ok(payload.response_format);assert.ok(payload.reasoning);assert.equal(payload.provider.data_collection,'deny');
  let failedCalls=0;const failed=new LegalApi(env,async()=>{failedCalls++;return Response.json({error:{code:400,message:'Request path cannot be relayed'}},{status:400});});
  await assert.rejects(failed.ai('synthetic',{}),e=>e.requestKind==='relay_path'&&e.message.includes('중계 경로')&&!e.message.includes('지원 코드'));assert.equal(failedCalls,2);
+});
+
+
+test('search rejects unrelated official articles and never promotes uncertain items',async()=>{
+ aiReply={candidates:[{law:'법령검증용법',article:'10',basisCode:'statutory',type:'collect',itemNames:['성명']}]};
+ const a=api();let checked=false;
+ a.reviewEvidence=async(candidate,items)=>{assert.equal(candidate.verified,true);assert.ok(candidate.excerpt);checked=true;return {review:{summary:'업무와 무관함',items:items.map(i=>({...i,verdict:'not_supported',explanation:'업무와 무관함',checks:[]}))}};};
+ const excluded=await a.search({items:[item()]});assert.ok(checked);assert.equal(excluded.candidates.length,0);assert.match(excluded.rejected[0].message,/뒷받침하지 않는/);
+ a.reviewEvidence=async(candidate,items)=>({review:{summary:'사실 확인 필요',items:items.map(i=>({...i,verdict:'needs_information',explanation:'지급 주체 확인 필요',checks:['지급 주체 확인']}))}});
+ const uncertain=await a.search({items:[item()]});assert.equal(uncertain.candidates.length,1);assert.equal(uncertain.candidates[0].itemReviews[0].suggested,false);assert.match(uncertain.candidates[0].itemReviews[0].reason,/지급 주체 확인/);
+});
+
+test('candidate schema is retried once and never converted to unverified success',async()=>{
+ const a=api();let calls=0;
+ a.ai=async()=>++calls===1?{items:[]}:{candidates:[]};
+ assert.equal((await a.search({items:[item()]})).candidates.length,0);assert.equal(calls,2);
+ calls=0;a.ai=async()=>{calls++;return {items:[]};};
+ await assert.rejects(()=>a.search({items:[item()]}),/후보 목록/);assert.equal(calls,2);
 });

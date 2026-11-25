@@ -271,6 +271,27 @@ class ClassificationTests(unittest.TestCase):
             with self.assertRaises(server.ApiError):server.classify_privacy_items(self.data)
             call.assert_not_called()
 
+class CandidateFormatTests(unittest.TestCase):
+    def setUp(self):
+        self.search_patch=patch.object(server,'web_research',return_value={'report':'합성 검색 자료','sources':[]})
+        self.search_patch.start();self.addCleanup(self.search_patch.stop)
+
+    def envelope(self,content,finish='stop'):
+        return json.dumps({'choices':[{'finish_reason':finish,'message':{'content':content}}]}).encode()
+    def test_malformed_then_valid_retries_without_inventing_candidates(self):
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}), patch.object(server,'request_bytes',side_effect=[self.envelope('{broken'),self.envelope('{"candidates":[],"note":""}')]) as call:
+            self.assertEqual(server.ai_candidates({'items':[]})['candidates'],[])
+        self.assertEqual(call.call_count,2)
+    def test_truncation_and_schema_failure_have_distinct_messages(self):
+        for content,finish,expected in [('{','length','출력 한도'),('{}','stop','후보 목록')]:
+            with self.subTest(finish=finish), patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}), patch.object(server,'request_bytes',return_value=self.envelope(content,finish)) as call:
+                with self.assertRaisesRegex(server.ApiError,expected):server.ai_candidates({'items':[]})
+                self.assertEqual(call.call_count,2)
+    def test_text_blocks_and_uppercase_fence(self):
+        blocks=[{'type':'text','text':'```JSON\n{"candidates":[]}\n```'}]
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}),patch.object(server,'request_bytes',return_value=self.envelope(blocks)):
+            self.assertEqual(server.ai_candidates({'items':[]})['candidates'],[])
+
 class ContextBundleTests(unittest.TestCase):
     def setUp(self):
         self.items=[{'id':'item-'+str(n),'name':name,'purpose':'법정 신고','type':'collect','context':'collect','classification':kind} for n,(name,kind) in enumerate([('성명','general'),('건강정보','sensitive'),('여권번호','unique'),('주민등록번호','rnn')])]
@@ -291,7 +312,8 @@ class ContextBundleTests(unittest.TestCase):
             return {'law':'시험법','basisCode':data['basisCode'],'verified':True}
         with patch.object(server,'verify_with_basis',side_effect=verify):
             with self.assertRaises(server.ApiError):server.apply_reviewed_basis(self.data,b'secret')
-    def test_search_prompt_requires_actual_business_laws(self):
+    @patch.object(server,'web_research',return_value={'report':'합성 검색 자료','sources':[]})
+    def test_search_prompt_requires_actual_business_laws(self, research):
         response={'choices':[{'message':{'content':json.dumps({'candidates':[]})}}]}
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test'}),patch.object(server,'request_bytes',return_value=json.dumps(response).encode()) as call:
             server.ai_candidates({'items':self.items})
@@ -340,10 +362,17 @@ class HttpTests(unittest.TestCase):
             seen.append(url.split('?')[0])
             if 'openrouter.ai' in url:
                 request=json.loads(payload)
+                if url.endswith('/responses'):
+                    self.assertEqual(request['tools'][0]['type'],'openrouter:web_search')
+                    return json.dumps({'status':'completed','output':[{'type':'message','content':[{'type':'output_text','text':'합성 자료: 시험법 제10조','annotations':[{'type':'url_citation','url':'https://www.law.go.kr/synthetic','title':'합성 출처'}]}]}]}).encode()
                 self.assertEqual(request['model'],'openai/gpt-oss-120b')
                 self.assertEqual(headers['Authorization'],'Bearer server-private-token')
                 self.assertNotIn('server-private-token',payload.decode())
                 plan={'candidates':[{'law':'시험법','article':'10','paragraph':'1','clause':'1','basisCode':'statutory','type':'required','excerpt':'가짜 AI 원문'}]}
+                material=json.loads(request['messages'][1]['content'])
+                if 'officialEvidence' in material:
+                    self.assertIn('테스트 호', str(material['officialEvidence']))
+                    plan={'items':[{'id':i['id'],'verdict':'possible','explanation':'합성 검토','checks':[]} for i in material['items']]}
                 return json.dumps({'choices':[{'message':{'content':json.dumps(plan)}}]}).encode()
             query=urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
             if 'lawSearch' in url:
@@ -358,7 +387,7 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(result['excerpt'],'테스트 호')
         self.assertTrue(result['pipaVerified'])
         self.assertNotIn(b'server-private',body)
-        self.assertEqual(len(seen),5)
+        self.assertEqual(len(seen),7)
 
     def test_catalog_http_needs_no_ai_key(self):
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':''}),patch.object(server,'law_request',return_value=server.xml(SEARCH)):
