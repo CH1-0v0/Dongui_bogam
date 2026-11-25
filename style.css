@@ -510,3 +510,5 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .final-title{display:flex;align-items:center;justify-content:space-between;gap:16px}.final-title>button{flex:none}@media(max-width:570px){.final-title{flex-wrap:wrap}.final-title>button{margin-left:auto}}
 
 .workspace>.stack{grid-template-columns:minmax(0,1fr)}.workspace>.stack>*{min-width:0;max-width:100%}.law-search-panel [role="alert"]{display:block;white-space:normal;overflow-wrap:anywhere;word-break:normal}
+
+.search-summary{padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--soft);line-height:1.7}.search-summary.search-incomplete{background:var(--warn-bg);color:var(--warn)}

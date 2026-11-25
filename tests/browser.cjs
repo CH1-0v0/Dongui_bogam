@@ -40,8 +40,16 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   assert.ok(overlapGeometry.right<=overlapGeometry.side);assert.equal(overlapGeometry.overflow,false);
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.setViewportSize({width:1440,height:1100});
   console.log('PASS long AI support codes wrap within the main panel without covering review status or overflowing mobile');
+  const outcomes=[
+   {outcome:'no_candidates',summary:'동의 외 적용 근거를 찾지 못했습니다. 법적 근거가 없거나 동의만 받으면 된다는 뜻은 아닙니다.',rejected:[]},
+   {outcome:'unverified',summary:'AI 제안이 공식 조문 검증을 통과하지 못했습니다. 법적 근거가 없다는 결론은 아닙니다.',rejected:[{law:'시험법',reason:'not_verified',message:'조문 불일치'}]},
+   {outcome:'unavailable',summary:'법령 조회를 완료하지 못해 근거가 있는지 판단할 수 없습니다.',rejected:[{law:'시험법',reason:'timeout',message:'조회 시간 초과'}]}
+  ];
+  for(const result of outcomes){await page.route('**/api/law/search',r=>r.fulfill({json:{...result,candidates:[],note:''}}));await page.locator('[data-ai-law]').click();await page.waitForFunction(()=>!document.querySelector('[data-ai-law]').disabled);assert.equal(await page.locator('.search-summary').innerText(),result.summary);if(result.outcome==='unavailable'){assert.equal(await page.getByText('조회하지 못한 법령 1건',{exact:true}).count(),1);assert.equal(await page.getByText('공식 검증에서 제외된 제안 1건',{exact:true}).count(),0);await page.locator('.law-search-panel').screenshot({path:'.test-output/search-incomplete.png'});}if(result.outcome==='unverified')assert.equal(await page.getByText('공식 검증에서 제외된 제안 1건',{exact:true}).count(),1);}
+  console.log('PASS search summaries distinguish missing proposals, rejected evidence and failed official lookups');
 
-  await page.route('**/api/law/search',r=>r.fulfill({json:{candidates:[candidate('statutory'),candidate('contract'),candidate('provisionEmergency','provide')],rejected:[],note:'테스트 가상 응답'}}));
+
+  await page.route('**/api/law/search',r=>r.fulfill({json:{candidates:[candidate('statutory'),candidate('contract'),candidate('provisionEmergency','provide')],rejected:[],note:'테스트 가상 응답',searchSources:[{title:'합성 공식 검색 출처 <script>',url:'https://www.nts.go.kr/synthetic'},{title:'허용하지 않은 주소',url:'javascript:alert(1)'}]}}));
   await page.route('**/api/law/basis',r=>r.fulfill({json:proof(r.request().postDataJSON().basisCode)}));
   let lastApply;
   let verifyCalls=0,reviewCalls=0,applyCalls=0,reviewMode='possible',reviewRelease;
@@ -55,6 +63,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
  await page.route('**/api/law/apply',r=>{applyCalls++;const data=r.request().postDataJSON();lastApply=data;return r.fulfill({json:{...data,verified:true,pipaVerified:true,supportVerified:true,reviewConfirmed:Boolean(data.reviewToken)}});});
   await page.route('**/api/law/verify',r=>{verifyCalls++;const data=r.request().postDataJSON();const actual=rules[data.basisCode].needsLaw?{...data,verified:true,pipaVerified:true,supportVerified:true,excerpt:'테스트: 개별 법령 원문',kind:'법률',cite:'시험법 제10조 제1항'}:{...proof(data.basisCode)};return r.fulfill({json:actual});});
   await page.locator('[data-ai-law]').click();await page.locator('[data-use-law="0"]').waitFor();
+  assert.equal(await page.locator('.web-search-sources a').count(),1);assert.equal(await page.locator('.web-search-sources a').getAttribute('href'),'https://www.nts.go.kr/synthetic');assert.equal(await page.locator('.web-search-sources script').count(),0);assert.equal(await page.locator('[data-search-scope]').count(),0);
   assert.equal(await page.locator('.law-search-panel .law-result').count(),0);
   assert.equal(await page.locator('[data-ground-category="collect"] .law-result').count(),2);
   assert.equal(await page.locator('[data-ground-category="provide"] .law-result').count(),1);
@@ -127,7 +136,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   await page.locator('[data-law-query]').fill('시험');await page.locator('[data-catalog-search]').click();await page.waitForFunction(()=>document.querySelectorAll('[data-catalog-law]').length===5);
   assert.equal(await page.locator('[data-catalog-search]').isEnabled(),true);
   assert.equal(await page.locator('[data-law-query]').isEnabled(),true);
-  assert.equal(pages[0].includeAdmin,false);assert.equal(await page.locator('[data-include-admin]').isChecked(),false);
+  assert.equal(pages[0].includeAdmin,undefined);assert.equal(await page.locator('[data-include-admin]').count(),0);
   assert.equal(await page.locator('[data-catalog-more]').count(),0);
   assert.equal(await page.locator('.catalog-search-box>summary').count(),0);
   const geometry=()=>page.evaluate(()=>{const w=document.querySelector('.catalog-window').getBoundingClientRect(),below=document.querySelector('.ai-review-panel').getBoundingClientRect();return {height:w.height,below:below.top+window.scrollY,document:document.documentElement.scrollHeight};});
@@ -181,13 +190,9 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);const tops=await page.locator('.law-picker-selects').evaluate(e=>[...e.querySelectorAll('select')].map(n=>n.getBoundingClientRect().top));assert.ok(Math.max(...tops)-Math.min(...tops)<1);await page.screenshot({path:'.test-output/step3-v3-mobile.png',fullPage:true});await page.setViewportSize({width:768,height:1024});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.setViewportSize({width:1440,height:1100});await page.evaluate(()=>document.body.style.zoom='2');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.evaluate(()=>document.body.style.zoom='');
   console.log('PASS selection clears the list and shows paragraph descendants locally, without extra verification calls or mobile overflow');
-  await page.locator('[data-include-admin]').check();await page.locator('[data-catalog-search]').click();await page.waitForFunction(()=>document.querySelectorAll('[data-catalog-law]').length===5);
-  assert.equal(pages.at(-1).includeAdmin,true);
-  await page.locator('[data-catalog-law="0"]').click();await page.getByText('행정규칙은 참고자료입니다.',{exact:false}).waitFor();
-  await page.locator('[data-scope]').first().check();await page.locator('[data-ai-review]').click();
-  assert.match(await page.locator('#ground-status').innerText(),/구체적인 법률·시행령/);
-  assert.equal(await page.locator('[data-adopt-ground]').isDisabled(),false);
-  console.log('PASS administrative rules are opt-in references and cannot substitute for statutory permission');
+  const rulesOnlyCatalogue=r=>r.fulfill({json:{laws:[{law:'시험법 시행규칙',mst:'888',kind:'부령',department:'테스트기관',effectiveDate:'20200101',target:'law'},{law:'시험업무 시행규칙',mst:'889',kind:'총리령',department:'테스트기관',effectiveDate:'20200101',target:'law'}],cursor:null,hasNext:false}});
+  await page.route('**/api/law/catalog',rulesOnlyCatalogue);await page.locator('[data-law-query]').fill('시험법 시행규칙');await page.locator('[data-catalog-search]').click();await page.waitForFunction(()=>document.querySelectorAll('[data-catalog-law]').length===2);assert.match(await page.locator('.catalog-results').innerText(),/부령/);assert.match(await page.locator('.catalog-results').innerText(),/총리령/);assert.equal(await page.locator('[data-include-admin]').count(),0);await page.unroute('**/api/law/catalog',rulesOnlyCatalogue);
+  console.log('PASS statutory instruments include ministerial rules and administrative-rule selection is absent');
   await page.locator('[data-cancel-ground]').click();
   await page.locator('[data-add-ground]').click();await page.locator('[data-basis-code]').selectOption('contract');await page.waitForFunction(()=>!document.querySelector('[data-basis-code]').disabled);await page.locator('[data-scope]').first().check();
   reviewMode='needs_information';await page.locator('[data-ai-review]').click();await page.locator('.ai-review-result').waitFor();assert.match(await page.locator('.ai-review-result').innerText(),/추가 확인 필요/);assert.equal(await page.locator('[data-adopt-ground]').isDisabled(),false);
@@ -260,6 +265,8 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   assert.equal(await page.locator('[data-item-preset]').last().inputValue(),'성명');
   console.log('PASS normalizing a direct item name on blur preserves document height and scroll position');
 
+  await stage3();await page.route('**/api/law/search',r=>r.fulfill({json:{candidates:Array.from({length:7},(_,n)=>({...candidate('contract'),article:String(n+1)})),rejected:[],note:'합성 초과 후보'}}));await page.locator('[data-ai-law]').click();await page.waitForFunction(()=>!document.querySelector('[data-ai-law]').disabled);assert.equal(await page.locator('[data-candidate]').count(),7);
+  console.log('PASS frontend preserves all returned proposals without a five-candidate cap');
   await stage3();await page.route('**/api/status',r=>r.abort('connectionrefused'));await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();assert.match(await page.getByRole('alert').innerText(),/로컬 API 서버와 연결/);
   assert.deepEqual(errors,[]);console.log('Browser acceptance checks passed, including optional AI review and stable loading layout');
  }finally{await browser.close();}

@@ -43,7 +43,7 @@ class LawTests(unittest.TestCase):
         with patch.object(server,'law_request',return_value=server.xml(future)):
             with self.assertRaises(server.ApiError):server.resolve_law('시험법')
     def test_blanket_and_admin_cannot_be_statutory_permission(self):
-        for candidate in [dict(law='개인정보 보호법',article='15',paragraph='1',clause='2'), dict(law='개인정보 보호법 시행령',article='1'), dict(law='행정규칙',article='1',target='admrul')]:
+        for candidate in [dict(law='개인정보 보호법',article='15',paragraph='1',clause='2'), dict(law='개인정보 보호법 시행령',article='1'), dict(law='개인정보 보호법 시행규칙',article='1'), dict(law='행정규칙',article='1',target='admrul')]:
             with self.assertRaises(server.ApiError):server.verify_with_basis({'basisCode':'statutory',**candidate})
     def test_non_law_ground_only_fetches_its_pipa_basis(self):
         pipa={'law':'개인정보 보호법','article':'15','paragraph':'1','clause':'5','excerpt':'테스트 긴급 요건','verified':True}
@@ -52,11 +52,11 @@ class LawTests(unittest.TestCase):
         self.assertEqual(fetch.call_count,2)
         self.assertTrue(result['pipaVerified'])
         self.assertEqual(result['law'],'개인정보 보호법')
-    def test_counts_only_current_laws_and_decrees(self):
+    def test_counts_current_laws_decrees_and_ministerial_rules(self):
         body=SEARCH.replace(b'</LawSearch>', '<law><법령구분명>총리령</법령구분명><법령일련번호>444</법령일련번호><시행일자>20200101</시행일자></law></LawSearch>'.encode())
         with patch.object(server,'law_request',return_value=server.xml(body)):
             result=server.count_law_catalog({'query':'시험'})
-        self.assertEqual(result,{'count':2,'cursor':None})
+        self.assertEqual(result,{'count':3,'cursor':None})
         for cursor in ['invalid',{'target':'admrul','page':1},{'target':'law','page':True}]:
             with self.assertRaises(server.ApiError):server.count_law_catalog({'query':'시험','cursor':cursor})
     def test_full_pipa_paragraph_is_separate_from_selected_clause(self):
@@ -78,7 +78,7 @@ class LawTests(unittest.TestCase):
         body=SEARCH.replace('</LawSearch>'.encode(),'<law><법령명한글>시험법 시행규칙</법령명한글><법령구분명>부령</법령구분명><법령일련번호>888</법령일련번호><시행일자>20200101</시행일자></law></LawSearch>'.encode())
         with patch.object(server,'law_request',return_value=server.xml(body)) as request:
             results=server.search_law_catalog({'query':'시험','page':1})
-        self.assertEqual(len(results['laws']),2)
+        self.assertEqual(len(results['laws']),3)
         self.assertEqual(request.call_args.kwargs['display'],'20')
         self.assertEqual(request.call_args.kwargs['target'],'law')
     def test_law_request_cache_reuses_same_query_and_is_credential_scoped(self):
@@ -90,21 +90,16 @@ class LawTests(unittest.TestCase):
             with patch.dict(os.environ,{'LAW_API_OC':'cache-test-two'}):server.law_request('lawSearch.do',query='시험')
             self.assertEqual(fetch.call_count,2)
         with server.LAW_CACHE_LOCK:server.LAW_CACHE.clear()
-    def test_admin_is_opt_in_and_plaintext_reference_only(self):
-        catalog='<AdmRulSearch><totalCnt>1</totalCnt><admrul><행정규칙명>테스트규정</행정규칙명><행정규칙일련번호>777</행정규칙일련번호><시행일자>20200101</시행일자></admrul></AdmRulSearch>'.encode()
-        detail='<행정규칙><행정규칙명>테스트규정</행정규칙명><본문><![CDATA[<p>참고 조항</p><script>bad()</script>]]></본문></행정규칙>'.encode()
-        with patch.object(server,'law_request',return_value=server.xml(catalog)) as request:
-            results=server.search_law_catalog({'query':'테스트','target':'admrul'})
-        self.assertEqual(request.call_args.kwargs['target'],'admrul')
-        self.assertEqual(results['laws'][0]['kind'],'행정규칙')
-        with patch.object(server,'law_request',return_value=server.xml(detail)):
-            result=server.law_article_catalog({'law':'테스트규정','mst':'777','target':'admrul'})
-        self.assertTrue(result['referenceOnly']);self.assertNotIn('bad()',result['text'])
+    def test_admin_is_not_a_search_or_document_target(self):
+        with patch.object(server,'law_request') as request:
+            with self.assertRaises(server.ApiError):server.search_law_catalog({'query':'테스트','target':'admrul'})
+            with self.assertRaises(server.ApiError):server.law_article_catalog({'law':'테스트규정','mst':'777','target':'admrul'})
+            request.assert_not_called()
 
     def test_catalog_fills_five_eligible_results_and_cursor_retains_remainder(self):
         def row(index,kind='법률'):
             return f'<law><법령명한글>시험법 {index}</법령명한글><법령구분명>{kind}</법령구분명><법령일련번호>{100+index}</법령일련번호><시행일자>20200101</시행일자></law>'
-        body=('<LawSearch><totalCnt>8</totalCnt>'+row(0,'부령')+row(1,'부령')+''.join(row(i) for i in range(2,8))+'</LawSearch>').encode()
+        body=('<LawSearch><totalCnt>8</totalCnt>'+row(0,'조례')+row(1,'조례')+''.join(row(i) for i in range(2,8))+'</LawSearch>').encode()
         with patch.object(server,'law_request',return_value=server.xml(body)):
             first=server.search_law_catalog({'query':'시험'})
             second=server.search_law_catalog({'query':'시험','cursor':first['cursor']})
@@ -113,20 +108,22 @@ class LawTests(unittest.TestCase):
         self.assertFalse(second['hasNext'])
         self.assertEqual(len({l['mst'] for l in first['laws']+second['laws']}),6)
     def test_catalog_fills_across_raw_pages(self):
-        rejected=''.join(f'<law><법령명한글>제외 {i}</법령명한글><법령구분명>부령</법령구분명><법령일련번호>{i+1}</법령일련번호><시행일자>20200101</시행일자></law>' for i in range(20))
+        rejected=''.join(f'<law><법령명한글>제외 {i}</법령명한글><법령구분명>조례</법령구분명><법령일련번호>{i+1}</법령일련번호><시행일자>20200101</시행일자></law>' for i in range(20))
         accepted=''.join(f'<law><법령명한글>법률 {i}</법령명한글><법령구분명>법률</법령구분명><법령일련번호>{i+101}</법령일련번호><시행일자>20200101</시행일자></law>' for i in range(6))
         with patch.object(server,'law_request',side_effect=[server.xml(('<LawSearch><totalCnt>26</totalCnt>'+rejected+'</LawSearch>').encode()),server.xml(('<LawSearch><totalCnt>26</totalCnt>'+accepted+'</LawSearch>').encode())]) as call:
             result=server.search_law_catalog({'query':'법률'})
         self.assertEqual(len(result['laws']),5);self.assertEqual(call.call_count,2)
         self.assertEqual(result['cursor'],{'target':'law','page':2,'offset':5})
-    def test_catalog_can_fill_five_across_law_and_opt_in_admin(self):
-        admin='<AdmRulSearch><totalCnt>4</totalCnt>'+''.join(f'<admrul><행정규칙명>행정 {i}</행정규칙명><행정규칙일련번호>{i+500}</행정규칙일련번호><시행일자>20200101</시행일자></admrul>' for i in range(4))+'</AdmRulSearch>'
-        with patch.object(server,'law_request',side_effect=[server.xml(SEARCH),server.xml(admin.encode())]):
+    def test_legacy_admin_option_never_queries_administrative_rules(self):
+        with patch.object(server,'law_request',return_value=server.xml(SEARCH)) as request:
             result=server.search_law_catalog({'query':'시험','includeAdmin':True})
-        self.assertEqual(len(result['laws']),5);self.assertEqual(result['cursor']['target'],'admrul')
-        with self.assertRaises(server.ApiError):server.search_law_catalog({'query':'시험','cursor':result['cursor']})
+        self.assertEqual(len(result['laws']),2)
+        self.assertFalse(result['hasNext'])
+        self.assertEqual(request.call_count,1)
+        self.assertEqual(request.call_args.kwargs['target'],'law')
+
     def test_catalog_partial_scan_is_resumable_not_false_empty(self):
-        body='<LawSearch><totalCnt>10000</totalCnt>'+''.join(f'<law><법령명한글>제외 {i}</법령명한글><법령구분명>부령</법령구분명><법령일련번호>{i+1}</법령일련번호><시행일자>20200101</시행일자></law>' for i in range(20))+'</LawSearch>'
+        body='<LawSearch><totalCnt>10000</totalCnt>'+''.join(f'<law><법령명한글>제외 {i}</법령명한글><법령구분명>조례</법령구분명><법령일련번호>{i+1}</법령일련번호><시행일자>20200101</시행일자></law>' for i in range(20))+'</LawSearch>'
         with patch.object(server,'law_request',return_value=server.xml(body.encode())) as call:
             result=server.search_law_catalog({'query':'시험'})
         self.assertTrue(result['incomplete']);self.assertTrue(result['hasNext']);self.assertEqual(call.call_count,8)
@@ -271,6 +268,23 @@ class ClassificationTests(unittest.TestCase):
             with self.assertRaises(server.ApiError):server.classify_privacy_items(self.data)
             call.assert_not_called()
 
+class WebResearchTests(unittest.TestCase):
+    def response(self,annotations,status='completed'):
+        return json.dumps({'status':status,'output':[{'type':'message','content':[{'type':'output_text','text':'합성 검색 자료','annotations':annotations}]}]}).encode()
+    def test_real_server_tool_payload_and_official_sources(self):
+        annotations=[{'type':'url_citation','url':'https://www.nts.go.kr/synthetic','title':'합성 출처','content':'합성 발췌'}, {'type':'url_citation','url':'https://www.nts.go.kr/synthetic'}, {'type':'url_citation','url':'https://nts.go.kr.attacker.invalid/'}, {'type':'url_citation','url':'javascript:alert(1)'}]
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic'}), patch.object(server,'request_bytes',return_value=self.response(annotations)) as call:
+            result=server.web_research({'items':[{'name':'성명','purpose':'강사료 지급'}]})
+        self.assertEqual(len(result['sources']),1)
+        self.assertEqual(result['sources'][0]['excerpt'],'합성 발췌')
+        self.assertTrue(call.call_args.args[0].endswith('/api/v1/responses'))
+        payload=json.loads(call.call_args.args[1]);self.assertEqual(payload['tools'][0]['type'],'openrouter:web_search');self.assertEqual(payload['max_tool_calls'],3);self.assertEqual(payload['provider']['data_collection'],'deny')
+    def test_missing_search_evidence_never_falls_back_to_memory(self):
+        for annotations,status in [([], 'completed'), ([{'type':'url_citation','url':'https://www.nts.go.kr/synthetic'}], 'incomplete')]:
+            with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic'}), patch.object(server,'request_bytes',return_value=self.response(annotations,status)) as call:
+                with self.assertRaises(server.ApiError):server.ai_candidates({'items':[]})
+                self.assertEqual(call.call_count,1)
+
 class CandidateFormatTests(unittest.TestCase):
     def setUp(self):
         self.search_patch=patch.object(server,'web_research',return_value={'report':'합성 검색 자료','sources':[]})
@@ -370,6 +384,9 @@ class HttpTests(unittest.TestCase):
                 self.assertNotIn('server-private-token',payload.decode())
                 plan={'candidates':[{'law':'시험법','article':'10','paragraph':'1','clause':'1','basisCode':'statutory','type':'required','excerpt':'가짜 AI 원문'}]}
                 material=json.loads(request['messages'][1]['content'])
+                if 'officialEvidence' not in material:
+                    self.assertIn('research', material)
+                    self.assertIn('합성 자료', material['research']['report'])
                 if 'officialEvidence' in material:
                     self.assertIn('테스트 호', str(material['officialEvidence']))
                     plan={'items':[{'id':i['id'],'verdict':'possible','explanation':'합성 검토','checks':[]} for i in material['items']]}
@@ -417,5 +434,79 @@ class HttpTests(unittest.TestCase):
         status,body=self.call('/api/law/search',data)
         self.assertEqual(status,200);self.assertFalse(json.loads(body)['candidates'][0]['verified'])
         self.srv.demo=False
+
+class SearchCacheTests(unittest.TestCase):
+    def setUp(self):
+        with server.LAW_CACHE_LOCK:
+            server.LAW_CACHE.clear()
+
+    def tearDown(self):
+        with server.LAW_CACHE_LOCK:
+            server.LAW_CACHE.clear()
+
+    def test_search_verifies_all_proposals_without_a_five_candidate_cap(self):
+        candidates = [{'law':'시험법','article':str(n+1),'basisCode':'statutory','type':'collect'} for n in range(7)]
+        context = {'items':[{'name':'성명','purpose':'합성 업무','type':'collect','context':'collect','classification':'general'}]}
+        with patch.dict(os.environ, {'LAW_API_OC':'synthetic-five'}), patch.object(server,'ai_candidates',return_value={'candidates':candidates}), patch.object(server,'verify_with_basis',side_effect=lambda c:{**c,'verified':True}) as verify, patch.object(server,'ai_application_review',side_effect=lambda c,items:{'summary':'합성 검토','items':[dict(i,verdict='possible',explanation='합성 검토',checks=[]) for i in items]}):
+            result = server.search(context)
+        self.assertEqual(verify.call_count,7)
+        self.assertEqual([c['article'] for c in result['candidates']],['1','2','3','4','5','6','7'])
+        self.assertEqual(result['outcome'],'verified')
+        self.assertFalse(result['limited'])
+        self.assertIsNone(result['limit'])
+
+    def test_empty_and_failed_verification_are_not_the_same_as_no_legal_basis(self):
+        for rejected, checked, expected in [([],0,'no_candidates'),([{'reason':'not_verified'}],1,'unverified'),([{'reason':'timeout'}],1,'unavailable')]:
+            result = server.search_outcome([],rejected,checked)
+            self.assertEqual(result['outcome'],expected)
+            self.assertNotEqual(result['summary'],'법적 근거가 없습니다.')
+        partial = server.search_outcome([{}],[{'reason':'service_unavailable'}],2)
+        self.assertEqual(partial['outcome'],'partial')
+        self.assertEqual(partial['counts']['unavailable'],1)
+
+    def test_cache_ttl_and_fresh_application_scope(self):
+        clock=[1000.0]
+        def fetch(url, **kwargs):
+            return BODY if 'lawService.do' in url else SEARCH
+        with patch.dict(os.environ, {'LAW_API_OC':'synthetic-ttl'}), patch.object(server,'request_bytes',side_effect=fetch) as network, patch.object(server.time,'monotonic',side_effect=lambda:clock[0]):
+            server.law_request('lawSearch.do',query='시험법')
+            server.law_request('lawSearch.do',query='시험법')
+            self.assertEqual(network.call_count,1)
+            clock[0]+=301
+            server.law_request('lawSearch.do',query='시험법')
+            self.assertEqual(network.call_count,2)
+            server.law_request('lawService.do',MST='123')
+            clock[0]+=301
+            server.law_request('lawService.do',MST='123')
+            self.assertEqual(network.call_count,3)
+            with server.fresh_law_requests():
+                server.law_request('lawService.do',MST='123')
+                server.law_request('lawService.do',MST='123')
+            self.assertEqual(network.call_count,4)
+            clock[0]+=3601
+            server.law_request('lawService.do',MST='123')
+            self.assertEqual(network.call_count,5)
+        self.assertFalse(getattr(server.LAW_CONTEXT,'fresh',False))
+
+    def test_failed_law_request_is_not_cached_and_timeout_stays_distinct(self):
+        with patch.dict(os.environ, {'LAW_API_OC':'synthetic-failure'}), patch.object(server,'request_bytes',side_effect=server.ApiError('조회 시간 초과',504)) as network:
+            for _ in range(2):
+                with self.assertRaises(server.ApiError):server.law_request('lawSearch.do',query='시험법')
+            self.assertEqual(network.call_count,2)
+        with patch.object(server.urllib.request,'urlopen',side_effect=TimeoutError()):
+            with self.assertRaises(server.ApiError) as error:server.request_bytes('https://www.law.go.kr/DRF/lawSearch.do')
+            self.assertEqual(error.exception.status,504)
+
+
+class StatutoryInstrumentTests(unittest.TestCase):
+    def test_ministerial_rules_are_searchable_and_statute_reserved_permissions_remain_checked(self):
+        with patch.object(server,'verify_citation',return_value={'law':'시험법 시행규칙','kind':'부령','verified':True}), patch.object(server,'verify_basis',return_value=dict.fromkeys(['pipa','pipaParagraph','pipaVerified','support','supportVerified'])):
+            self.assertEqual(server.verify_with_basis({'law':'시험법 시행규칙','basisCode':'statutory'})['kind'],'부령')
+            with self.assertRaises(server.ApiError):server.verify_with_basis({'law':'시험법 시행규칙','basisCode':'residentLaw'})
+            with self.assertRaises(server.ApiError):server.verify_with_basis({'law':'시험법 시행규칙','basisCode':'extraLaw'})
+        with patch.object(server,'verify_basis') as basis:
+            with self.assertRaises(server.ApiError):server.verify_with_basis({'target':'admrul','basisCode':'contract'})
+            basis.assert_not_called()
+
 
 if __name__=='__main__':unittest.main()

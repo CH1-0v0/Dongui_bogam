@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server
 
 parser=argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--search', action='store_true', help='OpenRouter에 실제 검색 1회를 요청합니다 (사용료 발생 가능)')
+parser.add_argument('--search', action='store_true', help='OpenRouter 웹 검색·후보 생성·후보별 원문 기반 검토를 요청합니다 (여러 유료 호출 가능)')
 parser.add_argument('--review', action='store_true', help='선택한 항목의 적용 전 AI 검토를 실제 요청합니다 (사용료 발생 가능)')
 parser.add_argument('--classify', action='store_true', help='항목명 민감정보 가능성 검토를 실제 요청합니다 (사용료 발생 가능)')
 args=parser.parse_args()
@@ -42,7 +42,8 @@ try:
         result=server.search({'items':[{'name':'성명','purpose':'근로계약 체결 및 법정 근로자 명부 작성','recipient':'','type':'collect','context':'collect','classification':'general'}]})
         if not result['candidates']:
             raise server.ApiError('AI 응답은 받았으나 원문 대조를 통과한 후보가 없습니다. 브라우저에서 제외 사유를 확인하세요.')
-        print('PASS OpenRouter 후보 검색 → 법령 API 원문 및 개인정보 보호법 연결 조항 대조')
+        assert result['searchSources'], '웹 검색 출처가 없습니다.'
+        print('PASS OpenRouter 웹 검색 → 후보 생성 → 법령 원문·연결 조항·업무 관련성 대조')
         print('확인한 후보:',len(result['candidates']),'제외한 후보:',len(result['rejected']))
     if args.review:
         request={'basisCode':'contract','type':'collect','items':[{'id':'test-item-1','name':'성명','purpose':'근로계약 체결 및 계약서 작성','recipient':'','type':'collect','context':'collect','classification':'general'}]}

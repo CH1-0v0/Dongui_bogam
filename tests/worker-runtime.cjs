@@ -8,6 +8,7 @@ test('native Workers fetch supports AI and canonical law verification without cr
  const mf=new Miniflare(convertV4MiniflareOptions({compatibilityDate:'2026-11-01',modules:true,script:source+`
  export default {async fetch(request){const api=new LegalApi({OPENROUTER_API_KEY:'synthetic-runtime-key',LAW_API_OC:'synthetic-runtime-oc'});
  try{if(new URL(request.url).pathname==='/redirect'){await api.upstream('https://openrouter.ai/redirect',{headers:{Authorization:'Bearer synthetic-runtime-key'}});return Response.json({unexpected:true});}
+ if(new URL(request.url).pathname==='/research')return Response.json(await api.research({items:[{name:'성명',purpose:'합성 업무'}]}));
  const ai=await api.ai('synthetic fixture',{});const law=await api.verify({basisCode:'contract',type:'collect'});return Response.json({ai,verified:law.verified,pipaVerified:law.pipaVerified,cite:law.cite});
  }catch(e){return Response.json({error:e.message},{status:e.status||500});}}};`,
  outboundService:async request=>{
@@ -15,7 +16,7 @@ test('native Workers fetch supports AI and canonical law verification without cr
   if(u.hostname==='openrouter.ai'){
    assert.equal(request.headers.get('Authorization'),'Bearer synthetic-runtime-key');
    if(u.pathname==='/redirect')return new Response(null,{status:302,headers:{Location:'https://credentials-must-not-arrive.invalid/'}});
-   assert.equal(request.method,'POST');assert.equal(request.headers.get('Content-Type'),'application/json');const body=await request.json();assert.equal(body.model,'openai/gpt-oss-120b');assert.ok(Number.isInteger(body.max_tokens)&&body.max_tokens>0);assert.ok(body.messages.every(m=>['system','user'].includes(m.role)&&typeof m.content==='string'));assert.equal(body.provider.data_collection,'deny');
+   assert.equal(request.method,'POST');assert.equal(request.headers.get('Content-Type'),'application/json');const body=await request.json();if(u.pathname==='/api/v1/responses'){assert.equal(body.tools[0].type,'openrouter:web_search');assert.equal(body.max_tool_calls,3);return Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:'합성 자료',annotations:[{type:'url_citation',url:'https://www.nts.go.kr/synthetic',title:'합성 출처'}]}]}]});}assert.equal(body.model,'openai/gpt-oss-120b');assert.ok(Number.isInteger(body.max_tokens)&&body.max_tokens>0);assert.ok(body.messages.every(m=>['system','user'].includes(m.role)&&typeof m.content==='string'));assert.equal(body.provider.data_collection,'deny');
    return Response.json({choices:[{message:{content:JSON.stringify({fixture:true})}}]});
   }
   assert.equal(u.hostname,'www.law.go.kr');assert.equal(u.searchParams.get('OC'),'synthetic-runtime-oc');assert.equal(request.headers.get('Authorization'),null);
@@ -24,6 +25,7 @@ test('native Workers fetch supports AI and canonical law verification without cr
  }}));
  try{
   const result=await mf.dispatchFetch('https://local.test/');assert.equal(result.status,200);assert.deepEqual(await result.json(),{ai:{fixture:true},verified:true,pipaVerified:true,cite:'개인정보 보호법 제15조 제1항 제4호'});
+  const research=await mf.dispatchFetch('https://local.test/research');assert.equal(research.status,200);assert.equal((await research.json()).sources[0].url,'https://www.nts.go.kr/synthetic');
   const redirected=await mf.dispatchFetch('https://local.test/redirect');assert.equal(redirected.status,502);const {error}=await redirected.json();assert.match(error,/다른 주소/);assert.doesNotMatch(error,/synthetic-runtime|credentials-must-not/);assert.ok(requests.every(p=>/^(openrouter.ai|www.law.go.kr)\//.test(p)));
  }finally{await mf.dispose();}
 });
