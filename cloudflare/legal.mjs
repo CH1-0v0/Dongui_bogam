@@ -1,3 +1,4 @@
+import {sealSupportText} from './ai-support.mjs';
 import {inspectAiError} from './ai-diagnostics.mjs';
 // Cloudflare-native asynchronous adapter. No local Python process or filesystem.
 import {XMLParser, XMLValidator} from 'fast-xml-parser';
@@ -56,7 +57,7 @@ export function validateContext(data){
 export function reviewMaterial(data){const {items}=validateContext(data),rule=rules[data.basisCode];if(!rule||rule.effect==='consent')fail('검토할 처리 근거를 선택하세요.',400);const seen=new Set();for(let n=0;n<items.length;n++){const i=items[n],id=data.items[n].id;if(typeof id!=='string'||!/^[-\w]{1,80}$/.test(id)||seen.has(id))fail('선택 항목을 다시 확인하세요.',400);if(!['general','sensitive','unique','rnn'].includes(i.classification)||!['required','optional','sensitive','unique','provide','extra','marketing','collect','outside'].includes(i.type)||i.type!==data.type||(['collect','provide','outside'].includes(data.type)&&i.context!==data.type)||!rule.contexts.includes(i.context)||(rule.supplement&&i.classification!==rule.supplement))fail('근거와 선택 항목의 개인정보 유형이 일치하지 않습니다.');i.id=id;seen.add(id);}return items;}
 async function readLimited(response,max=8_000_000){const reader=response.body?.getReader();if(!reader)return '';let size=0,parts=[];try{for(;;){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();fail('외부 API 응답이 너무 큽니다. 검색 범위를 줄여 주세요.',502);}parts.push(value);}}finally{reader.releaseLock();}const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}return new TextDecoder().decode(bytes);}
 // Classify only known conditions. Never forward upstream text: it may echo keys or prompts.
-async function serviceFailure(response,isAI,transportStatus=response.status){
+async function serviceFailure(response,isAI,transportStatus=response.status,secrets=[]){
  const status=response.status,service=isAI?'AI 서비스':'국가법령정보센터';let message='',bodyFormat='unreadable',inspection=null;
  if(isAI){try{const body=await readLimited(response,16384);bodyFormat=!body.trim()?'empty':/^\s*</.test(body)?'html':'text';
  try{const parsed=JSON.parse(body);bodyFormat='json';
@@ -90,7 +91,9 @@ async function serviceFailure(response,isAI,transportStatus=response.status){
  else if([408,504].includes(status))advice=service+' 처리 시간이 초과되었습니다. 잠시 후 다시 시도하세요.';
  else if(status>=500)advice=service+'가 일시적으로 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요.';
  else advice=service+' 요청을 처리하지 못했습니다. 연결 설정을 확인해 주세요.';
- const error=new ApiError(advice+' (오류 '+status+')'+(diagnostic?' [문의 코드: '+diagnostic+'; '+bodyFormat+'/'+reason+(inspection?'; 구조: '+inspection.shape+'; 코드: '+(inspection.codes.join(',')||'없음')+(reason==='unrecognized_error'?'; 단서: '+(inspection.keywords.join(',')||'알려진 오류 용어 없음'):''):'')+']':''),status===429?429:[408,504].includes(status)?504:502,status);
+ let support='';
+ if(isAI&&reason==='unrecognized_error'){try{support=await sealSupportText(message,secrets);}catch{}}
+ const error=new ApiError(advice+' (오류 '+status+')'+(diagnostic?' [문의 코드: '+diagnostic+'; '+bodyFormat+'/'+reason+(inspection?'; 구조: '+inspection.shape+'; 코드: '+(inspection.codes.join(',')||'없음')+(reason==='unrecognized_error'?'; 단서: '+(inspection.keywords.join(',')||'알려진 오류 용어 없음'):''):'')+']':'')+(support?' [지원 코드: '+support+']':''),status===429?429:[408,504].includes(status)?504:502,status);
  error.requestKind=['auth','balance','context','blocked','privacy','region','model','routing','messages','output_limit','invalid_json','request_validation'].includes(reason)?reason:kind==='unknown'&&bodyFormat==='json'?'parameters':kind;error.parameter=parameter;throw error;
 }
 const lawCache=new Map(); // Isolate-only official-law cache, never stores submitted items or AI results.
@@ -107,7 +110,7 @@ export class LegalApi {
    fail(service+'에 연결하지 못했습니다. 잠시 후 다시 시도하세요.',502);
   }
   if(response.status>=300&&response.status<400)fail(service+'가 다른 주소로 연결을 요청하여 중단했습니다. 서버의 API 주소를 확인하세요.',502);
-  if(!response.ok)return serviceFailure(response,service==='AI 서비스');
+  if(!response.ok)return serviceFailure(response,service==='AI 서비스',response.status,[options.headers?.Authorization,options.headers?.Authorization?.replace(/^Bearer /,'')]);
   try{return await readLimited(response);}catch(error){if(error instanceof ApiError)throw error;const failure=new ApiError(service+' 응답을 받는 중 연결이 끊겼습니다. 잠시 후 다시 시도하세요.',502);if(service==='AI 서비스')failure.requestKind='stream';throw failure;}
  }
  async law(endpoint,params={}){
@@ -149,7 +152,7 @@ export class LegalApi {
    try{
     const raw=await this.upstream('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+this.env.OPENROUTER_API_KEY,'Content-Type':'application/json','X-Title':'Dongui Bogam'},body:JSON.stringify(payload)},Math.min(25000,Math.max(1,deadline-Date.now())));
     let envelope;try{envelope=JSON.parse(raw);}catch{fail('AI 응답 형식을 확인하지 못했습니다. 다시 시도하세요.',502);}
-    if(envelope?.error){const code=Number(envelope.error.code);if(Number.isInteger(code)&&code>=400&&code<=599)await serviceFailure(Response.json(envelope,{status:code}),true,200);fail('AI 서비스가 답변을 완료하지 못했습니다. 다시 시도하세요.',502);}
+    if(envelope?.error){const code=Number(envelope.error.code);if(Number.isInteger(code)&&code>=400&&code<=599)await serviceFailure(Response.json(envelope,{status:code}),true,200,[this.env.OPENROUTER_API_KEY]);fail('AI 서비스가 답변을 완료하지 못했습니다. 다시 시도하세요.',502);}
     const choice=envelope?.choices?.[0];
     if(choice?.finish_reason==='content_filter')fail('AI 서비스가 응답을 제한했습니다. 입력 내용과 서비스 이용 조건을 확인해 주세요.',502);
     if(choice?.finish_reason==='length')fail('AI 답변이 완료되기 전에 출력 한도에 도달했습니다. 항목이나 설명을 줄여 다시 시도하세요.',502);

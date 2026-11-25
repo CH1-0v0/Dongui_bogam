@@ -1,3 +1,4 @@
+import {sealSupportText,redactSupportText} from '../cloudflare/ai-support.mjs';
 import {inspectAiError} from '../cloudflare/ai-diagnostics.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -76,3 +77,14 @@ test('unrecognized AI errors expose only unordered fixed diagnostic terms, never
  assert.equal(inspectAiError({error:{message:'This model is not supported'}}).reason,'model');
  assert.equal(inspectAiError({error:{message:'Requests are denied from your location'}}).reason,'region');
 });
+
+test('support diagnostics are encrypted and known credentials are removed before encryption',async()=>{
+ const pair=await crypto.subtle.generateKey({name:'RSA-OAEP',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['encrypt','decrypt']);const pub=await crypto.subtle.exportKey('jwk',pair.publicKey);
+ const code=await sealSupportText('Request refused abc-secret sk-or-test person@example.test 010-1234-5678',['abc-secret'],pub);
+ assert.match(code,/^D1\.[A-Za-z0-9_-]+$/);assert.ok(!code.includes('Request'));
+ const encoded=code.slice(3).replaceAll('-','+').replaceAll('_','/');const raw=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));
+ const text=new TextDecoder().decode(await crypto.subtle.decrypt({name:'RSA-OAEP'},pair.privateKey,raw));assert.ok(text.startsWith('Request refused'));assert.ok(!/abc-secret|sk-or-test|person@|010-/.test(text));
+ const long=await sealSupportText('x'.repeat(4000),[],pub);assert.equal(long.length,code.length);
+ assert.equal(redactSupportText('Bearer arbitrary-secret'), 'Bearer [redacted]');
+});
+test('unrecognized API failures include an encrypted support code without exposing provider messages',async()=>{const a=new LegalApi(env,async()=>Response.json({error:{code:400,message:'Request refused test-sensitive-value'}},{status:400}));await assert.rejects(a.ai('synthetic',{}),e=>e.message.includes('지원 코드: D1.')&&!e.message.includes('test-sensitive-value'));});
