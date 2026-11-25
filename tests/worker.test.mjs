@@ -5,8 +5,8 @@ import {inspectAiError} from '../cloudflare/ai-diagnostics.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import worker from '../cloudflare/worker.mjs';
-import {ApiError,LegalApi,reviewEvidenceFor,parseXml,articleNode,validateContext,reviewMaterial,fingerprint,signReview,checkReview} from '../cloudflare/legal.mjs';
+import worker,{failureDiagnostics} from '../cloudflare/worker.mjs';
+import {ApiError,LegalApi,reviewEvidenceFor,leadingNumber,parseXml,articleNode,validateContext,reviewMaterial,fingerprint,signReview,checkReview} from '../cloudflare/legal.mjs';
 import rules from '../basis-rules.json' with {type:'json'};
 const env={LAW_API_OC:'synthetic-oc',OPENROUTER_API_KEY:'synthetic-ai-key',AI_LIMITER:{limit:async()=>({success:true})},API_LIMITER:{limit:async()=>({success:true})},ASSETS:{fetch:async()=>new Response('synthetic public asset')}};
 const base='https://dongui.example';
@@ -141,7 +141,7 @@ test('edge cache is credential-hashed, shared across module instances, and bypas
  }finally{if(descriptor)Object.defineProperty(globalThis,'caches',descriptor);else delete globalThis.caches;}
 });
 test('concurrent official lookups coalesce but upstream failures are not cached',async()=>{
- let calls=0;const e={...env,LAW_API_OC:'inflight-'+crypto.randomUUID()};const fetcher=async()=>{calls++;await new Promise(r=>setTimeout(r,15));return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');};await Promise.all([new LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'}),new LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'})]);assert.equal(calls,1);
+ let calls=0;const e={...env,LAW_API_OC:'inflight-'+crypto.randomUUID()};const fetcher=async()=>{calls++;await new Promise(r=>setTimeout(r,15));return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');};const scoped=new LegalApi(e,fetcher);await Promise.all([scoped.law('lawSearch.do',{query:'공식법령'}),scoped.law('lawSearch.do',{query:'공식법령'})]);assert.equal(calls,1);await Promise.all([new LegalApi(e,fetcher).law('lawSearch.do',{query:'다른법령'}),new LegalApi(e,fetcher).law('lawSearch.do',{query:'다른법령'})]);assert.equal(calls,3);
  let failed=0;const f={...env,LAW_API_OC:'failure-'+crypto.randomUUID()},failure=async()=>{failed++;return new Response('unavailable',{status:503});};for(let n=0;n<2;n++)await assert.rejects(new LegalApi(f,failure).law('lawSearch.do',{query:'공식법령'}));assert.equal(failed,2);
 });
 
@@ -184,4 +184,18 @@ test('AI research retries only a known output limit once and preserves tool rest
  const bodies=[];const a=new LegalApi(env,async(url,opts)=>{bodies.push(JSON.parse(opts.body));return bodies.length===1?Response.json({status:'incomplete',incomplete_details:{reason:'max_output_tokens'}}):upstream(url,opts);});
  assert.ok((await a.research({items:[item()]})).sources.length);assert.deepEqual(bodies.map(b=>b.max_output_tokens),[8000,12000]);assert.deepEqual(bodies[0].tools,bodies[1].tools);assert.equal(bodies[1].provider.data_collection,'deny');assert.equal(bodies[0].reasoning.effort,'low');
  let calls=0;const bad=new LegalApi(env,async()=>{calls++;return Response.json({status:'failed',error:{code:'synthetic-private-code',message:'synthetic-private-key'}});});await assert.rejects(bad.research({items:[item()]}),e=>e.message.includes('ai-search/service')&&!e.message.includes('private'));assert.equal(calls,1);
+});
+
+test('branched legal clauses remain distinct and use correct Korean citation labels',async()=>{
+ assert.equal(leadingNumber('3의6.'),'3의6');const root=parseXml('<법령>'+article('10',['1']).replace('<호번호>1.</호번호>','<호번호>3의6.</호번호>')+'</법령>');assert.equal(articleNode(root,'10','1','3의6').tag,'호');
+ const a=api();a.resolve=async()=>({row:parseXml('<law><법령명한글>법령검증용법</법령명한글><법령구분명>법률</법령구분명></law>').children[0],mst:'branch-test'});a.law=async()=>root;const result=await a.citation({law:'법령검증용법',article:'10',paragraph:'1',clause:'3의6'});assert.match(result.cite,/제3호의6$/);
+});
+test('unexpected Worker diagnostics exclude error text and URL credentials',()=>{
+ const error=new TypeError('synthetic-private-key');error.stack='TypeError: synthetic-private-key\n    at citation (https://example.invalid/?OC=secret:120:8)';const result=failureDiagnostics(error);assert.equal(result.type,'TypeError');assert.deepEqual(result.frames,[{fn:'citation',line:120,column:8}]);assert.doesNotMatch(JSON.stringify(result),/private-key|secret|example/);
+});
+
+test('DRF JSON legal body order and branched clause labels survive separate number fields',async()=>{
+ const a=new LegalApi({...env,LAW_API_OC:'branch-json-'+crypto.randomUUID()},async url=>{const u=new URL(url);if(u.pathname.endsWith('lawSearch.do'))return Response.json({LawSearch:{law:{법령명한글:'합성법',법령일련번호:'8811',시행일자:'20200101',법령구분명:'대통령령'}}});return Response.json({법령:{조문:{조문단위:{호:[{호내용:'3의6. [합성] 진료기록 기록 사무',호번호:'3.',호가지번호:'6'},{호내용:'3의7. [합성] 인증 사무',호번호:'3.'}],조문여부:'조문',조문번호:'42',조문가지번호:'2',조문내용:'[합성] 민감정보 처리 요건과 주체'}}}});});
+ const cite=await a.citation({law:'합성법',article:'42의2',clause:'3의6'});assert.match(cite.cite,/제3호의6$/);assert.match(cite.excerpt,/진료기록/);assert.ok(cite.articleExcerpt.startsWith('[합성] 민감정보 처리 요건과 주체'));
+ const doc=await a.articles({law:'합성법',mst:'8811'});assert.deepEqual(doc.articles[0].clauses.map(c=>c.value),['3의6','3의7']);
 });

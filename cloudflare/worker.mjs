@@ -20,6 +20,11 @@ async function requestData(request){
  const length=Number(request.headers.get('Content-Length'));if(length>24000)throw new ApiError('요청 크기가 너무 큽니다.',413);
  let raw;const reader=request.body?.getReader();if(!reader)throw new ApiError('JSON 요청이 필요합니다.',400);let size=0,parts=[];try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>24000){await reader.cancel();throw new ApiError('요청 크기가 너무 큽니다.',413);}parts.push(value);}}finally{reader.releaseLock();}const data=new Uint8Array(size);let offset=0;for(const part of parts){data.set(part,offset);offset+=part.length;}raw=new TextDecoder().decode(data);try{const parsed=JSON.parse(raw);if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')throw Error();return parsed;}catch{throw new ApiError('JSON 객체가 필요합니다.',400);}
 }
+export function failureDiagnostics(error){
+ const type=['TypeError','RangeError','SyntaxError','Error'].includes(error?.name)?error.name:'Error';
+ const frames=String(error?.stack||'').split('\n').slice(1,4).map(line=>{const m=line.match(/at ([A-Za-z0-9_.$ ]+) .*?:(\d+):(\d+)\)?$/);return m?{fn:m[1].trim(),line:Number(m[2]),column:Number(m[3])}:{fn:'unknown'};});
+ return {event:'unexpected_api_failure',type,frames};
+}
 export default {async fetch(request,env,ctx){
  const url=new URL(request.url),path=url.pathname;
  try{
@@ -46,5 +51,5 @@ export default {async fetch(request,env,ctx){
   if(!publicFile)return json({error:'요청한 파일이 없습니다.'},404);
   if(!['GET','HEAD'].includes(request.method))return json({error:'허용되지 않은 요청입니다.'},405);
   const response=await env.ASSETS.fetch(request);const headers=new Headers(response.headers);for(const [k,v]of Object.entries(policy))headers.set(k,v);if(['/', '/index.html','/app.js','/style.css','/law-basis.js','/basis-rules.json','/pdf-export.js','/hwpx-template.json'].includes(path))headers.set('Cache-Control','no-cache');return new Response(response.body,{status:response.status,headers});
- }catch(e){return json({error:e instanceof ApiError?e.message:'서버에서 요청을 처리하지 못했습니다. 설정과 API 연결을 확인하세요.'},e instanceof ApiError?e.status:500);}
+ }catch(e){if(!(e instanceof ApiError))console.error(JSON.stringify(failureDiagnostics(e)));return json({error:e instanceof ApiError?e.message:'서버에서 요청을 처리하지 못했습니다. 설정과 API 연결을 확인하세요.'},e instanceof ApiError?e.status:500);}
 }};

@@ -31,6 +31,19 @@ class LawTests(unittest.TestCase):
         self.assertEqual([part['clause'] for part in segments],['','1','1','2'])
         self.assertEqual([part['label'] for part in segments],['①','1.','가.','2.'])
         self.assertEqual(segments[1]['text'],segments[3]['text'])
+    def test_branch_clause_numbers_remain_distinct(self):
+        body=BODY.replace('<호번호>1.</호번호>'.encode(),'<호번호>3의6.</호번호>'.encode())
+        self.assertEqual(server.leading_number('3의6.'),'3의6')
+        self.assertEqual(server.extract_article(server.xml(body),'10','1','3의6'),'테스트 호')
+        with self.assertRaises(server.ApiError):server.extract_article(server.xml(body),'10','1','3')
+        with patch.object(server,'law_request',side_effect=[server.xml(SEARCH),server.xml(body)]):
+            citation=server.verify_citation({'law':'시험법','article':'10','paragraph':'1','clause':'3의6'})
+        self.assertTrue(citation['cite'].endswith('제3호의6'))
+
+    def test_branched_clause_with_base_number_and_inline_text(self):
+        body=BODY.replace('<호번호>1.</호번호><호내용>테스트 호</호내용>'.encode(),'<호번호>3.</호번호><호내용>3의6. 진료기록 사무</호내용>'.encode())
+        self.assertIn('진료기록',server.extract_article(server.xml(body),'10','1','3의6'))
+
     def test_missing_article_paragraph_clause_rejected(self):
         for args in [('11','',''),('10','2',''),('10','1','99')]:
             with self.assertRaises(server.ApiError):server.extract_article(server.xml(BODY),*args)
