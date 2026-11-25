@@ -168,7 +168,7 @@ test('web research evidence precedes candidate generation without returning unus
 
 test('verified summary counts displayed grounds separately from rejected proposals',()=>{
  const result=searchOutcome([{}, {}, {}],[{reason:'not_verified'},{reason:'not_verified'}],5);
- assert.equal(result.summary,'확인된 근거는 총 3개입니다. 0개는 조회를 완료하지 못했고, 2개는 검증을 통과하지 못했습니다.');assert.equal(result.counts.checked,5);assert.equal(result.counts.verified,3);
+ assert.equal(result.summary,'검토한 근거 후보는 총 5개입니다. 이 중 적합한 근거 후보로 판단된 것은 3개입니다. 0개는 조회를 완료하지 못했고, 2개는 검증을 통과하지 못했습니다.');assert.equal(result.counts.checked,5);assert.equal(result.counts.verified,3);
 });
 
 test('duplicate proposals do not repeat paid relevance checks or generate unused search tokens',async()=>{

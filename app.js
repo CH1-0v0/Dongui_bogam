@@ -343,7 +343,7 @@ const candidateKey=(candidate,index)=>candidate?._key||lawSearch.version+':'+ind
 const candidateIdentity=c=>JSON.stringify([c.type,c.basisCode,c.law,c.article,c.paragraph,c.clause,c.mst,c.excerpt]);
 function searchSummary(result,total){
  const summary=result.summary||result.note||(!result.candidates.length?'이번 검색에서 확인된 근거가 없습니다. 법적 근거가 없다는 결론은 아니므로 처리 목적을 구체화하거나 직접 확인해 주세요.':'');
- if(result.counts&&total!==result.candidates.length){const counts=result.counts;return `확인된 근거는 총 ${total}개입니다. 이전 검색 결과를 포함한 수입니다. 이번 검색에서는 ${counts.verified}개를 확인했고, ${counts.unavailable}개는 조회를 완료하지 못했으며, ${counts.excluded}개는 검증을 통과하지 못했습니다.`;}
+ if(result.counts&&total!==result.candidates.length)return `${summary} 하단에는 이전 검색 결과를 포함해 총 ${total}개의 근거 후보를 표시합니다.`;
  return summary;
 }
 async function findLaws(){
