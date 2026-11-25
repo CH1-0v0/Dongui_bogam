@@ -50,7 +50,7 @@ export function validateContext(data){
 export function reviewMaterial(data){const {items}=validateContext(data),rule=rules[data.basisCode];if(!rule||rule.effect==='consent')fail('검토할 처리 근거를 선택하세요.',400);const seen=new Set();for(let n=0;n<items.length;n++){const i=items[n],id=data.items[n].id;if(typeof id!=='string'||!/^[-\w]{1,80}$/.test(id)||seen.has(id))fail('선택 항목을 다시 확인하세요.',400);if(!['general','sensitive','unique','rnn'].includes(i.classification)||!['required','optional','sensitive','unique','provide','extra','marketing','collect','outside'].includes(i.type)||i.type!==data.type||(['collect','provide','outside'].includes(data.type)&&i.context!==data.type)||!rule.contexts.includes(i.context)||(rule.supplement&&i.classification!==rule.supplement))fail('근거와 선택 항목의 개인정보 유형이 일치하지 않습니다.');i.id=id;seen.add(id);}return items;}
 async function readLimited(response,max=8_000_000){const reader=response.body?.getReader();if(!reader)return '';let size=0,parts=[];try{for(;;){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();fail('외부 API 응답이 너무 큽니다. 검색 범위를 줄여 주세요.',502);}parts.push(value);}}finally{reader.releaseLock();}const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}return new TextDecoder().decode(bytes);}
 // Classify only known conditions. Never forward upstream text: it may echo keys or prompts.
-async function serviceFailure(response,isAI){
+async function serviceFailure(response,isAI,transportStatus=response.status){
  const status=response.status,service=isAI?'AI 서비스':'국가법령정보센터';let message='';
  if(isAI){try{const parsed=JSON.parse(await readLimited(response,16384));message=typeof parsed?.error?.message==='string'?parsed.error.message:'';
  const raw=parsed?.error?.metadata?.raw;if(typeof raw==='string'){try{const provider=JSON.parse(raw);const detail=provider?.error?.message||provider?.message;if(typeof detail==='string')message+=' '+detail;}catch{message+=' '+raw;}}
@@ -59,8 +59,9 @@ async function serviceFailure(response,isAI){
  const blocked=/content.?policy|content.?filter|moderation|safety.?policy/i.test(message);
  const auth=/invalid.*(?:api.?key|token)|unauthorized/i.test(message),balance=/insufficient.*(?:credit|balance)|payment required/i.test(message);
  const parameter=/response_format|json_object|json.?schema|structured.?output/i.test(message)?'response_format':/reasoning|reasoning_effort/i.test(message)?'reasoning':/temperature/i.test(message)?'temperature':null;
- // Operator-only diagnostics for `wrangler tail`; never returned to the browser. Truncated because providers may echo input.
- if(isAI)console.warn(JSON.stringify({aiUpstreamStatus:status,kind:context?'context':blocked?'blocked':auth?'auth':balance?'balance':'parameters',parameter,detail:message.slice(0,300)}));
+ const diagnostic=isAI?'AI-'+transportStatus+'-'+status+'-'+crypto.randomUUID().slice(0,8):null;
+ // Match a browser error to operator logs without exposing provider text in the browser.
+ if(isAI)console.warn(JSON.stringify({diagnostic,transportStatus,aiUpstreamStatus:status,kind:context?'context':blocked?'blocked':auth?'auth':balance?'balance':'parameters',parameter,detail:message.slice(0,300)}));
  let advice;
  if([401,403].includes(status)||isAI&&status===400&&auth)advice=service+' 인증 또는 접근이 거부되었습니다. 서버의 키·이용 권한을 확인하세요.';
  else if(status===402||isAI&&status===400&&balance)advice='AI 서비스 사용 잔액과 키 사용 한도를 확인하세요.';
@@ -73,7 +74,7 @@ async function serviceFailure(response,isAI){
  else if([408,504].includes(status))advice=service+' 처리 시간이 초과되었습니다. 잠시 후 다시 시도하세요.';
  else if(status>=500)advice=service+'가 일시적으로 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요.';
  else advice=service+' 요청을 처리하지 못했습니다. 연결 설정을 확인해 주세요.';
- const error=new ApiError(advice+' (오류 '+status+')',status===429?429:[408,504].includes(status)?504:502,status);
+ const error=new ApiError(advice+' (오류 '+status+')'+(diagnostic?' [문의 코드: '+diagnostic+']':''),status===429?429:[408,504].includes(status)?504:502,status);
  error.requestKind=context?'context':blocked?'blocked':auth?'auth':balance?'balance':'parameters';error.parameter=parameter;throw error;
 }
 const lawCache=new Map(); // Isolate-only official-law cache, never stores submitted items or AI results.
@@ -124,15 +125,15 @@ export class LegalApi {
  }
  async ai(prompt,data,maxTokens=3000){
   if(!this.env.OPENROUTER_API_KEY)fail('AI 기능을 위해 서버에 OPENROUTER_API_KEY를 설정해 주세요.',503);
-  const model=this.env.OPENROUTER_MODEL||'openai/gpt-6-luna';
+  const model=this.env.OPENROUTER_MODEL||'openai/gpt-oss-120b';
   const order=model==='openai/gpt-oss-120b'?['deepinfra','groq','cerebras']:null;
-  const payload={model,...(model==='openai/gpt-6-luna'?{}:{temperature:0.1}),max_tokens:maxTokens,response_format:{type:'json_object'},provider:{data_collection:'deny',...(order?{order}:{sort:'latency'}),require_parameters:true,allow_fallbacks:true},...((model.includes('gpt-oss')||model==='openai/gpt-6-luna')?{reasoning:{effort:'low',exclude:true}}:{}),messages:[{role:'system',content:prompt},{role:'user',content:JSON.stringify(data)}]};
+  const payload={model,temperature:0.1,max_tokens:maxTokens,response_format:{type:'json_object'},provider:{data_collection:'deny',...(order?{order}:{sort:'latency'}),require_parameters:true,allow_fallbacks:true},...(model.includes('gpt-oss')?{reasoning:{effort:'low',exclude:true}}:{}),messages:[{role:'system',content:prompt},{role:'user',content:JSON.stringify(data)}]};
   const deadline=Date.now()+35000;
   for(let attempt=0;attempt<2;attempt++){
    try{
     const raw=await this.upstream('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+this.env.OPENROUTER_API_KEY,'Content-Type':'application/json','X-Title':'Dongui Bogam'},body:JSON.stringify(payload)},Math.min(25000,Math.max(1,deadline-Date.now())));
     let envelope;try{envelope=JSON.parse(raw);}catch{fail('AI 응답 형식을 확인하지 못했습니다. 다시 시도하세요.',502);}
-    if(envelope?.error){const code=Number(envelope.error.code);if(Number.isInteger(code)&&code>=400&&code<=599)await serviceFailure(Response.json(envelope,{status:code}),true);fail('AI 서비스가 답변을 완료하지 못했습니다. 다시 시도하세요.',502);}
+    if(envelope?.error){const code=Number(envelope.error.code);if(Number.isInteger(code)&&code>=400&&code<=599)await serviceFailure(Response.json(envelope,{status:code}),true,200);fail('AI 서비스가 답변을 완료하지 못했습니다. 다시 시도하세요.',502);}
     const choice=envelope?.choices?.[0];
     if(choice?.finish_reason==='content_filter')fail('AI 서비스가 응답을 제한했습니다. 입력 내용과 서비스 이용 조건을 확인해 주세요.',502);
     if(choice?.finish_reason==='length')fail('AI 답변이 완료되기 전에 출력 한도에 도달했습니다. 항목이나 설명을 줄여 다시 시도하세요.',502);
@@ -161,7 +162,7 @@ export class LegalApi {
  }
  async classify(data){const {items}=validateContext(data);if(items.length>20||items.some(i=>i.name.trim().length<2||i.name.trim().length>100))fail('분류할 항목명은 2~100자, 한 번에 20개까지 입력하세요.',400);const ids=data.items.map(i=>i.id);if(ids.some(id=>typeof id!=='string'||!/^[-\w]{1,80}$/.test(id))||new Set(ids).size!==ids.length)fail('분류할 항목을 다시 확인하세요.',400);if(!this.env.OPENROUTER_API_KEY||!this.env.LAW_API_OC)fail('민감정보 API 분류를 위한 서버 연결 설정을 확인하세요.',503);const sources=await Promise.all([this.citation({law:'개인정보 보호법',article:'23'}),this.citation({law:'개인정보 보호법 시행령',article:'18'})]);const officialEvidence=sources.map(s=>({cite:s.cite,text:s.articleExcerpt||s.excerpt}));if(officialEvidence.reduce((s,e)=>s+e.text.length,0)>40000)fail('민감정보 분류의 기준 조문을 확인하지 못했습니다.',502);const planned=await this.ai(prompts.classify_privacy_items,{officialEvidence,items:items.map((i,n)=>({id:ids[n],name:i.name,purpose:i.purpose}))},1800);const indexed=new Map();if(!Array.isArray(planned.items))fail('민감정보 분류 응답을 확인하지 못했습니다.',502);for(const row of planned.items){if(!obj(row)||!ids.includes(row.id)||indexed.has(row.id)||!['high','general','uncertain'].includes(row.verdict))fail('민감정보 분류 응답을 확인하지 못했습니다.',502);indexed.set(row.id,row);}const allowed=['건강','사상·신념','정치적 견해','가입·탈퇴','성생활','유전','범죄경력','생체인식','인종·민족','사생활'];return {items:items.map((i,n)=>{const r=indexed.get(ids[n])||{};return {id:ids[n],name:i.name,verdict:r.verdict||'uncertain',reason:String(r.reason??'항목의 구체적인 의미를 담당자가 확인하세요.').slice(0,400),included:Array.isArray(r.included)?r.included.filter(v=>allowed.includes(v)).slice(0,2):[]};})};
  }
- async review(data){const items=reviewMaterial(data),candidate=await this.withAdditional(data,items);const officialEvidence=Object.fromEntries(['cite','excerpt','articleExcerpt','basisCode','pipa','support','additionalGrounds'].map(k=>[k,candidate[k]]));if(JSON.stringify(officialEvidence).length>45000)fail('검토할 조문이 너무 깁니다. 적용할 항·호를 구체적으로 선택하세요.');const planned=await this.ai(prompts.ai_application_review,{officialEvidence,items},4000);if(!Array.isArray(planned.items))fail('AI 검토 결과를 읽지 못했습니다.',502);const indexed=new Map();for(const r of planned.items){if(!obj(r)||typeof r.id!=='string'||indexed.has(r.id))fail('AI 검토 결과를 읽지 못했습니다.',502);indexed.set(r.id,r);}const normalized=items.map(i=>{const r=indexed.get(i.id)||{};return {id:i.id,name:i.name,verdict:['possible','needs_information','not_supported'].includes(r.verdict)?r.verdict:'needs_information',explanation:String(r.explanation??'해당 항목의 검토 결과가 부족합니다.').slice(0,800),checks:Array.isArray(r.checks)?r.checks.slice(0,3).map(c=>String(c).slice(0,300)):[]};});const review={items:normalized,summary:String(planned.summary??'선택 항목의 검토 결과를 확인하세요.').slice(0,1600),canApply:normalized.every(i=>i.verdict==='possible'),model:this.env.OPENROUTER_MODEL||'openai/gpt-6-luna',checkedAt:new Date().toISOString()};if(review.canApply){review.token=await signReview(this.env.OPENROUTER_API_KEY,await fingerprint(candidate,items));review.validForSeconds=300;}return {candidate,review};}
+ async review(data){const items=reviewMaterial(data),candidate=await this.withAdditional(data,items);const officialEvidence=Object.fromEntries(['cite','excerpt','articleExcerpt','basisCode','pipa','support','additionalGrounds'].map(k=>[k,candidate[k]]));if(JSON.stringify(officialEvidence).length>45000)fail('검토할 조문이 너무 깁니다. 적용할 항·호를 구체적으로 선택하세요.');const planned=await this.ai(prompts.ai_application_review,{officialEvidence,items},4000);if(!Array.isArray(planned.items))fail('AI 검토 결과를 읽지 못했습니다.',502);const indexed=new Map();for(const r of planned.items){if(!obj(r)||typeof r.id!=='string'||indexed.has(r.id))fail('AI 검토 결과를 읽지 못했습니다.',502);indexed.set(r.id,r);}const normalized=items.map(i=>{const r=indexed.get(i.id)||{};return {id:i.id,name:i.name,verdict:['possible','needs_information','not_supported'].includes(r.verdict)?r.verdict:'needs_information',explanation:String(r.explanation??'해당 항목의 검토 결과가 부족합니다.').slice(0,800),checks:Array.isArray(r.checks)?r.checks.slice(0,3).map(c=>String(c).slice(0,300)):[]};});const review={items:normalized,summary:String(planned.summary??'선택 항목의 검토 결과를 확인하세요.').slice(0,1600),canApply:normalized.every(i=>i.verdict==='possible'),model:this.env.OPENROUTER_MODEL||'openai/gpt-oss-120b',checkedAt:new Date().toISOString()};if(review.canApply){review.token=await signReview(this.env.OPENROUTER_API_KEY,await fingerprint(candidate,items));review.validForSeconds=300;}return {candidate,review};}
  async apply(data){const items=reviewMaterial(data),actual=await this.withAdditional(data,items);if(data.reviewToken)await checkReview(this.env.OPENROUTER_API_KEY,data.reviewToken,await fingerprint(actual,items));return {...actual,reviewConfirmed:Boolean(data.reviewToken)};}
 }
 const enc=new TextEncoder();

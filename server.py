@@ -21,7 +21,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent
-MODEL = 'openai/gpt-6-luna'
+MODEL = 'openai/gpt-oss-120b'
 MAX_BODY = 24000
 MAX_RESPONSE = 8_000_000
 LAW_CACHE = {}
@@ -466,9 +466,7 @@ article은 숫자 또는 24의2, paragraph/clause는 숫자 문자열 또는 빈
                'response_format': {'type': 'json_object'}, 'provider': {'data_collection': 'deny', 'sort': 'latency'}, 'reasoning': {'effort': 'low', 'exclude': True},
                'messages': [{'role': 'system', 'content': prompt + '\n처리 근거 코드: ' + json.dumps({k:v for k,v in basis_rules().items() if v['effect'] != 'consent'}, ensure_ascii=False)},
                             {'role': 'user', 'content': json.dumps(context, ensure_ascii=False)}]}
-    if payload['model'] == 'openai/gpt-6-luna':
-        payload.pop('temperature', None)
-    if 'gpt-oss' not in payload['model'] and payload['model'] != 'openai/gpt-6-luna':
+    if 'gpt-oss' not in payload['model']:
         payload.pop('reasoning', None)
     data = request_bytes('https://openrouter.ai/api/v1/chat/completions', json.dumps(payload).encode(),
                          {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'X-Title': 'Dongui Bogam'}, timeout=25)
@@ -566,9 +564,7 @@ included는 실제 포함 가능성이 높은 유형만 최대 2개 선택: 건�
                'response_format': {'type': 'json_object'}, 'provider': {'data_collection': 'deny', 'sort': 'latency'},
                'messages': [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': json.dumps({
                    'officialEvidence': evidence, 'items': [{'id': value, 'name': row['name'], 'purpose': row['purpose']} for value, row in zip(ids, items)]}, ensure_ascii=False)}]}
-    if payload['model'] == 'openai/gpt-6-luna':
-        payload.pop('temperature', None)
-    if 'gpt-oss' in payload['model'] or payload['model'] == 'openai/gpt-6-luna':
+    if 'gpt-oss' in payload['model']:
         payload['reasoning'] = {'effort': 'low', 'exclude': True}
     raw = request_bytes('https://openrouter.ai/api/v1/chat/completions', json.dumps(payload).encode(),
                         {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, timeout=20)
@@ -680,9 +676,7 @@ JSON만 반환: {"summary":"검토 요약", "items":[{"id":"입력 id", "verdict
                'response_format': {'type': 'json_object'}, 'provider': {'data_collection': 'deny', 'sort': 'latency'},
                'reasoning': {'effort': 'low', 'exclude': True},
                'messages': [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': json.dumps({'officialEvidence': evidence, 'items': items}, ensure_ascii=False)}]}
-    if payload['model'] == 'openai/gpt-6-luna':
-        payload.pop('temperature', None)
-    if 'gpt-oss' not in payload['model'] and payload['model'] != 'openai/gpt-6-luna':
+    if 'gpt-oss' not in payload['model']:
         payload.pop('reasoning', None)
     raw = request_bytes('https://openrouter.ai/api/v1/chat/completions', json.dumps(payload).encode(),
                         {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'X-Title': 'Dongui Bogam'}, timeout=25)

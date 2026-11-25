@@ -340,7 +340,7 @@ class HttpTests(unittest.TestCase):
             seen.append(url.split('?')[0])
             if 'openrouter.ai' in url:
                 request=json.loads(payload)
-                self.assertEqual(request['model'],'openai/gpt-6-luna')
+                self.assertEqual(request['model'],'openai/gpt-oss-120b')
                 self.assertEqual(headers['Authorization'],'Bearer server-private-token')
                 self.assertNotIn('server-private-token',payload.decode())
                 plan={'candidates':[{'law':'시험법','article':'10','paragraph':'1','clause':'1','basisCode':'statutory','type':'required','excerpt':'가짜 AI 원문'}]}

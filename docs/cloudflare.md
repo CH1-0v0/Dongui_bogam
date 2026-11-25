@@ -85,6 +85,6 @@ TEST_BASE_URL=http://127.0.0.1:8787 node tests/guideline-flow.cjs
 
 공개 지원·가격 정보: https://openrouter.ai/api/v1/models/openai/gpt-oss-120b/endpoints
 
-## 현재 기본 모델
+## 400 오류 문의 코드
 
-기본 모델은 `openai/gpt-6-luna`입니다. 로컬 `.env`의 `OPENROUTER_MODEL` 값이 있으면 해당 값이 우선합니다. Luna는 temperature를 보내지 않고 JSON 응답과 낮은 reasoning effort를 요청합니다. 위 OSS 제공자 우선순위는 OSS 모델을 명시했을 때만 적용됩니다.
+기본 모델을 `openai/gpt-oss-120b`로 복구했습니다. AI 오류에는 `AI-실제HTTP상태-응답내오류상태-식별자` 문의 코드가 표시됩니다. 예를 들어 AI-200-400은 HTTP 200 응답 안의 오류 코드 400이며, AI-400-400은 HTTP 요청 자체가 400으로 거부된 경우입니다. 같은 문의 코드로 Cloudflare 실시간 로그에서 실제 오류를 찾을 수 있습니다. 브라우저에는 외부 오류 원문을 반환하지 않습니다.
