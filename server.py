@@ -510,6 +510,8 @@ def search(context):
     allowed_types = {i['type'] for i in context['items']}
     def verify_candidate(candidate):
         try:
+            if not isinstance(candidate.get('law'), str) or not candidate['law'].strip() or not candidate.get('article'):
+                raise ApiError('AI 제안에 법령명 또는 조문 번호가 없어 확인할 수 없습니다. 다시 검색해 주세요.', 422)
             if candidate.get('type') not in allowed_types:
                 raise ApiError('입력 항목에 없는 처리 유형입니다.', 422)
             rule = basis_rules().get(candidate.get('basisCode'))

@@ -103,7 +103,7 @@ export class LegalApi {
   }
   if(response.status>=300&&response.status<400)fail(service+'가 다른 주소로 연결을 요청하여 중단했습니다. 서버의 API 주소를 확인하세요.',502);
   if(!response.ok)return serviceFailure(response,service==='AI 서비스');
-  try{return await readLimited(response);}catch(error){if(error instanceof ApiError)throw error;fail(service+' 응답을 받는 중 연결이 끊겼습니다. 잠시 후 다시 시도하세요.',502);}
+  try{return await readLimited(response);}catch(error){if(error instanceof ApiError)throw error;const failure=new ApiError(service+' 응답을 받는 중 연결이 끊겼습니다. 잠시 후 다시 시도하세요.',502);if(service==='AI 서비스')failure.requestKind='stream';throw failure;}
  }
  async law(endpoint,params={}){
   const oc=this.env.LAW_API_OC;if(!oc)fail('법령 검색을 위해 서버에 LAW_API_OC를 설정해 주세요.',503);
@@ -151,7 +151,7 @@ export class LegalApi {
     try{const result=JSON.parse(choice.message.content.trim().replace(/^```(?:json)?\s*|\s*```$/g,''));if(!obj(result))throw Error();return result;}catch{const error=new ApiError('AI 답변이 비어 있거나 형식을 확인하지 못했습니다. 다시 시도하세요.',502);error.requestKind='format';throw error;}
    }catch(error){
     if(attempt===0&&deadline-Date.now()>1000){
-     if((error.upstreamStatus===400&&error.requestKind==='parameters')||[500,502,503,504,520,522,524].includes(error.upstreamStatus)||error.requestKind==='format'){if(payload.provider.order)payload.provider.order=[...payload.provider.order.slice(1),payload.provider.order[0]];}
+     if((error.upstreamStatus===400&&error.requestKind==='parameters')||[500,502,503,504,520,522,524].includes(error.upstreamStatus)||['format','stream'].includes(error.requestKind)){if(payload.provider.order)payload.provider.order=[...payload.provider.order.slice(1),payload.provider.order[0]];}
      if(error.upstreamStatus===400&&error.requestKind==='parameters'){
       // Preserve the model, privacy policy, prompt and output cap. Only optional
       // generation settings change; official-law and JSON validation still run.
@@ -159,7 +159,7 @@ export class LegalApi {
       else{delete payload.response_format;delete payload.reasoning;delete payload.temperature;}
       continue;
      }
-     if([500,502,503,504,520,522,524].includes(error.upstreamStatus)||error.requestKind==='format')continue;
+     if([500,502,503,504,520,522,524].includes(error.upstreamStatus)||['format','stream'].includes(error.requestKind))continue;
     }
     throw error;
    }
@@ -168,7 +168,7 @@ export class LegalApi {
 
  async search(data){const context=validateContext(data);if(!this.env.LAW_API_OC)fail('법령 원문 조회를 위해 서버에 LAW_API_OC를 설정해 주세요.',503);const planned=await this.ai(prompts.ai_candidates+'\n처리 근거 코드: '+JSON.stringify(Object.fromEntries(Object.entries(rules).filter(([,r])=>r.effect!=='consent'))),context);if(!Array.isArray(planned.candidates)||planned.candidates.length>6||planned.candidates.some(c=>!obj(c)))fail('AI 응답 형식을 확인하지 못했습니다.',502);const candidates=[],rejected=[];
  // Sequential candidates keep peak memory/subrequests bounded on the free tier.
- for(const candidate of planned.candidates){try{const scope=context.items.filter(i=>i.type===candidate.type),rule=rules[candidate.basisCode];if(!scope.length||!rule||!scope.some(i=>rule.contexts.includes(i.context)&&(!rule.supplement||rule.supplement===i.classification)))fail('법령의 개인정보 보호법 연결 조항이 처리 유형과 맞지 않습니다.');const actual=await this.verify(candidate);const proposed=candidate.itemNames||[],reasons=candidate.itemReasons||{};actual.itemReviews=Array.isArray(proposed)&&obj(reasons)?scope.filter(i=>!rule.supplement||i.classification===rule.supplement).map(i=>({name:i.name,suggested:proposed.includes(i.name),reason:String(reasons[i.name]??candidate.reason??'적용 요건을 확인해 주세요.').slice(0,500)})):[];candidates.push(actual);}catch(e){if(!(e instanceof ApiError))throw e;rejected.push({law:String(candidate.law??'').slice(0,100),message:e.message});}}
+ for(const candidate of planned.candidates){try{if(typeof candidate.law!=='string'||!candidate.law.trim()||!candidate.article)fail('AI 제안에 법령명 또는 조문 번호가 없어 확인할 수 없습니다. 다시 검색해 주세요.',422);const scope=context.items.filter(i=>i.type===candidate.type),rule=rules[candidate.basisCode];if(!scope.length||!rule||!scope.some(i=>rule.contexts.includes(i.context)&&(!rule.supplement||rule.supplement===i.classification)))fail('법령의 개인정보 보호법 연결 조항이 처리 유형과 맞지 않습니다.');const actual=await this.verify(candidate);const proposed=candidate.itemNames||[],reasons=candidate.itemReasons||{};actual.itemReviews=Array.isArray(proposed)&&obj(reasons)?scope.filter(i=>!rule.supplement||i.classification===rule.supplement).map(i=>({name:i.name,suggested:proposed.includes(i.name),reason:String(reasons[i.name]??candidate.reason??'적용 요건을 확인해 주세요.').slice(0,500)})):[];candidates.push(actual);}catch(e){if(!(e instanceof ApiError))throw e;rejected.push({law:String(candidate.law??'').slice(0,100),message:e.message});}}
  return {candidates,rejected,note:String(planned.note??'').slice(0,1800),mode:'live'};
  }
  async classify(data){const {items}=validateContext(data);if(items.length>20||items.some(i=>i.name.trim().length<2||i.name.trim().length>100))fail('분류할 항목명은 2~100자, 한 번에 20개까지 입력하세요.',400);const ids=data.items.map(i=>i.id);if(ids.some(id=>typeof id!=='string'||!/^[-\w]{1,80}$/.test(id))||new Set(ids).size!==ids.length)fail('분류할 항목을 다시 확인하세요.',400);if(!this.env.OPENROUTER_API_KEY||!this.env.LAW_API_OC)fail('민감정보 API 분류를 위한 서버 연결 설정을 확인하세요.',503);const sources=await Promise.all([this.citation({law:'개인정보 보호법',article:'23'}),this.citation({law:'개인정보 보호법 시행령',article:'18'})]);const officialEvidence=sources.map(s=>({cite:s.cite,text:s.articleExcerpt||s.excerpt}));if(officialEvidence.reduce((s,e)=>s+e.text.length,0)>40000)fail('민감정보 분류의 기준 조문을 확인하지 못했습니다.',502);const planned=await this.ai(prompts.classify_privacy_items,{officialEvidence,items:items.map((i,n)=>({id:ids[n],name:i.name,purpose:i.purpose}))},1800);const indexed=new Map();if(!Array.isArray(planned.items))fail('민감정보 분류 응답을 확인하지 못했습니다.',502);for(const row of planned.items){if(!obj(row)||!ids.includes(row.id)||indexed.has(row.id)||!['high','general','uncertain'].includes(row.verdict))fail('민감정보 분류 응답을 확인하지 못했습니다.',502);indexed.set(row.id,row);}const allowed=['건강','사상·신념','정치적 견해','가입·탈퇴','성생활','유전','범죄경력','생체인식','인종·민족','사생활'];return {items:items.map((i,n)=>{const r=indexed.get(ids[n])||{};return {id:ids[n],name:i.name,verdict:r.verdict||'uncertain',reason:String(r.reason??'항목의 구체적인 의미를 담당자가 확인하세요.').slice(0,400),included:Array.isArray(r.included)?r.included.filter(v=>allowed.includes(v)).slice(0,2):[]};})};

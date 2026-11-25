@@ -196,7 +196,18 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   await page.locator('[data-cancel-ground]').click();await page.locator('[data-next]').click();assert.equal(await page.locator('.doc-notice-row').count(),1);assert.match(await page.locator('.doc-notice-row').innerText(),/성명/);assert.doesNotMatch(await page.locator('.doc-notice-row').innerText(),/휴대전화번호/);
   await page.locator('[data-title]').click();await page.locator('[data-intro]').click();await page.locator('[data-child][value="no"]').check();
   for(const el of await page.locator('[data-path^="refusals."]').all())await el.fill('테스트용 미제공 안내');
+  await page.waitForFunction(()=>{const f=document.querySelector('.a4-document-frame');return f&&!f.hidden&&f.querySelectorAll('.a4-paper').length===Number(f.dataset.pages);});
+  const widthBefore=await page.locator('.a4-paper:not([hidden])').evaluate(n=>n.getBoundingClientRect().width);
+  await page.locator('[data-preview-zoom="0.1"]').click();
+  const widthAfter=await page.locator('.a4-paper:not([hidden])').evaluate(n=>n.getBoundingClientRect().width);assert.ok(widthAfter>widthBefore*1.05);
+  assert.ok(await page.locator('.a4-document-frame').evaluate(n=>n.scrollWidth>n.clientWidth));
+  await page.locator('[data-preview-zoom="fit"]').click();assert.ok(await page.locator('.a4-document-frame').evaluate(n=>n.scrollWidth<=n.clientWidth+1));
+  await page.locator('[data-toggle-document-edit]').click();const editable=page.locator('[contenteditable]').first();await editable.waitFor();assert.equal(await editable.evaluate(n=>getComputedStyle(n).outlineStyle),'dashed');
+  await page.locator('[data-toggle-document-edit]').click();
   await page.locator('[data-finish]').last().click();
+  await page.locator('.human-check input').first().check();assert.equal(await page.locator('.human-check input').first().isChecked(),true);
+  await page.locator('.human-review>summary').click();assert.equal(await page.locator('.human-review').getAttribute('open'),null);await page.locator('.human-review>summary').click();
+  console.log('PASS width-fit preview enlarges with horizontal scrolling, editable cells are marked, and human checks collapse');
   for(const format of ['pdf','hwpx']){const pending=page.waitForEvent('download');await page.locator(`[data-${format}]`).click();const download=await pending;await download.saveAs(`.test-output/output.${format}`);assert.ok((await fs.stat(`.test-output/output.${format}`)).size>1000);}
   console.log('PASS explicit application reaches step 4 and both PDF/HWPX export');
   for(const verdict of ['needs_information','not_supported']){

@@ -120,7 +120,7 @@ function suggested(i){
  return value==='possible'?'sensitive':'general';
 }
 const kind=i=>i.kind||suggested(i);
-const needsItemReview=i=>signal(i.name)!=='general'||!knownItemName(i.name)||currentSensitivity(i)?.verdict==='high';
+const needsItemReview=i=>isManualItemName(i)&&(signal(i.name)!=='general'||!knownItemName(i.name)||currentSensitivity(i)?.verdict==='high');
 function hint(i){
  const standard=standardItemName(i.name);
  if(standard!==i.name.trim())return '권장 표기 · '+standard;
@@ -308,7 +308,7 @@ async function lawRequest(path,data){
  if(!response.ok){const error=new Error(result.error||'요청에 실패했습니다.');error.status=response.status;throw error;}return result;
 }
 function lawSearchPanel(){
- return `<section class="panel law-search-panel"><div class="panelhead"><div><h2>개인정보별로 적용할 근거를 선택하세요</h2></div></div><p>AI가 제안한 근거는 아래 개인정보 유형별로 표시됩니다. <strong>법령을 선택하고 항목을 체크한 뒤, 담당자 확인 후 적용하세요. 직접 추가한 근거는 필요할 때 AI 검토를 진행할 수 있습니다.</strong> 별도 근거를 적용하지 않은 일반 항목은 동의서로 진행합니다. 주민등록번호 등 별도 허용 요건이 있는 정보는 추가 확인이 필요합니다.</p><p class="muted">실제 개인정보는 입력하지 마세요. 조문의 존재와 업무에 적용할 수 있는지는 별도로 검토해야 합니다.</p><div class="actions"><button class="primary" data-ai-law ${lawSearch.busy?'disabled':''}>${lawSearch.busy?'AI가 근거를 찾고 있습니다…':'AI로 적용 근거 찾기'}</button><button data-add-ground>＋ 법령·처리 근거 직접 추가</button>${apiStatus?.demoAvailable?`<label class="field law-mode"><span>검색 방식</span><select data-law-mode ${lawSearch.busy?'disabled':''}><option value="live" ${lawSearch.mode==='live'?'selected':''}>실제 검색</option><option value="demo" ${lawSearch.mode==='demo'?'selected':''}>화면 시연</option></select></label>`:''}</div><p class="notice" role="status">${lawSearch.busy?'AI로 법률 근거를 찾고 있습니다.':'필요한 항목에만 법령 근거를 적용하세요.'}</p>${lawSearch.mode==='demo'?'<p class="notice">시연 법령은 실제 원문을 확인하지 않아 적용할 수 없습니다.</p>':''}${lawSearch.error?`<div class="info warn" role="alert">${safe(lawSearch.error)}</div>`:''}${lawSearch.note?`<p class="muted">${safe(lawSearch.note)}</p>`:''}${lawSearch.rejected.length?`<details><summary>적용 법령에서 제외된 근거 ${lawSearch.rejected.length}건</summary>${lawSearch.rejected.map(r=>`<p>${safe(r.law)} · ${safe(r.message)}</p>`).join('')}</details>`:''}</section>`;
+ return `<section class="panel law-search-panel"><div class="panelhead"><div><h2>개인정보별로 적용할 근거를 선택하세요</h2></div></div><p>AI가 제안한 근거는 아래 개인정보 유형별로 표시됩니다. <strong>법령을 선택하고 항목을 체크한 뒤, 담당자 확인 후 적용하세요. 직접 추가한 근거는 필요할 때 AI 검토를 진행할 수 있습니다.</strong> 별도 근거를 적용하지 않은 일반 항목은 동의서로 진행합니다. 주민등록번호 등 별도 허용 요건이 있는 정보는 추가 확인이 필요합니다.</p><p class="muted">실제 개인정보는 입력하지 마세요. 조문의 존재와 업무에 적용할 수 있는지는 별도로 검토해야 합니다.</p><div class="actions"><button class="primary" data-ai-law ${lawSearch.busy?'disabled':''}>${lawSearch.busy?'AI가 근거를 찾고 있습니다…':'AI로 적용 근거 찾기'}</button><button data-add-ground>＋ 법령·처리 근거 직접 추가</button>${apiStatus?.demoAvailable?`<label class="field law-mode"><span>검색 방식</span><select data-law-mode ${lawSearch.busy?'disabled':''}><option value="live" ${lawSearch.mode==='live'?'selected':''}>실제 검색</option><option value="demo" ${lawSearch.mode==='demo'?'selected':''}>화면 시연</option></select></label>`:''}</div><p class="notice" role="status">${lawSearch.busy?'AI로 법률 근거로 찾으나, 담당자가 최종 검토하여 반영해야 합니다.':'필요한 항목에만 법령 근거를 적용하세요.'}</p>${lawSearch.mode==='demo'?'<p class="notice">시연 법령은 실제 원문을 확인하지 않아 적용할 수 없습니다.</p>':''}${lawSearch.error?`<div class="info warn" role="alert">${safe(lawSearch.error)}</div>`:''}${lawSearch.note?`<p class="muted">${safe(lawSearch.note)}</p>`:''}${lawSearch.rejected.length?`<details><summary>적용 법령에서 제외된 근거 ${lawSearch.rejected.length}건</summary>${lawSearch.rejected.map(r=>`<p>${safe(r.law||'법령명 없는 AI 제안')} · ${safe(r.message)}</p>`).join('')}</details>`:''}</section>`;
 }
 const candidateKey=(candidate,index)=>candidate?._key||lawSearch.version+':'+index;
 const candidateIdentity=c=>JSON.stringify([c.type,c.basisCode,c.law,c.article,c.paragraph,c.clause,c.mst,c.excerpt]);
@@ -660,10 +660,11 @@ function previewControls(editing,top=false){
  return `<nav class="a4-page-nav ${top?'a4-nav-top':''}" aria-label="미리보기 ${top?'상단':'하단'} 쪽 이동" ${editing?'hidden':''}><button data-preview-move="-1" disabled>← 이전 쪽</button><output class="a4-page-counter" aria-live="polite">1 / 1쪽</output><button data-preview-move="1" disabled>다음 쪽 →</button>${top?'<span class="preview-zoom"><button data-preview-zoom="-0.1" aria-label="미리보기 축소">−</button><output class="preview-zoom-value">100%</output><button data-preview-zoom="0.1" aria-label="미리보기 확대">＋</button><button data-preview-zoom="fit">가로 맞춤</button></span>':''}</nav>`;
 }
 function previewMarkup(html,editing=false){
- return `<p class="a4-preview-status muted" role="status">${editing?'표 수정 중입니다. 저장하면 A4 쪽 미리보기가 갱신됩니다.':'A4 미리보기를 준비하고 있습니다…'}</p>${previewControls(editing,true)}<div class="a4-document-frame" role="region" aria-label="A4 문서 쪽 미리보기" data-zoom="1" ${editing?'hidden':''}></div>${previewControls(editing)}<div id="preview-docs" class="document-source" ${editing?'':'hidden'}>${html}</div>`;
+ return `<p class="a4-preview-status muted" role="status">${editing?'색과 점선으로 표시한 부분을 직접 수정할 수 있습니다. 저장하면 A4 쪽 미리보기가 갱신됩니다.':'A4 미리보기를 준비하고 있습니다…'}</p>${previewControls(editing,true)}<div class="a4-document-frame" role="region" aria-label="A4 문서 쪽 미리보기" data-zoom="1" hidden></div>${previewControls(editing)}<div id="preview-docs" class="document-source">${html}</div>`;
 }
 
-let a4PreviewVersion=0,a4PreviewTimer,pdfViewer;
+let a4PreviewVersion=0,a4PreviewTimer,pdfViewer,a4PreviewCache;
+const warmPdfPreview=()=>{import('./pdf-export.js').then(m=>m.preparePdf()).catch(()=>{});pdfViewer??=import('./export-assets/pdfjs.min.js').catch(error=>{pdfViewer=null;throw error;});pdfViewer.catch(()=>{});};
 function scheduleA4Preview(){
  clearTimeout(a4PreviewTimer);const version=++a4PreviewVersion;
  const frame=document.querySelector('.a4-document-frame'),status=document.querySelector('.a4-preview-status');
@@ -671,12 +672,14 @@ function scheduleA4Preview(){
  a4PreviewTimer=setTimeout(async()=>{
   let documentPdf,loadingTask;
   try{
-   const blob=await (await import('./pdf-export.js')).createPdf(exportBody(),documentTableGrid);
+   const body=exportBody(),key=body.innerHTML;
+   if(a4PreviewCache?.key===key){frame.replaceChildren(...a4PreviewCache.pages);frame.hidden=false;frame.dataset.pages=a4PreviewCache.pages.length;status.textContent='A4 · 총 '+a4PreviewCache.pages.length+'쪽';document.querySelector('#preview-docs').hidden=true;showA4Page(1);return;}
+   const blob=await (await import('./pdf-export.js')).createPdf(body,documentTableGrid);
    const viewer=await (pdfViewer??=import('./export-assets/pdfjs.min.js').catch(error=>{pdfViewer=null;throw error;}));
    if(version!==a4PreviewVersion||!frame.isConnected)return;
    viewer.GlobalWorkerOptions.workerSrc=new URL('/export-assets/pdfjs-worker.min.js',location.origin).href;
    loadingTask=viewer.getDocument({data:new Uint8Array(await blob.arrayBuffer()),isEvalSupported:false,useWasm:false});documentPdf=await loadingTask.promise;
-   const pages=document.createDocumentFragment();
+   const pages=[];frame.replaceChildren();
    for(let n=1;n<=documentPdf.numPages;n++){
     if(version!==a4PreviewVersion||!frame.isConnected)return;
     const page=await documentPdf.getPage(n),viewport=page.getViewport({scale:1.5}),paper=document.createElement('section');
@@ -684,14 +687,15 @@ function scheduleA4Preview(){
     const label=document.createElement('p');label.className='a4-page-label';label.textContent=n+' / '+documentPdf.numPages+'쪽';paper.append(label);
     const canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);canvas.setAttribute('aria-hidden','true');paper.append(canvas);
     await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
-    const accessible=document.createElement('div');accessible.className='a4-page-text';accessible.textContent=(await page.getTextContent()).items.map(i=>i.str).join(' ');paper.append(accessible);pages.append(paper);
+    const accessible=document.createElement('div');accessible.className='a4-page-text';accessible.textContent=(await page.getTextContent()).items.map(i=>i.str).join(' ');paper.append(accessible);pages.push(paper);frame.append(paper);
+    if(n===1){frame.hidden=false;document.querySelector('#preview-docs').hidden=true;frame.dataset.pages=documentPdf.numPages;status.textContent='A4 · 총 '+documentPdf.numPages+'쪽';fitA4Page();}
    }
    if(version!==a4PreviewVersion||!frame.isConnected)return;
-   frame.replaceChildren(pages);frame.hidden=false;frame.dataset.pages=documentPdf.numPages;
+   a4PreviewCache={key,pages};frame.hidden=false;frame.dataset.pages=documentPdf.numPages;
    status.textContent='A4 · 총 '+documentPdf.numPages+'쪽';showA4Page(1);
   }catch{if(version===a4PreviewVersion&&frame.isConnected){status.textContent='A4 미리보기를 만들지 못했습니다. 문서 내용을 확인한 뒤 다시 시도해 주세요.';document.querySelector('#preview-docs').hidden=false;frame.hidden=true;}}
   finally{await loadingTask?.destroy().catch(()=>{});}
- },220);
+ },0);
 }
 
 function fitA4Page(){
@@ -787,7 +791,7 @@ function finalPage(){
  return `<div class="title"><h1 tabindex="-1">최종본</h1><p>최종본을 확인하고 저장하거나 인쇄하세요.</p></div>
  <div class="final-layout"><section class="panel final-review" aria-labelledby="final-review-title"><h2 id="final-review-title">최종 점검 결과</h2>
  <p class="muted">자동 점검은 기재 여부를 확인합니다. 법적 근거와 동의 범위의 적정성은 담당자가 확인해 주세요.</p>
- <section class="human-review"><h3>담당자가 확인할 사항</h3><ul>${pending.map(row).join('')}</ul></section>
+ <details class="human-review" open><summary><strong>담당자가 확인할 사항</strong></summary><ul>${pending.map(([title,status,description],index)=>`<li><label class="human-check"><input type="checkbox" aria-label="${safe(title)} 담당자 확인"><strong>${safe(title)}</strong></label><p>${safe(description)}</p></li>`).join('')}</ul></details>
  <details class="review-checks" data-audit-kind="fields"><summary><span class="review-check-title"><strong>${items[0][0]}</strong><span class="review-toggle" aria-hidden="true"></span>${pill(items[0][1])}</span><span class="review-check-description">${items[0][2]}</span></summary><div class="consent-audit">${auditBody(false)}</div></details>
  <details class="review-checks" data-audit-kind="choices"><summary><span class="review-check-title"><strong>동의란 구분</strong><span class="review-toggle" aria-hidden="true"></span>${pill(items[1][1])}</span><span class="review-check-description">${items[1][2]}</span></summary><div class="choice-audit">${auditBody(true)}</div></details>
  <ul>${items.slice(2).filter(([,status])=>['확인','반영'].includes(status)).map(row).join('')}</ul><a href="${reference}" target="_blank" rel="noopener">개인정보 보호법 원문</a><ul class="not-applicable-review">${items.slice(2).filter(([,status])=>status==='해당 없음').map(row).join('')}</ul></section>
@@ -813,6 +817,7 @@ function render(){
  app.innerHTML=`<div class="trail"><button data-go="0">홈</button> / 문서 작성</div><div class="title"><h1>${labels[step-1]}</h1><p>${descriptions[step-1]}</p></div><nav class="stepper" aria-label="작성 단계">${labels.map((name,n)=>`<button data-go="${n+1}" ${step===n+1?'aria-current="step"':''} ${n+1>reached||(n===3&&unresolvedRnn().length)?'disabled':''}><span class="stepnum">${String(n+1).padStart(2,'0')}</span>${name}</button>`).join('')}</nav><div class="workspace ${step===4?'wide-output':''}"><div class="stack">${body}<div class="notice" id="message" role="status">${safe(step===3&&state.groundDraft?'':message)}</div><div class="bar"><button data-go="${step-1}">← ${step===1?'홈으로':'이전 단계'}</button>${step<4?`<button class="primary" data-next ${step===3&&unresolvedRnn().length?'disabled aria-describedby="rrn-block"':''}>${step===2?'분류 확정 후 다음':step===3?'문서 작성으로':'다음 단계'} →</button>`:step===4?'<button class="primary" data-finish>완성하기 →</button>':''}</div></div>${step===4?'':`<aside class="side">${reviewStatus()}</aside>`}</div>`;
  const selectAll=document.querySelector('[data-scope-all]');if(selectAll){const checks=[...document.querySelectorAll('[data-scope]')];selectAll.indeterminate=checks.some(c=>c.checked)&&checks.some(c=>!c.checked);}
  if(step===1&&basicsChecked)showBasicsIssues();
+ if(step===3)warmPdfPreview();
  if(step===4)scheduleA4Preview();
  if(!matchMedia('(prefers-reduced-motion: reduce)').matches)for(const node of document.querySelectorAll('[data-item-row]')){const old=before.get(node.dataset.itemRow);if(!old)continue;const now=node.getBoundingClientRect(),x=old.left-now.left,y=old.top-now.top;if(Math.abs(x)+Math.abs(y)>1)node.animate([{transform:`translate(${x}px,${y}px)`,backgroundColor:'#eaf1ff'},{transform:'translate(0,0)',backgroundColor:'transparent'}],{duration:320,easing:'cubic-bezier(.2,.7,.2,1)'});}
 }
@@ -829,7 +834,7 @@ function contextualRisk({g,i}){
 function riskHTML(issues,missing){
  const all=entries(),labels={collect:'개인정보 수집',extra:'목적 외 이용',provide:'제3자 제공',marketing:'홍보 또는 마케팅'};
  const checks=Object.entries(labels).filter(([key])=>all.some(e=>e.key===key)).map(([key,label])=>{const rows=all.filter(e=>e.key===key),hasPurpose=rows.every(e=>e.g.purpose.trim()),possible=rows.some(contextualRisk);return `<li class="${possible?'risk-possible':''}">${label}${hasPurpose?'에서 과다 수집 가능성이 '+(possible?'있습니다.':'적습니다.'):'의 목적을 입력하면 과다 수집 가능성을 점검합니다.'}</li>`;});
- return `<section class="risk-summary"><strong>과다 수집 가능성</strong><ul>${checks.join('')}</ul></section><section class="risk-classification"><strong>분류 확인 항목 ${issues.length}개</strong>${issues.map(({i})=>`<div>${safe(i.name)} · ${safe(hint(i))}</div>`).join('')}</section><section class="risk-purpose"><strong>목적·기간 확인 항목 ${missing}개</strong></section>`;
+ return `<section class="risk-summary"><strong>과다 수집 가능성</strong><ul>${checks.join('')}</ul></section><section class="risk-classification"><strong>분류 확인 항목 ${issues.length}개</strong>${issues.map(({i})=>`<div>${safe(i.name)} → ${safe(hint(i))}</div>`).join('')}</section><section class="risk-purpose"><strong>목적·기간 확인 항목 ${missing}개</strong></section>`;
 }
 function reviewStatus(){
  const all=entries();return `<div class="review-status-header"><h3>검토 현황</h3><span class="pill">개인정보 항목 <span id="count">${all.length}</span>개</span></div><div id="risk">${riskHTML(all.filter(({i})=>needsItemReview(i)),all.filter(({g})=>!g.purpose.trim()||!g.period.trim()).length)}</div><p class="review-human-warning">최종 개인정보의 상세 분류와 법령 근거는 담당자가 직접 확인해야 합니다.</p><button class="review-guide" data-guide>이용 안내</button>`;
@@ -1140,7 +1145,7 @@ function validateBasics(){
 function startBlankConsent(){
  clearTimeout(sensitivityTimer);state=newDraft();
  lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};
- freshLawPicker();editorOpen=false;documentEditing=false;finalDocument=null;basicsChecked=false;message='';tab='collect';reached=0;go(1);
+ freshLawPicker();editorOpen=false;documentEditing=false;a4PreviewCache=null;finalDocument=null;basicsChecked=false;message='';tab='collect';reached=0;go(1);
 }
 function positionItemMenu(menu,trigger){const r=trigger.getBoundingClientRect(),height=window.visualViewport?.height||innerHeight,below=height-r.bottom-8,above=r.top-8,up=below<180&&above>below;menu.style.top=up?'auto':'calc(100% + 4px)';menu.style.bottom=up?'calc(100% + 4px)':'auto';menu.style.maxHeight=Math.min(180,Math.max(40,up?above:below))+'px';}
 function closeItemMenus(){document.querySelectorAll('.item-options').forEach(menu=>menu.hidden=true);document.querySelectorAll('[data-item-menu]').forEach(button=>button.setAttribute('aria-expanded','false'));}
