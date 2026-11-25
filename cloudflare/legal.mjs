@@ -2,7 +2,7 @@
 import {XMLParser, XMLValidator} from 'fast-xml-parser';
 import rules from '../basis-rules.json' with {type:'json'};
 import prompts from './prompts.json' with {type:'json'};
-export class ApiError extends Error {constructor(message,status=502){super(message);this.status=status;}}
+export class ApiError extends Error {constructor(message,status=502,upstreamStatus){super(message);this.status=status;this.upstreamStatus=upstreamStatus;}}
 const fail=(message,status=422)=>{throw new ApiError(message,status);};
 export const compact=value=>String(value??'').replace(/\s/g,'');
 const obj=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
@@ -49,6 +49,23 @@ export function validateContext(data){
 }
 export function reviewMaterial(data){const {items}=validateContext(data),rule=rules[data.basisCode];if(!rule||rule.effect==='consent')fail('검토할 처리 근거를 선택하세요.',400);const seen=new Set();for(let n=0;n<items.length;n++){const i=items[n],id=data.items[n].id;if(typeof id!=='string'||!/^[-\w]{1,80}$/.test(id)||seen.has(id))fail('선택 항목을 다시 확인하세요.',400);if(!['general','sensitive','unique','rnn'].includes(i.classification)||!['required','optional','sensitive','unique','provide','extra','marketing','collect','outside'].includes(i.type)||i.type!==data.type||(['collect','provide','outside'].includes(data.type)&&i.context!==data.type)||!rule.contexts.includes(i.context)||(rule.supplement&&i.classification!==rule.supplement))fail('근거와 선택 항목의 개인정보 유형이 일치하지 않습니다.');i.id=id;seen.add(id);}return items;}
 async function readLimited(response,max=8_000_000){const reader=response.body?.getReader();if(!reader)return '';let size=0,parts=[];try{for(;;){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();fail('외부 API 응답이 너무 큽니다. 검색 범위를 줄여 주세요.',502);}parts.push(value);}}finally{reader.releaseLock();}const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}return new TextDecoder().decode(bytes);}
+// Classify only known conditions. Never forward upstream text: it may echo keys or prompts.
+async function serviceFailure(response,isAI){
+ const status=response.status,service=isAI?'AI 서비스':'국가법령정보센터';let message='';
+ if(isAI){try{const parsed=JSON.parse(await readLimited(response,16384));message=typeof parsed?.error?.message==='string'?parsed.error.message:'';}catch{}}
+ let advice;
+ if([401,403].includes(status))advice=service+' 인증 또는 접근이 거부되었습니다. 서버의 키·이용 권한을 확인하세요.';
+ else if(status===402)advice='AI 서비스 사용 잔액과 키 사용 한도를 확인하세요.';
+ else if(status===429)advice=service+' 호출 한도에 도달했습니다. 잠시 후 다시 시도하세요.';
+ else if(isAI&&status===404&&/data.?policy|privacy|data.?collection|zero.?data|zdr/i.test(message))advice='AI 서비스의 개인정보 보호 조건에 맞는 연결을 찾지 못했습니다. AI 연결 설정을 확인해 주세요.';
+ else if(isAI&&status===404)advice='현재 사용할 수 있는 AI 연결을 찾지 못했습니다. AI 모델과 연결 설정을 확인해 주세요.';
+ else if(isAI&&[400,413,422].includes(status)&&/context|too (?:many|long)|maximum.*token|length.*exceed/i.test(message))advice='AI가 처리할 수 있는 입력 범위를 넘었습니다. 항목이나 설명을 줄여 다시 시도해 주세요.';
+ else if(isAI&&[400,422].includes(status))advice='AI 서비스가 요청 설정을 처리하지 못했습니다. AI 연결 설정을 확인해 주세요.';
+ else if([408,504].includes(status))advice=service+' 처리 시간이 초과되었습니다. 잠시 후 다시 시도하세요.';
+ else if(status>=500)advice=service+'가 일시적으로 요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요.';
+ else advice=service+' 요청을 처리하지 못했습니다. 연결 설정을 확인해 주세요.';
+ throw new ApiError(advice+' (오류 '+status+')',status===429?429:[408,504].includes(status)?504:502,status);
+}
 const lawCache=new Map(); // Isolate-only official-law cache, never stores submitted items or AI results.
 export class LegalApi {
  constructor(env,fetcher=fetch){this.env=env;this.fetcher=fetcher;this.memo=new Map();this.calls=0;}
@@ -63,7 +80,8 @@ export class LegalApi {
    fail(service+'에 연결하지 못했습니다. 잠시 후 다시 시도하세요.',502);
   }
   if(response.status>=300&&response.status<400)fail(service+'가 다른 주소로 연결을 요청하여 중단했습니다. 서버의 API 주소를 확인하세요.',502);
-  if(!response.ok){if([401,403].includes(response.status))fail(service+' 인증 또는 접근이 거부되었습니다. 서버의 키·이용 권한을 확인하세요.',502);if(response.status===402)fail('AI 서비스 사용 잔액을 확인하세요.',502);if(response.status===429)fail(service+' 호출 한도에 도달했습니다. 잠시 후 다시 시도하세요.',429);fail(service+' 요청이 실패했습니다. 잠시 후 다시 시도하세요.',502);}return readLimited(response);
+  if(!response.ok)return serviceFailure(response,service==='AI 서비스');
+  try{return await readLimited(response);}catch(error){if(error instanceof ApiError)throw error;fail(service+' 응답을 받는 중 연결이 끊겼습니다. 잠시 후 다시 시도하세요.',502);}
  }
  async law(endpoint,params={}){
   const oc=this.env.LAW_API_OC;if(!oc)fail('법령 검색을 위해 서버에 LAW_API_OC를 설정해 주세요.',503);
@@ -94,7 +112,24 @@ export class LegalApi {
  const {row,mst:current}=await this.resolve(name);if(current!==mst)fail('법령 버전이 변경되었거나 검색 결과와 다릅니다. 법령을 다시 검색하세요.');const root=await this.law('lawService.do',{MST:mst});const official=content(find(root,'법령명_한글'));if(official&&compact(official)!==compact(name))fail('검색 결과와 본문의 법령명이 다릅니다.',502);
  const articles=descendants(root,'조문단위').filter(n=>text(n,'조문여부')==='조문'&&text(n,'조문제목')!=='삭제'&&excerpt(n)).map(n=>{const paragraphs=children(n,'항').map(p=>({value:leadingNumber(text(p,'항번호')),text:excerpt(p),clauses:clauses(p)})).filter(p=>p.value);return {value:articleLabel(n),title:text(n,'조문제목'),text:excerpt(n),paragraphs,clauses:[...clauses(n),...(!paragraphs.length?children(n,'항').flatMap(clauses):[])]};});if(!articles.length)fail('선택할 수 있는 조문 본문을 확인하지 못했습니다.');return {law:text(row,'법령명한글'),mst,effectiveDate:text(row,'시행일자'),articles,sourceUrl:'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq='+mst};
  }
- async ai(prompt,data,maxTokens=3000){if(!this.env.OPENROUTER_API_KEY)fail('AI 기능을 위해 서버에 OPENROUTER_API_KEY를 설정해 주세요.',503);const model=this.env.OPENROUTER_MODEL||'openai/gpt-oss-120b';const payload={model,temperature:0.1,max_tokens:maxTokens,response_format:{type:'json_object'},provider:{data_collection:'deny',sort:'latency'},...(model.includes('gpt-oss')?{reasoning:{effort:'low',exclude:true}}:{}),messages:[{role:'system',content:prompt},{role:'user',content:JSON.stringify(data)}]};const raw=await this.upstream('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+this.env.OPENROUTER_API_KEY,'Content-Type':'application/json','X-Title':'Dongui Bogam'},body:JSON.stringify(payload)},25000);try{const parsed=JSON.parse(raw),result=JSON.parse(parsed.choices[0].message.content.trim().replace(/^```(?:json)?\s*|\s*```$/g,''));if(!obj(result))throw Error();return result;}catch{fail('AI 응답 형식을 확인하지 못했습니다. 다시 시도하세요.',502);}}
+ async ai(prompt,data,maxTokens=3000){
+  if(!this.env.OPENROUTER_API_KEY)fail('AI 기능을 위해 서버에 OPENROUTER_API_KEY를 설정해 주세요.',503);
+  const model=this.env.OPENROUTER_MODEL||'openai/gpt-oss-120b';
+  const payload={model,temperature:0.1,max_tokens:maxTokens,response_format:{type:'json_object'},provider:{data_collection:'deny',sort:'latency',require_parameters:true,allow_fallbacks:true},...(model.includes('gpt-oss')?{reasoning:{effort:'low',exclude:true}}:{}),messages:[{role:'system',content:prompt},{role:'user',content:JSON.stringify(data)}]};
+  const deadline=Date.now()+35000;
+  for(let attempt=0;attempt<2;attempt++){
+   try{
+    const raw=await this.upstream('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+this.env.OPENROUTER_API_KEY,'Content-Type':'application/json','X-Title':'Dongui Bogam'},body:JSON.stringify(payload)},Math.min(25000,Math.max(1,deadline-Date.now())));
+    let envelope;try{envelope=JSON.parse(raw);}catch{fail('AI 응답 형식을 확인하지 못했습니다. 다시 시도하세요.',502);}
+    if(envelope?.error){const code=Number(envelope.error.code);if(Number.isInteger(code)&&code>=400&&code<=599)await serviceFailure(Response.json(envelope,{status:code}),true);fail('AI 서비스가 답변을 완료하지 못했습니다. 다시 시도하세요.',502);}
+    try{const result=JSON.parse(envelope.choices[0].message.content.trim().replace(/^```(?:json)?\s*|\s*```$/g,''));if(!obj(result))throw Error();return result;}catch{fail('AI 응답 형식을 확인하지 못했습니다. 다시 시도하세요.',502);}
+   }catch(error){
+    if(attempt===0&&[500,502,503,504,520,522,524].includes(error.upstreamStatus)&&deadline-Date.now()>1000)continue;
+    throw error;
+   }
+  }
+ }
+
  async search(data){const context=validateContext(data);if(!this.env.LAW_API_OC)fail('법령 원문 조회를 위해 서버에 LAW_API_OC를 설정해 주세요.',503);const planned=await this.ai(prompts.ai_candidates+'\n처리 근거 코드: '+JSON.stringify(Object.fromEntries(Object.entries(rules).filter(([,r])=>r.effect!=='consent'))),context);if(!Array.isArray(planned.candidates)||planned.candidates.length>6||planned.candidates.some(c=>!obj(c)))fail('AI 응답 형식을 확인하지 못했습니다.',502);const candidates=[],rejected=[];
  // Sequential candidates keep peak memory/subrequests bounded on the free tier.
  for(const candidate of planned.candidates){try{const scope=context.items.filter(i=>i.type===candidate.type),rule=rules[candidate.basisCode];if(!scope.length||!rule||!scope.some(i=>rule.contexts.includes(i.context)&&(!rule.supplement||rule.supplement===i.classification)))fail('법령의 개인정보 보호법 연결 조항이 처리 유형과 맞지 않습니다.');const actual=await this.verify(candidate);const proposed=candidate.itemNames||[],reasons=candidate.itemReasons||{};actual.itemReviews=Array.isArray(proposed)&&obj(reasons)?scope.filter(i=>!rule.supplement||i.classification===rule.supplement).map(i=>({name:i.name,suggested:proposed.includes(i.name),reason:String(reasons[i.name]??candidate.reason??'적용 요건을 확인해 주세요.').slice(0,500)})):[];candidates.push(actual);}catch(e){if(!(e instanceof ApiError))throw e;rejected.push({law:String(candidate.law??'').slice(0,100),message:e.message});}}
