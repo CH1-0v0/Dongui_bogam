@@ -281,7 +281,7 @@ const groundType=entry=>entry.key==='extra'||entry.key==='provide'&&entry.g.outs
 const groundEntries=type=>entries().filter(entry=>groundType(entry)===type);
 const groundInitial=type=>({type,basisCode:'',law:'',article:'',paragraph:'',clause:'',excerpt:'',reason:'',ids:[],specific:false,conditionsConfirmed:false,authorityConfirmed:false,verified:false,pipaVerified:false,supportVerified:false});
 let lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:0,dismissed:[]};
-let apiStatus=null,lawActionBusy=false,editorOpen=false;
+let apiStatus=null,apiStatusExpires=0,apiStatusFlight=null,lawActionBusy=false,editorOpen=false;
 const lawContext=entry=>groundType(entry);
 const lawClassification=i=>rnn(i.name)?'rnn':kind(i);
 const draftOptions=draft=>{
@@ -306,20 +306,31 @@ function apiErrorMessage(error){
  if(error instanceof TypeError)return '로컬 API 서버와 연결이 끊겼습니다. server.py 터미널과 같은 주소의 /api/status를 확인한 뒤 새로고침하세요.';
  return (error.message||'요청을 처리하지 못했습니다.').replaceAll('OpenRouter','AI 서비스').replaceAll('OPENROUTER_API_KEY','AI 연결 설정');
 }
-async function readApiStatus(){
+async function readApiStatus(force=false){
  if(!['http:','https:'].includes(location.protocol))throw new Error('python server.py 실행 후 http://127.0.0.1:3000으로 접속하세요. HTML 파일을 직접 열면 검색할 수 없습니다.');
- let response;try{response=await fetch('/api/status',{signal:AbortSignal.timeout(10000),cache:'no-store'});}catch(error){throw new Error(apiErrorMessage(error));}
- if(!response.ok)throw new Error('server.py가 실행 중인지 확인하세요.');
- let result;try{result=await response.json();}catch{throw new Error('서버가 올바르게 응답하지 않습니다. server.py로 실행한 주소를 확인하세요.');}
- if(result.app!=='dongui'||result.apiVersion!==8)throw new Error('이전 버전 서버가 실행 중입니다. Ctrl+C로 종료하고 최신 폴더에서 python server.py를 다시 실행하세요.');
- apiStatus=result;return result;
+ if(!force&&apiStatus&&Date.now()<apiStatusExpires)return apiStatus;
+ if(apiStatusFlight)return apiStatusFlight;
+ apiStatusFlight=(async()=>{
+  let response;try{response=await fetch('/api/status',{signal:AbortSignal.timeout(10000),cache:'no-store'});}catch(error){throw new Error(apiErrorMessage(error));}
+  if(!response.ok)throw new Error('server.py가 실행 중인지 확인하세요.');
+  let result;try{result=await response.json();}catch{throw new Error('서버가 올바르게 응답하지 않습니다. server.py로 실행한 주소를 확인하세요.');}
+  if(result.app!=='dongui'||result.apiVersion!==8)throw new Error('이전 버전 서버가 실행 중입니다. Ctrl+C로 종료하고 최신 폴더에서 python server.py를 다시 실행하세요.');
+  apiStatus=result;apiStatusExpires=Date.now()+30000;return result;
+ })();
+ try{return await apiStatusFlight;}finally{apiStatusFlight=null;}
 }
 async function lawRequest(path,data){
- await readApiStatus();let response;
- try{response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':apiStatus.csrfToken},body:JSON.stringify(data),signal:AbortSignal.timeout(path.endsWith('/search')?660000:path.endsWith('/review')?120000:path.endsWith('/classify')?120000:90000)});}catch(error){throw new Error(apiErrorMessage(error));}
- let result;try{result=await response.json();}catch{throw new Error('응답을 읽지 못했습니다. server.py 터미널의 API 로그를 확인하세요.');}
- if(!response.ok){const error=new Error(result.error||'요청에 실패했습니다.');error.status=response.status;throw error;}return result;
+ const body=JSON.stringify(data);
+ for(let attempt=0;attempt<2;attempt++){
+  const status=await readApiStatus(attempt>0);let response;
+  try{response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':status.csrfToken},body,signal:AbortSignal.timeout(path.endsWith('/search')?660000:path.endsWith('/review')?120000:path.endsWith('/classify')?120000:90000)});}catch(error){throw new Error(apiErrorMessage(error));}
+  let result;try{result=await response.json();}catch{throw new Error('응답을 읽지 못했습니다. server.py 터미널의 API 로그를 확인하세요.');}
+  // Only replay a CSRF rejection, which occurs before any API work or billing.
+  if(attempt===0&&response.status===403&&String(result.error||'').includes('새로고침'))continue;
+  if(!response.ok){const error=new Error(result.error||'요청에 실패했습니다.');error.status=response.status;throw error;}return result;
+ }
 }
+
 function lawSearchDetails(){
  const unavailable=lawSearch.rejected.filter(r=>['timeout','service_unavailable'].includes(r.reason));
  const excluded=lawSearch.rejected.filter(r=>!['timeout','service_unavailable'].includes(r.reason));

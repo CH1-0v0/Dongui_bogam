@@ -1,4 +1,5 @@
 import json
+import http.server
 import os
 from pathlib import Path
 import threading
@@ -174,9 +175,40 @@ class LawTests(unittest.TestCase):
         self.assertTrue(result['pipaVerified'])
     def test_upstream_error_does_not_leak_key(self):
         e=urllib.error.HTTPError('https://example.test/?OC=secret',403,'secret',{},None)
-        with patch.object(urllib.request,'urlopen',side_effect=e):
+        with patch.object(server.UPSTREAM_OPENER,'open',side_effect=e):
             with self.assertRaises(server.ApiError) as got:server.request_bytes('https://example.test')
         self.assertNotIn('secret',str(got.exception))
+
+class ReviewSecurityTests(unittest.TestCase):
+    def test_redirect_never_receives_authorization(self):
+        hits=[]
+        class Redirect(http.server.BaseHTTPRequestHandler):
+            def log_message(self,*args): pass
+            def do_POST(self):
+                hits.append(self.path)
+                self.send_response(302)
+                self.send_header('Location', f'http://localhost:{self.server.server_port}/sink')
+                self.end_headers()
+            def do_GET(self):
+                hits.append(self.path)
+                self.send_response(200);self.end_headers();self.wfile.write(b'should not be reached')
+        srv=http.server.ThreadingHTTPServer(('127.0.0.1',0),Redirect)
+        thread=threading.Thread(target=srv.serve_forever,daemon=True);thread.start()
+        try:
+            with self.assertRaisesRegex(server.ApiError,'다른 주소'):
+                server.request_bytes(f'http://127.0.0.1:{srv.server_port}/start', b'{}', {'Authorization':'Bearer synthetic-secret'})
+            self.assertEqual(hits,['/start'])
+        finally:srv.shutdown();srv.server_close();thread.join()
+    def test_duplicate_candidates_skip_repeated_paid_reviews(self):
+        c={'law':'시험법','article':'10','basisCode':'statutory','type':'collect'}
+        context={'items':[{'name':'성명','type':'collect','context':'collect','classification':'general'}]}
+        with patch.dict(os.environ,{'LAW_API_OC':'synthetic'}),patch.object(server,'ai_candidates',return_value={'candidates':[c,{**c,'law':'시험 법','target':'law'}]}),patch.object(server,'verify_with_basis',side_effect=lambda c:{**c,'verified':True}) as verify,patch.object(server,'ai_application_review',return_value={'summary':'합성','items':[{'name':'성명','verdict':'possible','explanation':'합성','checks':[]}]}) as review:
+            result=server.search(context)
+        self.assertEqual(verify.call_count,1);self.assertEqual(review.call_count,1);self.assertEqual(result['counts']['checked'],1)
+    def test_review_payload_drops_metadata_but_keeps_legal_conditions(self):
+        record={'law':'시험법','cite':'시험법 제10조','excerpt':'선택한 호','articleExcerpt':'조건을 포함한 전체 조문','verifiedAt':'timestamp','paragraphSegments':['duplicate']*100,'pipa':{'excerpt':'연결 근거','articleExcerpt':'연결 근거','paragraphSegments':['duplicate']*100}}
+        compact=server.review_evidence_for(record)
+        self.assertEqual(compact['articleExcerpt'],record['articleExcerpt']);self.assertEqual(compact['pipa']['excerpt'],'연결 근거');self.assertNotIn('paragraphSegments',str(compact));self.assertLess(len(json.dumps(compact)),len(json.dumps(record))/2)
 
 class ReviewTests(unittest.TestCase):
     def setUp(self):
@@ -350,6 +382,37 @@ class HttpTests(unittest.TestCase):
         try:
             with urllib.request.urlopen(req) as r:return r.status,r.read()
         except urllib.error.HTTPError as e:return e.code,e.read()
+    def test_loopback_rebinding_host_and_malformed_origin_rejected(self):
+        for path in ['/api/status','/']:
+            request=urllib.request.Request(self.base+path,headers={'Host':'attacker.invalid'})
+            with self.assertRaises(urllib.error.HTTPError) as got:urllib.request.urlopen(request)
+            self.assertEqual(got.exception.code,403)
+        self.assertEqual(self.call('/api/law/search',{'items':[]},origin='http://[')[0],403)
+
+    def test_slow_body_timeout_releases_api_worker(self):
+        import http.client
+        original=server.Handler.setup
+        def short_timeout(handler):
+            original(handler)
+            handler.connection.settimeout(.1)
+        with patch.object(server.Handler,'setup',short_timeout):
+            connection=http.client.HTTPConnection('127.0.0.1',self.srv.server_port,timeout=2)
+            try:
+                connection.putrequest('POST','/api/law/search')
+                connection.putheader('Content-Type','application/json')
+                connection.putheader('X-CSRF-Token',self.srv.csrf)
+                connection.putheader('Content-Length','10')
+                connection.endheaders()
+                response=connection.getresponse();self.assertEqual(response.status,408);response.read()
+            finally:connection.close()
+        self.assertEqual(self.call('/api/status')[0],200)
+        self.assertTrue(self.srv.workers.acquire(timeout=1));self.assertTrue(self.srv.workers.acquire(timeout=1));self.srv.workers.release();self.srv.workers.release()
+
+    def test_unknown_api_paths_do_not_enter_logs(self):
+        with patch('builtins.print') as output:
+            self.assertEqual(self.call('/api/synthetic-private-path',{})[0],404)
+        logs=str(output.call_args_list);self.assertNotIn('synthetic-private-path',logs);self.assertIn('/api/unknown',logs)
+
     def test_private_files_not_served(self):
         for path in ['/.env','/.env.example','/.git/config','/server.py','/tests/test_server.py','/%2eenv','/export-assets/../.env']:
             self.assertEqual(self.call(path)[0],404,path)
@@ -499,7 +562,7 @@ class SearchCacheTests(unittest.TestCase):
             for _ in range(2):
                 with self.assertRaises(server.ApiError):server.law_request('lawSearch.do',query='시험법')
             self.assertEqual(network.call_count,2)
-        with patch.object(server.urllib.request,'urlopen',side_effect=TimeoutError()):
+        with patch.object(server.UPSTREAM_OPENER,'open',side_effect=TimeoutError()):
             with self.assertRaises(server.ApiError) as error:server.request_bytes('https://www.law.go.kr/DRF/lawSearch.do')
             self.assertEqual(error.exception.status,504)
 

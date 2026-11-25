@@ -7,7 +7,7 @@ test('native Workers fetch supports AI and canonical law verification without cr
  const requests=[];
  const mf=new Miniflare(convertV4MiniflareOptions({compatibilityDate:'2026-11-01',modules:true,script:source+`
  export default {async fetch(request){const api=new LegalApi({OPENROUTER_API_KEY:'synthetic-runtime-key',LAW_API_OC:'synthetic-runtime-oc'});
- try{if(new URL(request.url).pathname==='/redirect'){await api.upstream('https://openrouter.ai/redirect',{headers:{Authorization:'Bearer synthetic-runtime-key'}});return Response.json({unexpected:true});}
+ try{if(new URL(request.url).pathname==='/token'){const token=await signReview('synthetic-runtime-key','synthetic-scope');await checkReview('synthetic-runtime-key',token,'synthetic-scope');let rejected=false;try{await checkReview('synthetic-runtime-key',token,'changed-scope');}catch(e){rejected=e.status===409;}return Response.json({verified:true,tamperingRejected:rejected});}if(new URL(request.url).pathname==='/redirect'){await api.upstream('https://openrouter.ai/redirect',{headers:{Authorization:'Bearer synthetic-runtime-key'}});return Response.json({unexpected:true});}
  if(new URL(request.url).pathname==='/research')return Response.json(await api.research({items:[{name:'성명',purpose:'합성 업무'}]}));
  const ai=await api.ai('synthetic fixture',{});const law=await api.verify({basisCode:'contract',type:'collect'});return Response.json({ai,verified:law.verified,pipaVerified:law.pipaVerified,cite:law.cite});
  }catch(e){return Response.json({error:e.message},{status:e.status||500});}}};`,
@@ -25,6 +25,7 @@ test('native Workers fetch supports AI and canonical law verification without cr
  }}));
  try{
   const result=await mf.dispatchFetch('https://local.test/');assert.equal(result.status,200);assert.deepEqual(await result.json(),{ai:{fixture:true},verified:true,pipaVerified:true,cite:'개인정보 보호법 제15조 제1항 제4호'});
+  const signed=await mf.dispatchFetch('https://local.test/token');assert.equal(signed.status,200);assert.deepEqual(await signed.json(),{verified:true,tamperingRejected:true});
   const research=await mf.dispatchFetch('https://local.test/research');assert.equal(research.status,200);assert.equal((await research.json()).sources[0].url,'https://www.nts.go.kr/synthetic');
   const redirected=await mf.dispatchFetch('https://local.test/redirect');assert.equal(redirected.status,502);const {error}=await redirected.json();assert.match(error,/다른 주소/);assert.doesNotMatch(error,/synthetic-runtime|credentials-must-not/);assert.ok(requests.every(p=>/^(openrouter.ai|www.law.go.kr)\//.test(p)));
  }finally{await mf.dispose();}

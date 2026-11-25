@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import worker from '../cloudflare/worker.mjs';
-import {ApiError,LegalApi,parseXml,articleNode,validateContext,reviewMaterial,fingerprint,signReview,checkReview} from '../cloudflare/legal.mjs';
+import {ApiError,LegalApi,reviewEvidenceFor,parseXml,articleNode,validateContext,reviewMaterial,fingerprint,signReview,checkReview} from '../cloudflare/legal.mjs';
 import rules from '../basis-rules.json' with {type:'json'};
 const env={LAW_API_OC:'synthetic-oc',OPENROUTER_API_KEY:'synthetic-ai-key',AI_LIMITER:{limit:async()=>({success:true})},API_LIMITER:{limit:async()=>({success:true})},ASSETS:{fetch:async()=>new Response('synthetic public asset')}};
 const base='https://dongui.example';
@@ -161,12 +161,21 @@ test('web research uses bounded server search and accepts official citation anno
  for(const bad of [{status:'incomplete',output:response.output},{output:[{type:'message',content:[{type:'output_text',text:'기억 기반 답변',annotations:[]}]}]}])assert.throws(()=>parseSearchResponse(bad));
  const a=new LegalApi(env,async()=>Response.json({output:[]}));let generated=false;a.ai=async()=>{generated=true;return {candidates:[]};};await assert.rejects(a.search({items:[item()]}),/출처/);assert.equal(generated,false);
 });
-test('web research evidence precedes candidate generation and the UI receives real citations',async()=>{
+test('web research evidence precedes candidate generation without returning unused excerpts to the UI',async()=>{
  const a=api();const calls=[];const original=a.ai.bind(a);a.ai=async(prompt,data,...rest)=>{calls.push(data);return original(prompt,data,...rest);};
- aiReply={candidates:[]};const result=await a.search({items:[item()]});assert.equal(calls.length,1);assert.match(calls[0].research.report,/합성 검색 자료/);assert.equal(result.searchSources[0].url,'https://www.law.go.kr/synthetic');
+ aiReply={candidates:[]};const result=await a.search({items:[item()]});assert.equal(calls.length,1);assert.match(calls[0].research.report,/합성 검색 자료/);assert.equal(calls[0].research.sources[0].url,'https://www.law.go.kr/synthetic');assert.equal(result.searchSources,undefined);
 });
 
 test('verified summary counts displayed grounds separately from rejected proposals',()=>{
  const result=searchOutcome([{}, {}, {}],[{reason:'not_verified'},{reason:'not_verified'}],5);
  assert.equal(result.summary,'확인된 근거는 총 3개입니다. 0개는 조회를 완료하지 못했고, 2개는 검증을 통과하지 못했습니다.');assert.equal(result.counts.checked,5);assert.equal(result.counts.verified,3);
+});
+
+test('duplicate proposals do not repeat paid relevance checks or generate unused search tokens',async()=>{
+ const c={law:'법령검증용법',article:'10',basisCode:'statutory',type:'collect'};aiReply={candidates:[c,{...c,law:'법령검증용 법',target:'law'}]};const a=api();let reviews=0;const review=a.reviewEvidence.bind(a);a.reviewEvidence=async(...args)=>{reviews++;assert.equal(args[2],false);const result=await review(...args);assert.equal(result.review.token,undefined);return result;};
+ const result=await a.search({items:[item()]});assert.equal(result.candidates.length,1);assert.equal(reviews,1);assert.equal(result.counts.checked,1);
+});
+test('review evidence keeps selected text and full legal conditions without duplicated UI metadata',()=>{
+ const source={law:'합성법',cite:'합성법 제10조',excerpt:'선택한 호',articleExcerpt:'조건이 포함된 전체 조문',paragraphSegments:Array(100).fill('duplicate'),verifiedAt:'timestamp',pipa:{excerpt:'연결 근거',articleExcerpt:'연결 근거',paragraphSegments:Array(100).fill('duplicate')}};
+ const result=reviewEvidenceFor(source);assert.equal(result.articleExcerpt,source.articleExcerpt);assert.equal(result.pipa.excerpt,'연결 근거');assert.equal(result.pipa.articleExcerpt,undefined);assert.ok(!JSON.stringify(result).includes('paragraphSegments'));assert.ok(JSON.stringify(result).length<JSON.stringify(source).length/2);
 });

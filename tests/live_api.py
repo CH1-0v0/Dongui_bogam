@@ -42,7 +42,6 @@ try:
         result=server.search({'items':[{'name':'성명','purpose':'근로계약 체결 및 법정 근로자 명부 작성','recipient':'','type':'collect','context':'collect','classification':'general'}]})
         if not result['candidates']:
             raise server.ApiError('AI 응답은 받았으나 원문 대조를 통과한 후보가 없습니다. 브라우저에서 제외 사유를 확인하세요.')
-        assert result['searchSources'], '웹 검색 출처가 없습니다.'
         print('PASS OpenRouter 웹 검색 → 후보 생성 → 법령 원문·연결 조항·업무 관련성 대조')
         print('확인한 후보:',len(result['candidates']),'제외한 후보:',len(result['rejected']))
     if args.review:
