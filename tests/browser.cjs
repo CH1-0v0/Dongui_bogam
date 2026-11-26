@@ -2,7 +2,7 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
-const rules=require('../law-basis.js').rules;
+const rules=require('../frontend/law-basis.js').rules;
 const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
 (async()=>{
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});

@@ -1,6 +1,6 @@
 // Synthetic proof data; validates final requested interactions and generated documents.
 const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs/promises');
-const rules=require('../law-basis.js').rules,base=process.env.TEST_BASE_URL||'http://127.0.0.1:3014';
+const rules=require('../frontend/law-basis.js').rules,base=process.env.TEST_BASE_URL||'http://127.0.0.1:3014';
 (async()=>{const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});try{
  const page=await browser.newPage({viewport:{width:1440,height:1100},acceptDownloads:true}),errors=[];page.on('pageerror',e=>errors.push(e.message));
  const basis=code=>{const r=rules[code],paragraphSegments=Array.from({length:7},(_,n)=>({text:'[합성] '+(n+1)+'호 내용',clause:String(n+1),label:(n+1)+'.'})),pipa={law:'개인정보 보호법',article:r.article,paragraph:r.paragraph,clause:r.clause,cite:r.pipa,excerpt:'[합성] '+r.clause+'호 내용',paragraphSegments};return {...pipa,pipa,pipaParagraph:{excerpt:paragraphSegments.map(s=>s.text).join('\n'),paragraphSegments},basisCode:code,type:'collect',verified:true,pipaVerified:true,supportVerified:true};};

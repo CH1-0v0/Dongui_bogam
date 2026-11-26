@@ -1,4 +1,4 @@
-const {chromium}=require('playwright');const assert=require('node:assert/strict');const rules=require('../law-basis.js').rules;
+const {chromium}=require('playwright');const assert=require('node:assert/strict');const rules=require('../frontend/law-basis.js').rules;
 const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3008';
 (async()=>{const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});try{
  const page=await browser.newPage({viewport:{width:1280,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));

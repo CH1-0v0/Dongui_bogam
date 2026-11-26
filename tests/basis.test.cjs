@@ -1,7 +1,7 @@
 const test=require('node:test');const assert=require('node:assert/strict');
-const p=require('../law-basis.js');const fs=require('node:fs');
+const p=require('../frontend/law-basis.js');const fs=require('node:fs');
 const base=(basisCode='statutory',other={})=>({law:'시험법',article:'10',paragraph:'1',clause:'',basisCode,verified:true,pipaVerified:true,supportVerified:true,conditionsConfirmed:true,authorityConfirmed:true,specific:true,...other});
-test('server/browser legal rules stay identical',()=>assert.deepEqual(p.rules,JSON.parse(fs.readFileSync('basis-rules.json','utf8'))));
+test('server/browser legal rules stay identical',()=>assert.deepEqual(p.rules,JSON.parse(fs.readFileSync('backend/basis-rules.json','utf8'))));
 test('no adopted authority and legacy citation alone preserve consent',()=>{assert.equal(p.notice([],'collect','general'),false);assert.equal(p.notice([{law:'시험법',article:'10'}],'collect','general'),false)});
 for(const [article,paragraph,clause] of [['15','1','1'],['17','1','1'],['18','2','1'],['23','1','1'],['24','1','1'],['15','1',''],['15','','']]){
  test(`consent citation ${article}/${paragraph}/${clause} never switches to notice`,()=>assert.equal(p.notice([base('statutory',{law:'개인정보보호법',article,paragraph,clause})],'collect','general'),false));

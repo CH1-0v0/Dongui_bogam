@@ -9,7 +9,7 @@ export function discoveryScope(context,extraTerms=[]){
  for(const term of extraTerms.slice(0,12))if(typeof term==='string'&&term.length>=2&&term.length<=30&&!terms.has(term))terms.set(term,2);
  return {laws:profiles.flatMap(p=>p.laws),terms:[...terms].map(([text,weight])=>({text,weight}))};
 }
-export function candidateLawNames(names){const seen=new Set();return names.map(normalizeLawName).filter(name=>{const key=compact(name);if(!key||key.startsWith('개인정보보호법')||seen.has(key))return false;seen.add(key);return true;}).slice(0,config.maxLaws);}
+export function candidateLawNames(names,limit=config.maxLaws){const seen=new Set();return names.map(normalizeLawName).filter(name=>{const key=compact(name);if(!key||key.startsWith('개인정보보호법')||seen.has(key))return false;seen.add(key);return true;}).slice(0,limit);}
 export function rankEvidence(articles,terms,law,mst,index){
  const scored=articles.map(a=>{const title=a.title||'',text=a.text||'';const score=terms.reduce((n,t)=>n+t.weight*((title.includes(t.text)?5:0)+(text.includes(t.text)?1:0)),0);return {a,score};}).filter(v=>v.score>0).sort((a,b)=>b.score-a.score);
  return scored.slice(0,config.articlesPerLaw).map(({a})=>{let text=a.text;if(text.length>config.maxText){const pieces=[text.slice(0,2800)];for(const term of [...terms].sort((a,b)=>b.weight-a.weight)){const at=text.indexOf(term.text,2800);if(at>=0)pieces.push(text.slice(Math.max(2800,at-150),at+500));if(pieces.join('\n').length>=config.maxText-300)break;}text=pieces.join('\n[중간 생략]\n').slice(0,config.maxText);}

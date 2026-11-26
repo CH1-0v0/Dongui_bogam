@@ -226,15 +226,15 @@ export class LegalApi {
    try{return parseSearchResponse(envelope);}catch(error){fail(error.message,502);}
   }
  }
- async discover(context,research){
-  let scope=discoveryScope(context),lawPlan={};
-  if(!scope.laws.length){for(let attempt=0;attempt<2;attempt++){lawPlan=await this.ai(discoveryConfig.lawPrompt,{...context,research},1800);if((Array.isArray(lawPlan.laws)&&lawPlan.laws.every(n=>typeof n==='string'))||(Array.isArray(lawPlan.candidates)&&lawPlan.candidates.every(obj)))break;if(attempt)fail('AI 응답에 올바른 법령 후보 목록이 없습니다. 다시 검색하세요.',502);}const names=Array.isArray(lawPlan.laws)?lawPlan.laws:Array.isArray(lawPlan.candidates)?lawPlan.candidates.map(c=>c.law):[];scope={...discoveryScope(context,Array.isArray(lawPlan.terms)?lawPlan.terms:[]),laws:names};}
-  const names=candidateLawNames(scope.laws),pool=[],rejected=[];
+ async discover(context,research,options={}){
+  let scope=discoveryScope(context,options.assistant?['보존','보유','기재사항','기록']:[]),lawPlan={};
+  if(!scope.laws.length||options.assistant){for(let attempt=0;attempt<2;attempt++){lawPlan=await this.ai(discoveryConfig.lawPrompt+(options.assistant?' 해당 업무의 개인정보 기재사항과 법정 기록 보존기간을 규정한 법률·시행령·시행규칙도 포함하라.':''),{...context,research},1800);if((Array.isArray(lawPlan.laws)&&lawPlan.laws.every(n=>typeof n==='string'))||(Array.isArray(lawPlan.candidates)&&lawPlan.candidates.every(obj)))break;if(attempt)fail('AI 응답에 올바른 법령 후보 목록이 없습니다. 다시 검색하세요.',502);}const names=Array.isArray(lawPlan.laws)?lawPlan.laws:Array.isArray(lawPlan.candidates)?lawPlan.candidates.map(c=>c.law):[];scope={...discoveryScope(context,[...(Array.isArray(lawPlan.terms)?lawPlan.terms:[]),...(options.assistant?['보존','보유','기재사항','기록']:[])]),laws:options.assistant?[...scope.laws,...names]:names};}
+  const names=candidateLawNames(scope.laws,options.assistant?4:discoveryConfig.maxLaws),pool=[],rejected=[];
   for(const [index,name] of names.entries()){
    for(let attempt=0;attempt<2;attempt++){try{const {row,mst}=await this.resolve(name);const root=await this.law('lawService.do',{MST:mst});const official=content(find(root,'법령명_한글')).trim();if(official&&compact(official)!==compact(text(row,'법령명한글')))fail('검색한 법령명과 원문이 다릅니다.',502);const articles=descendants(root,'조문단위').filter(n=>text(n,'조문여부')==='조문'&&!deletedNode(n)).map(n=>({value:articleLabel(n),title:text(n,'조문제목'),text:excerpt(n)}));pool.push(...rankEvidence(articles,scope.terms,text(row,'법령명한글'),mst,index));break;}catch(e){if(!(e instanceof ApiError))throw e;if(attempt===0&&(e.status===504||[500,502,503,504,520,522,524].includes(e.upstreamStatus))){this.memo.clear();continue;}rejected.push({law:normalizeLawName(name),message:e.message,reason:e.status===504?'timeout':e.status>=500||e.status===429?'service_unavailable':'not_verified'});break;}}
   }
   let selected;
-  for(let attempt=0;attempt<2;attempt++){selected=await this.ai(discoveryConfig.selectionPrompt,{...context,research,evidencePool:pool,searchNote:String(lawPlan.note||'').slice(0,1000)},attempt?5000:3500);if(Array.isArray(selected.candidates)&&selected.candidates.every(obj))break;if(attempt)fail('AI 응답에 올바른 법령 후보 목록이 없습니다. 자동 재시도에도 완료하지 못했습니다. 다시 검색하세요.',502);}
+  for(let attempt=0;attempt<2;attempt++){selected=await this.ai(discoveryConfig.selectionPrompt+(options.assistant?' 추가로 해당 업무에서 기재할 개인정보 항목 및 문서 보존기간을 정한 조문을 general 유형으로 포함하라. 이런 조문을 단순 정의 조문으로 제외하지 마라.':''),{...context,research,evidencePool:pool,searchNote:String(lawPlan.note||'').slice(0,1000)},attempt?5000:3500);if(Array.isArray(selected.candidates)&&selected.candidates.every(obj))break;if(attempt)fail('AI 응답에 올바른 법령 후보 목록이 없습니다. 자동 재시도에도 완료하지 못했습니다. 다시 검색하세요.',502);}
   return {...selected,candidates:groundSelections(selected.candidates,pool,rules,rejected),rejected};
  }
  async search(data){const context=validateContext(data);if(!this.env.LAW_API_OC)fail('법령 원문 조회를 위해 서버에 LAW_API_OC를 설정해 주세요.',503);const research=await this.research(context);const planned=await this.discover(context,research);planned.candidates=uniqueCandidates(planned.candidates);const candidates=[],rejected=[...(planned.rejected||[])];const initialRejected=rejected.length;

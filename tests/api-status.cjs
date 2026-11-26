@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-const source=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8'),code=source.slice(source.indexOf('async function readApiStatus('),source.indexOf('function lawSearchDetails('));
+const source=fs.readFileSync(require('node:path').join(__dirname,'../frontend/app.js'),'utf8'),code=source.slice(source.indexOf('async function readApiStatus('),source.indexOf('function lawSearchDetails('));
 const result=(status,data)=>({ok:status>=200&&status<300,status,json:async()=>data});
 function context(fetch){let clock=100;const c={apiStatus:null,apiStatusExpires:0,apiStatusFlight:null,location:{protocol:'http:'},Date:{now:()=>clock},AbortSignal,fetch,apiErrorMessage:e=>e.message};vm.createContext(c);vm.runInContext(code,c);c.advance=()=>clock+=30001;return c;}
 test('status reads coalesce and remain cached only for thirty seconds',async()=>{

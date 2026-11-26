@@ -1,14 +1,14 @@
-import {discoveryConfig,normalizeLawName,discoveryScope,rankEvidence,groundSelections,hasPermissionText} from '../cloudflare/evidence-discovery.mjs';
-import {searchOutcome} from '../cloudflare/search-outcome.mjs';
-import {searchPayload,parseSearchResponse,officialSearchUrl} from '../cloudflare/web-search.mjs';
-import {sealSupportText,redactSupportText} from '../cloudflare/ai-support.mjs';
-import {inspectAiError} from '../cloudflare/ai-diagnostics.mjs';
+import {discoveryConfig,normalizeLawName,discoveryScope,rankEvidence,groundSelections,hasPermissionText} from '../backend/cloudflare/evidence-discovery.mjs';
+import {searchOutcome} from '../backend/cloudflare/search-outcome.mjs';
+import {searchPayload,parseSearchResponse,officialSearchUrl} from '../backend/cloudflare/web-search.mjs';
+import {sealSupportText,redactSupportText} from '../backend/cloudflare/ai-support.mjs';
+import {inspectAiError} from '../backend/cloudflare/ai-diagnostics.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import worker,{failureDiagnostics} from '../cloudflare/worker.mjs';
-import {ApiError,LegalApi,reviewEvidenceFor,leadingNumber,parseXml,articleNode,validateContext,reviewMaterial,fingerprint,signReview,checkReview} from '../cloudflare/legal.mjs';
-import rules from '../basis-rules.json' with {type:'json'};
+import worker,{failureDiagnostics} from '../backend/cloudflare/worker.mjs';
+import {ApiError,LegalApi,reviewEvidenceFor,leadingNumber,parseXml,articleNode,validateContext,reviewMaterial,fingerprint,signReview,checkReview} from '../backend/cloudflare/legal.mjs';
+import rules from '../backend/basis-rules.json' with {type:'json'};
 const env={OPENROUTER_MODEL:'openai/gpt-oss-120b',LAW_API_OC:'synthetic-oc',OPENROUTER_API_KEY:'synthetic-ai-key',AI_LIMITER:{limit:async()=>({success:true})},API_LIMITER:{limit:async()=>({success:true})},ASSETS:{fetch:async()=>new Response('synthetic public asset')}};
 const base='https://dongui.example';
 const item=(classification='general',id='item-1')=>({id,name:classification==='general'?'성명':classification==='rnn'?'주민등록번호':'검증 항목',purpose:'합성 검증 목적',recipient:'',type:'collect',context:'collect',classification});
@@ -135,7 +135,7 @@ test('edge cache is credential-hashed, shared across module instances, and bypas
  const descriptor=Object.getOwnPropertyDescriptor(globalThis,'caches'),stored=new Map();Object.defineProperty(globalThis,'caches',{configurable:true,value:{default:{match:async request=>stored.get(request.url)?.clone(),put:async(request,response)=>{stored.set(request.url,response.clone());}}}});
  let calls=0;const fetcher=async()=>{calls++;return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');};const e={...env,LAW_API_OC:'private-oc-'+crypto.randomUUID()};
  try{await new LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'});assert.equal(stored.size,1);for(const [key,value]of stored){assert.ok(!key.includes(e.LAW_API_OC)&&!key.includes('공식법령'));assert.equal(value.headers.get('Cache-Control'),'public, max-age=300');}
- const isolated=await import('../cloudflare/legal.mjs?edge='+crypto.randomUUID());await new isolated.LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'});assert.equal(calls,1);
+ const isolated=await import('../backend/cloudflare/legal.mjs?edge='+crypto.randomUUID());await new isolated.LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'});assert.equal(calls,1);
  await new isolated.LegalApi({...e,LAW_API_OC:'other-'+crypto.randomUUID()},fetcher).law('lawSearch.do',{query:'공식법령'});assert.equal(calls,2);
  const fresh=new isolated.LegalApi(e,fetcher);fresh.forceFresh=true;await fresh.law('lawSearch.do',{query:'공식법령'});assert.equal(calls,3);
  }finally{if(descriptor)Object.defineProperty(globalThis,'caches',descriptor);else delete globalThis.caches;}

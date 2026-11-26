@@ -1,6 +1,6 @@
 // Synthetic proofs verify notice-only and mixed documents in preview and exports.
 const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs/promises');
-const rules=require('../law-basis.js').rules,base=process.env.TEST_BASE_URL||'http://127.0.0.1:3051';
+const rules=require('../frontend/law-basis.js').rules,base=process.env.TEST_BASE_URL||'http://127.0.0.1:3051';
 (async()=>{const b=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox']});try{
  await fs.mkdir('.test-output',{recursive:true});
  for(const mixed of [false,true]){

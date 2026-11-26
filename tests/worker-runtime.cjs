@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {Miniflare,convertV4MiniflareOptions}=require('miniflare');
 const {buildSync}=require('esbuild');
-const source=buildSync({entryPoints:['cloudflare/legal.mjs'],bundle:true,format:'esm',platform:'browser',write:false}).outputFiles[0].text;
+const source=buildSync({entryPoints:['backend/cloudflare/legal.mjs'],bundle:true,format:'esm',platform:'browser',write:false}).outputFiles[0].text;
 test('native Workers fetch supports AI and canonical law verification without credentials leaving the origin',async()=>{
  const requests=[];
  const mf=new Miniflare(convertV4MiniflareOptions({compatibilityDate:'2026-11-01',modules:true,script:source+`

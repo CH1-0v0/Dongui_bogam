@@ -1,5 +1,5 @@
 // All legal bodies below are explicitly synthetic, not live statutory quotations.
-const {chromium}=require('playwright');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const rules=require('../law-basis.js').rules;
+const {chromium}=require('playwright');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const rules=require('../frontend/law-basis.js').rules;
 const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3010';
 (async()=>{const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});try{
  const page=await browser.newPage({viewport:{width:1440,height:1100},acceptDownloads:true});const errors=[];page.on('pageerror',e=>errors.push(e.message));let applyCount=0,lastApply;
