@@ -133,8 +133,8 @@ def finish_questions(questions,messages,resident_confirmed=False,items_missing=F
     return result
 def kept_period_choice(user_text):
     """The user's explicit "keep this period" choice is a user-entered value and must survive later turns."""
-    line=next((t for t in reversed(str(user_text or '').split('\n')) if re.search(r'보유\s*및\s*이용기간[:：].+현재 기간을 그대로 사용합니다',t)),'')
-    m=re.search(r'보유\s*및\s*이용기간[:：]\s*(.+?)\.?\s*현재 기간을 그대로 사용합니다',line)
+    line=next((t for t in reversed(str(user_text or '').split('\n')) if re.search(r'보유\s*및\s*이용기간[:：].+(?:현재 기간을 그대로 사용합니다|이 기간으로 변경합니다)',t)),'')
+    m=re.search(r'보유\s*및\s*이용기간[:：]\s*(.+?)\.?\s*(?:현재 기간을 그대로 사용합니다|이 기간으로 변경합니다)',line)
     value=clean(m.group(1),300) if m else ''
     return {'value':value,'sourceId':'user','quote':line[:1500]} if re.search(r'[0-9가-힣A-Za-z]',value) else None
 def period_value(value):
