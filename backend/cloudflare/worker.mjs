@@ -1,10 +1,10 @@
 import {workPlan} from './assistant.mjs';
-import {ApiError,LegalApi} from './legal.mjs';
+import {ApiError,LegalApi,signProof} from './legal.mjs';
 const routes={
  '/api/work/plan':(api,d)=>workPlan(api,d),
  '/api/law/catalog':(api,d)=>api.catalog(d),'/api/law/count':(api,d)=>api.catalog(d,true),
  '/api/law/articles':(api,d)=>api.articles(d),'/api/law/basis':(api,d)=>api.basis(d),
- '/api/law/verify':(api,d)=>api.verify(d),'/api/law/search':(api,d)=>api.search(d),
+ '/api/law/verify':async(api,d)=>{const actual=await api.verify(d);return {...actual,proofToken:await signProof(api.env.OPENROUTER_API_KEY,actual)};},'/api/law/search':(api,d)=>api.search(d),
  '/api/law/review':(api,d)=>api.review(d),'/api/law/apply':(api,d)=>api.apply(d),
  '/api/privacy/classify':(api,d)=>api.classify(d)
 };
@@ -45,7 +45,7 @@ export default {async fetch(request,env,ctx){
    if(!env.API_LIMITER||!env.AI_LIMITER)throw new ApiError('서버 요청 한도 설정을 확인하세요.',503);
    if(!(await env.API_LIMITER.limit({key:ip})).success)return json({error:'요청 한도에 도달했습니다. 잠시 후 다시 시도하세요.'},429,{'Retry-After':'60'});
    if(aiPaths.has(path)&&!(await env.AI_LIMITER.limit({key:ip})).success)return json({error:'분당 AI 요청 한도에 도달했습니다. 잠시 후 다시 시도하세요.'},429,{'Retry-After':'60'});
-   const data=await requestData(request,path==='/api/work/plan'?98304:24000);if(data.demo===true)return json({error:'운영 서버에서는 시연 모드를 사용할 수 없습니다.'},403);
+   const data=await requestData(request,path==='/api/work/plan'||path==='/api/law/apply'?98304:24000);if(data.demo===true)return json({error:'운영 서버에서는 시연 모드를 사용할 수 없습니다.'},403);
    const api=new LegalApi(env,fetch,ctx,url.origin);api.allowMcp=['/api/work/plan','/api/law/search'].includes(path);
    return json(await routes[path](api,data));
   }

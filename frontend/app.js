@@ -480,6 +480,8 @@ function basisEditor(draft){
 }
 function selectedReviewItems(draft){return applicableEntries(draft).filter(({i})=>draft.ids.includes(i.id)).map(e=>({id:e.i.id,name:e.i.name,purpose:e.g.purpose,recipient:e.g.recipient,type:groundType(e),context:lawContext(e),classification:lawClassification(e.i)}));}
 function reviewSnapshot(draft){return JSON.stringify({basisCode:draft.basisCode,type:draft.type,law:draft.law,article:draft.article,paragraph:draft.paragraph,clause:draft.clause,mst:draft.mst,additionalBasisCodes:additionalCodes(draft),items:selectedReviewItems(draft).sort((a,b)=>a.id.localeCompare(b.id))});}
+// Official text the server verified and signed today; sent back on apply so it need not be fetched again.
+function keepSignedProof(draft,proof){if(proof?.proofToken){const {signedProof:_,...copy}=proof;draft.signedProof=structuredClone(copy);}return draft;}
 function citationRequest(draft){return {type:draft.type,basisCode:draft.basisCode,law:draft.law,article:draft.article,paragraph:draft.paragraph,clause:draft.clause,mst:draft.mst,target:draft.target||'law',additionalBasisCodes:additionalCodes(draft)};}
 function hasCurrentReview(draft){return Boolean(draft.aiReview?.canApply&&draft.aiReview.token&&draft.reviewContext===reviewSnapshot(draft));}
 function reviewPanel(draft){
@@ -506,7 +508,7 @@ async function reviewGround(){
  try{
   const result=await lawRequest('/api/law/review',{...citationRequest(draft),items:selectedReviewItems(draft)});
   if(state.groundDraft!==draft||reviewSnapshot(draft)!==snapshot){message='검토 중 항목이나 근거가 바뀌었습니다. 변경한 내용으로 다시 검토하세요.';return;}
-  Object.assign(draft,result.candidate);draft.aiReview=result.review;draft.reviewContext=reviewSnapshot(draft);
+  Object.assign(draft,result.candidate);keepSignedProof(draft,result.candidate);draft.aiReview=result.review;draft.reviewContext=reviewSnapshot(draft);
   message='AI 의견을 참고하여 담당자가 최종 판단하세요. 검토 의견과 관계없이 요건 확인 후 적용할 수 있습니다.';
  }catch(error){if(state.groundDraft===draft){draft.reviewError=apiErrorMessage(error);message='';}}
  finally{aiReviewBusy=false;lawActionBusy=false;if(step===3)render();}
@@ -578,7 +580,7 @@ async function applyGround(){
  if((draft.basisCode==='residentLaw'||additionalCodes(draft).includes('residentLaw'))&&!draft.specific){feedback('주민등록번호의 구체적 처리 허용 요건을 확인하세요.');return;}
  const snapshot=JSON.stringify(draft);lawActionBusy=true;message='선택한 근거를 확인하여 적용하고 있습니다.';render();
  try{
-  const actual=await lawRequest('/api/law/apply',{...citationRequest(draft),items:selectedReviewItems(draft),reviewToken:hasCurrentReview(draft)?draft.aiReview.token:undefined});
+  const actual=await lawRequest('/api/law/apply',{...citationRequest(draft),items:selectedReviewItems(draft),reviewToken:hasCurrentReview(draft)?draft.aiReview.token:undefined,...(draft.signedProof?.proofToken?{proof:draft.signedProof,proofToken:draft.signedProof.proofToken}:{})});
   if(state.groundDraft!==draft||JSON.stringify(draft)!==snapshot){message='검토 내용이 바뀌었습니다. 변경된 내용으로 다시 적용하세요.';return;}
   Object.assign(draft,actual);saveGround();
  }catch(error){if(state.groundDraft===draft){if(error.status===409)clearAiReview(draft);message=apiErrorMessage(error);}}
@@ -590,7 +592,7 @@ async function verifyGround(){
  try{
   const actual=await lawRequest('/api/law/verify',citationRequest(draft));
   if(state.groundDraft!==draft||JSON.stringify(draft)!==snapshot)return;
-  Object.assign(draft,actual);message='선택한 조문을 다시 가져왔습니다. 적용 항목과 요건을 검토하세요.';
+  Object.assign(draft,actual);keepSignedProof(draft,actual);message='선택한 조문을 다시 가져왔습니다. 적용 항목과 요건을 검토하세요.';
  }catch(error){if(state.groundDraft===draft)message=apiErrorMessage(error);}
  finally{lawActionBusy=false;if(step===3)render();}
 }
@@ -1294,7 +1296,7 @@ document.addEventListener('click',e=>{
   const n=Number(d.useLaw),candidate=lawSearch.candidates[n],key=candidate?candidateKey(candidate,n):'';
   const applied=state.grounds.find(b=>b.candidateKey===key),pending=lawSearch.drafts?.[key];
   if(candidate){lawSearch.showAlternatives??={};lawSearch.showAlternatives[candidate.type]=false;freshLawPicker();lawSearch.candidateOpen??={};lawSearch.candidateOpen[n]=true;
-   state.groundDraft=applied?{...applied,ids:[...applied.ids],editId:applied.id}:pending?structuredClone(pending):{...groundInitial(candidate.type),...candidate,ids:[],specific:false,conditionsConfirmed:false,authorityConfirmed:false,candidateKey:key};
+   state.groundDraft=applied?{...applied,ids:[...applied.ids],editId:applied.id}:pending?structuredClone(pending):keepSignedProof({...groundInitial(candidate.type),...candidate,ids:[],specific:false,conditionsConfirmed:false,authorityConfirmed:false,candidateKey:key},candidate);
    message='적용할 항목과 법령의 요건을 확인한 후 적용하세요.';render();document.querySelector('.candidate-editor')?.scrollIntoView({behavior:'smooth'});
   }
  }
