@@ -42,3 +42,10 @@ class WorkAssistantTests(unittest.TestCase):
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server.time,'time',return_value=now+600),patch.object(server,'verify_with_basis',return_value={**REF,'cite':'합성법 제10조','articleExcerpt':SOURCE,'excerpt':SOURCE}),patch.object(server,'discovery_json',side_effect=lambda prompt,material,**kwargs:ANSWER if 'sources' in material else {'verdict':'possible'}),patch.object(server,'ai_application_review',side_effect=lambda proof,items:{'items':[dict(i,verdict='possible') for i in items]}):
             result=work_plan(data,server)
         self.assertEqual(result['period'],'5년')
+
+class DraftTests(unittest.TestCase):
+    def test_drafts_are_separate_and_exclude_resident_numbers(self):
+        from backend.work_assistant import work_draft
+        result=work_draft({'draft':{'items':[{'name':'성명'},{'name':'주민등록번호'},{'name':'계좌번호'}],'period':{'value':'5년','reason':'기관 기준 확인 필요'}}})
+        self.assertEqual([i['name'] for i in result['suggestedItems']],['성명','계좌번호'])
+        self.assertEqual(result['suggestedPeriod'],'5년')

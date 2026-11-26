@@ -14,6 +14,18 @@ def norm(value):
 def classification(value):
     name = norm(value)
     return 'rnn' if re.search('주민등록번호|주민번호', name) else 'unique' if re.search('여권|운전면허|외국인등록', name) else 'sensitive' if re.search('종교|사상|신념|성생활|정치|노동조합|정당|건강|진료|유전|범죄|병력|진단|질병|장애|상담|생체|인종|민족|복약|심리|지문|안면|증상|치료|처방|수술|투약|처치|입원|외래|의학|검사결과|맥박|혈압|체온|의료|신체|혈액|가족력', name) else 'general'
+def work_draft(answer):
+    draft = answer.get('draft') if isinstance(answer.get('draft'),dict) else {}
+    rows = draft.get('items') if isinstance(draft.get('items'),list) else []
+    items = {}
+    for row in rows[:30]:
+        if not isinstance(row,dict):continue
+        name=clean(row.get('name'),100)
+        if not name or classification(name)=='rnn' or re.search(r'\d{6}[ -]?[1-8]\d{6}|@|01[016789][ -]?\d{3,4}[ -]?\d{4}',name):continue
+        items[name]={'name':name,'required':row.get('required') is True,'classification':classification(name),'origin':'draft'}
+    period=draft.get('period') if isinstance(draft.get('period'),dict) else {}
+    return {'suggestedItems':list(items.values()),'suggestedPeriod':clean(period.get('value'),300),'suggestionReason':clean(period.get('reason'),500)}
+
 def ref_fingerprint(business, kind, refs, facts, flow):
     return hashlib.sha256(json.dumps([business, kind, refs, facts, flow], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 def work_plan(data, api):
@@ -155,4 +167,4 @@ def work_plan(data, api):
     facts['items'].extend(i for i in retained if not any(a['name']==i['name'] for a in facts['items']))
     if retained or retained_period:questions.insert(0,'이전에 확인한 내용은 보관하고 있습니다. 현재 원문·허용 요건을 다시 확인해 주세요.')
     import time
-    return {'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed)],'reply':('공식 조문과 입력 내용을 대조해 항목 '+str(len(allowed))+'개를 정리했습니다. 문서로 이동하기 전에 아래 내용을 확인해 주세요.' if sources else '공식 원문 조회를 완료하지 못했습니다. 필요한 항목과 기간을 추가로 알려주시거나 나중에 확인할 수 있습니다.' if failures else '적용할 개별 법령 근거를 확인하지 못했습니다. 추가 항목과 보유기간의 직접 입력은 선택사항입니다.'),'questions':list(dict.fromkeys(questions))[:5],'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}
+    return {**work_draft(answer),'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed)],'reply':('공식 조문과 입력 내용을 대조해 항목 '+str(len(allowed))+'개를 정리했습니다. 문서로 이동하기 전에 아래 내용을 확인해 주세요.' if sources else '공식 원문 조회를 완료하지 못했습니다. 필요한 항목과 기간을 추가로 알려주시거나 나중에 확인할 수 있습니다.' if failures else '적용할 개별 법령 근거를 확인하지 못했습니다. 추가 항목과 보유기간의 직접 입력은 선택사항입니다.'),'questions':list(dict.fromkeys(questions))[:5],'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}
