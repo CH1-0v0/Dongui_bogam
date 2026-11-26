@@ -10,7 +10,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3008';
   await page.route('**/api/law/basis',r=>r.fulfill({json:proof(r.request().postDataJSON().basisCode)}));
   await page.route('**/api/law/apply',r=>r.fulfill({json:proof(r.request().postDataJSON().basisCode)}));
   await page.goto(base);await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');await page.locator('.quick-create-form [type=submit]').click();await require('./educational-fixture.cjs')(page);
-  await page.locator('[data-path=agency]').fill('시험 기관');await page.locator('[data-bulk-required=collect][value=required]').click();
+  await page.evaluate(v=>{state.agency=v;},'시험 기관');await page.locator('[data-bulk-required=collect][value=required]').click();
   for(const name of ['주소','이메일 주소','건강정보']){await page.locator('[data-add=collect]').click();await page.locator('[data-item-preset]').last().selectOption(name);}
   await page.locator('[data-required]').nth(2).check();await page.locator('[data-next]').click();await page.locator('[data-next]').click();
   const manual=async(code,indices)=>{

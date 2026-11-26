@@ -3,7 +3,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3008';
 (async()=>{const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});try{
  const page=await browser.newPage({viewport:{width:1280,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/api/privacy/classify',r=>r.fulfill({json:{items:r.request().postDataJSON().items.map(i=>({...i,verdict:'high',included:['건강']}))}}));
- const start=async()=>{await page.goto(base);await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');await page.locator('.quick-create-form [type=submit]').click();await require('./educational-fixture.cjs')(page);await page.locator('[data-path=agency]').fill('시험 기관');};
+ const start=async()=>{await page.goto(base);await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');await page.locator('.quick-create-form [type=submit]').click();await require('./educational-fixture.cjs')(page);await page.evaluate(v=>{state.agency=v;},'시험 기관');};
  const names=()=>page.locator('[data-item-menu]').allTextContents().then(xs=>xs.map(x=>x.replace('⌄','').trim()));
  const row=name=>page.locator('.item-row').filter({has:page.locator('[data-item-menu]').filter({hasText:new RegExp('^'+name+'\\s*⌄$')})});
  await start();for(const name of ['주소','이메일 주소']){await page.locator('[data-add=collect]').click();await page.locator('[data-item-preset]').last().selectOption(name);}
