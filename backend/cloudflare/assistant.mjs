@@ -1,7 +1,7 @@
 import defaults from './work-defaults.json' with {type:'json'};
 import {consolidateWorkQuestions,workQuestionCategory,checkToChoiceQuestion,finishWorkQuestions,questionsDoneNote} from './work-questions.mjs';
 import {ApiError,validateContext,signReview,checkReview} from './legal.mjs';
-import {hasPermissionText,discoveryScope} from './evidence-discovery.mjs';
+import {hasPermissionText,discoveryScope,discoveryMode} from './evidence-discovery.mjs';
 import policy from './assistant-policy.json' with {type:'json'};
 const clean=(v,n=500)=>typeof v==='string'?v.trim().slice(0,n):'';
 const norm=v=>String(v||'').normalize('NFKC').replace(/\s+/g,'');
@@ -95,8 +95,12 @@ export async function workPlan(api,data){
   try{await checkReview(api.env.OPENROUTER_API_KEY+':work-state-v2',data.evidenceToken,fp);}catch(error){if(!(error instanceof ApiError))throw error;await checkReview(api.env.OPENROUTER_API_KEY,data.evidenceToken,fp,86100000);}
   previous.items=previous.items.map(i=>classification(i.name)==='rnn'?{...i,name:'주민등록번호'}:i);
  }
- if(!refs.length||data.refresh===true||messages.at(-1)?.role==='user'){
-  const research=await api.research(context),planned=await api.discover(context,research,{assistant:true});researchMaterial={report:clean(research.report,6000),sources:(research.sources||[]).slice(0,8).map(s=>({url:s.url,title:clean(s.title,200),excerpt:clean(s.excerpt,500)}))};
+ // consent: event-like work with no specific law, no law search. profile: known laws, no web search or AI law plan.
+ const searchMode=discoveryMode(userText,context),started=Date.now(),timings={};let lap=started;const mark=name=>{const now=Date.now();timings[name]=now-lap;lap=now;};
+ if(searchMode!=='consent'&&(!refs.length||data.refresh===true||messages.at(-1)?.role==='user')){
+  const research=searchMode==='profile'?{report:'',sources:[]}:await api.research(context);mark('research');
+  const planned=await api.discover(context,research,{assistant:true,fast:searchMode==='profile'});mark('discover');
+  researchMaterial=searchMode==='profile'?null:{report:clean(research.report,6000),sources:(research.sources||[]).slice(0,8).map(s=>({url:s.url,title:clean(s.title,200),excerpt:clean(s.excerpt,500)}))};
   discoveryFailures=planned.rejected||[];const found=[...new Map(planned.candidates.filter(c=>!c.discoveryError).map(c=>[JSON.stringify([c.law,c.article,c.basisCode,c.type]),Object.fromEntries(['law','article','paragraph','clause','basisCode','type'].map(k=>[k,clean(c[k],100)]))])).values()].slice(0,8);
   const identity=r=>JSON.stringify([r.law,r.article,r.basisCode,r.type]),protectedIds=new Set([...previous.items.map(i=>i.sourceId),previous.period?.sourceId]);
   for(const ref of found)if(!refs.some(r=>identity(r)===identity(ref))){if(refs.length<8)refs.push(ref);else{const replace=refs.findIndex((r,i)=>!protectedIds.has('S'+i)&&!found.some(n=>identity(n)===identity(r)));if(replace>=0)refs[replace]=ref;}}
@@ -112,11 +116,12 @@ export async function workPlan(api,data){
   const ref={law:source.proof.law,article:source.proof.article,paragraph:source.proof.paragraph||'',clause:source.proof.clause||'',basisCode,type};
   const index=refs.length;refs.push(ref);try{const proof=await api.verify(ref);sources.push({id:'S'+index,proof,text:proof.articleExcerpt||proof.excerpt});}catch(error){if(!(error instanceof ApiError))throw error;failures.push({law:ref.law,reason:error.status>=500?'unavailable':'not_verified'});}
  }
+ mark('verify');
  if(!sources.length&&!previous.items.length&&!previous.period)refs=[];
  const checkpoint=async facts=>({evidenceRefs:refs,evidenceFacts:facts,evidenceToken:await signReview(api.env.OPENROUTER_API_KEY+':work-state-v2',await digest({business,type,flow,refs,facts}),86400000),evidenceExpiresAt:Date.now()+86400000});
  if(!sources.length&&failures.length&&(previous.items.length||previous.period))return {agency:manual.agency||'',purpose:business,shortPurpose:'',recipient:manual.recipient||'',items:[],period:'',periodOrigin:'',grounds:[],verifiedSources:[],retainedItems:previous.items.map(i=>({...i,classification:classification(i.name),origin:i.sourceId==='user'?'user':'law'})),retainedPeriod:previous.period?.value||'',incomplete:true,reply:'공식 원문을 재확인하지 못했습니다. 이전에 확인한 항목과 기간은 지우지 않고 보관했습니다.',questions:['잠시 후 근거를 다시 확인해 주세요. 항목을 다시 입력하실 필요는 없습니다.'],failures,residentCheck:{status:'unavailable',checks:['공식 원문 재확인 필요']},...await checkpoint(previous),checkedAt:0,legalChecked:false};
  const material={business,type,flow,messages,manual,research:researchMaterial,previousFacts:previous,sources:sources.map(s=>({id:s.id,cite:s.proof.cite,text:s.text.slice(0,11000)}))};
- const answer=await api.ai(policy.prompt,material,4500);
+ const answer=await api.ai(policy.prompt,material,4500);mark('draft');
  if(!Array.isArray(answer.items)||answer.items.length>30||!answer.period||typeof answer.period!=='object'||Array.isArray(answer.period))throw new ApiError('업무 정리 응답을 읽지 못했습니다. 다시 시도하세요.',502);
  const supported=(value,claim)=>{const quote=clean(claim?.quote,1500),source=sources.find(s=>s.id===claim?.sourceId);return quote&&norm(quote).replaceAll('주민번호','주민등록번호').includes(norm(value).replaceAll('주민번호','주민등록번호'))&&(claim.sourceId==='user'?norm(userText).includes(norm(quote)):source&&norm(source.text).includes(norm(quote)));};
  const removed=new Set((Array.isArray(answer.removeItems)?answer.removeItems:[]).filter(i=>i&&norm(userText).includes(norm(clean(i.quote,500)))&&norm(i.quote).replaceAll('주민번호','주민등록번호').includes(norm(i.name).replaceAll('주민번호','주민등록번호'))&&/제외|삭제|않|안\s*(?:수집|처리|제공)|불필요/.test(i.quote)).map(i=>classification(i.name)==='rnn'?'주민등록번호':i.name));
@@ -149,6 +154,7 @@ export async function workPlan(api,data){
  const confirmedGrounds=grounds.filter(g=>!supplementCodes.includes(g.basisCode)).map(g=>({cite:g.cite,excerpt:g.excerpt,itemNames:g.itemNames}));
  for(const result of await Promise.all(sources.filter(isSupplement).map(s=>reviewSource(s,confirmedGrounds))))applyReview(result);
  if(periodReview){const review=await periodReview;if(review.verdict!=='possible'){if(review.verdict!=='not_supported')lawPeriodDraft=lawPeriodSuggestion(period,periodSource?.proof?.cite,review.reason);period='';periodOrigin='';periodStatus=['needs_information','not_supported'].includes(review.verdict)?review.verdict:'review_incomplete';}else{periodStatus='verified';period=periodValue(period);}}
+ mark('review');
  const kept=keptPeriodChoice(userText);
  if(!period&&kept){period=kept.value;periodOrigin='user';periodStatus='user_confirmed';periodClaim=kept;lawPeriodDraft=null;}
  const draftResult={...workDraft(answer,business,userText),...(lawPeriodDraft||{})};
@@ -174,5 +180,5 @@ export async function workPlan(api,data){
 
  if(flow==='provide'&&!recipient&&!manual.recipient)questions.push('제공받는 기관을 알려주세요.');
  const finalQuestions=finishWorkQuestions([...residentChoiceQuestions(residentCheck,requestedResident||specialRequested),...(asksGround?[]:consolidateWorkQuestions(questions.filter(q=>!(workQuestionCategory(q)==='permission'&&(!specialRequested||knownResidentUse))&&!(periodSettled&&workQuestionCategory(q)==='period')&&!(itemsSettled&&workQuestionCategory(q)==='items')&&!(/기타소득/.test(userText)&&/사업소득|소득.*구분|기타소득/.test(q))&&!((requestedResident||previous.items.some(i=>classification(i.name)==='rnn'))&&/주민등록번호|주민번호/.test(q)))))].slice(0,5),{messages,residentConfirmed:residentCheck.status==='confirmed',itemsMissing:!allowed.length&&!necessaryDrafts.length&&!retained.length,periodMissing:!period&&!retainedPeriod&&!draftResult.suggestedPeriod});
- return {...draftResult,suggestedItems:necessaryDrafts,proposedGrounds,agency:norm(userText).includes(norm(agency))?agency:'',purpose:clean(answer.purpose)||business,shortPurpose:clean(answer.shortPurpose,40),recipient:norm(userText).includes(norm(recipient))?recipient:'',items:allowed,removedItems:[...removed],verifiedSources:[...new Map(sources.map(s=>[s.proof.cite,{law:s.proof.law,article:s.proof.article,cite:s.proof.cite,excerpt:(s.proof.excerpt||'').slice(0,3000)}])).values()],retainedItems:retained.map(i=>({...i,classification:classification(i.name),origin:i.sourceId==='user'?'user':'law'})),retainedPeriod,incomplete:Boolean(retained.length||retainedPeriod),residentCheck,checkedAt:Date.now(),period,periodOrigin,periodStatus,grounds:grounds.map(g=>({...g,itemNames:g.itemNames.filter(n=>[...allowed,...necessaryDrafts].some(i=>i.name===n))})).filter(g=>g.itemNames.length),reply:(requestedResident||/근거.*없|정말.*근거/.test(recentUsers.at(-1)?.content||'')?residentSummary(residentCheck,grounds)+' ':'')+'개인정보 항목 '+new Set([...allowed,...necessaryDrafts,...retained].map(i=>i.name)).size+'개와 보유기간을 오른쪽에 정리했습니다.'+(requestedResident&&residentCheck.status==='confirmed'?'':applicableGroundSummary(grounds))+(finalQuestions.length?'':questionsDoneNote),questions:finalQuestions,failures,...await checkpoint(facts),legalChecked:sources.length>0};
+ return {...draftResult,suggestedItems:necessaryDrafts,proposedGrounds,agency:norm(userText).includes(norm(agency))?agency:'',purpose:clean(answer.purpose)||business,shortPurpose:clean(answer.shortPurpose,40),recipient:norm(userText).includes(norm(recipient))?recipient:'',items:allowed,removedItems:[...removed],verifiedSources:[...new Map(sources.map(s=>[s.proof.cite,{law:s.proof.law,article:s.proof.article,cite:s.proof.cite,excerpt:(s.proof.excerpt||'').slice(0,3000)}])).values()],retainedItems:retained.map(i=>({...i,classification:classification(i.name),origin:i.sourceId==='user'?'user':'law'})),retainedPeriod,incomplete:Boolean(retained.length||retainedPeriod),residentCheck,checkedAt:Date.now(),period,periodOrigin,periodStatus,grounds:grounds.map(g=>({...g,itemNames:g.itemNames.filter(n=>[...allowed,...necessaryDrafts].some(i=>i.name===n))})).filter(g=>g.itemNames.length),reply:(requestedResident||/근거.*없|정말.*근거/.test(recentUsers.at(-1)?.content||'')?residentSummary(residentCheck,grounds)+' ':'')+'개인정보 항목 '+new Set([...allowed,...necessaryDrafts,...retained].map(i=>i.name)).size+'개와 보유기간을 오른쪽에 정리했습니다.'+(requestedResident&&residentCheck.status==='confirmed'?'':searchMode==='consent'&&!grounds.length?' 이벤트·홍보처럼 동의를 받아 처리하는 업무로 보고 법령 검색은 생략했습니다. 법령 근거가 필요하면 3단계에서 추가할 수 있습니다.':applicableGroundSummary(grounds))+(finalQuestions.length?'':questionsDoneNote),questions:finalQuestions,failures,...await checkpoint(facts),legalChecked:sources.length>0,searchMode,timings:{...timings,total:Date.now()-started}};
 }

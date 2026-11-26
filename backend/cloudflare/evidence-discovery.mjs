@@ -9,6 +9,8 @@ export function discoveryScope(context,extraTerms=[]){
  for(const term of extraTerms.slice(0,12))if(typeof term==='string'&&term.length>=2&&term.length<=30&&!terms.has(term))terms.set(term,2);
  return {identifierLaws:profiles.flatMap(p=>p.identifierLaws||[]),laws:profiles.flatMap(p=>p.laws),terms:[...terms].map(([text,weight])=>({text,weight}))};
 }
+// How much searching a chat turn needs: 'consent' (event-like, no specific law), 'profile' (known laws), or 'full'.
+export function discoveryMode(text,context){const t=String(text||'');if(new RegExp(config.fullSearchSignals).test(t)&&!discoveryScope(context).laws.length)return 'full';if(discoveryScope(context).laws.length)return 'profile';return new RegExp(config.consentSignals).test(t)&&!new RegExp(config.fullSearchSignals).test(t)?'consent':'full';}
 export function candidateLawNames(names,limit=config.maxLaws){const seen=new Set();return names.map(normalizeLawName).filter(name=>{const key=compact(name);if(!key||key.startsWith('개인정보보호법')||seen.has(key))return false;seen.add(key);return true;}).slice(0,limit);}
 export function rankEvidence(articles,terms,law,mst,index){
  const scored=articles.map(a=>{const title=a.title||'',text=a.text||'';const score=terms.reduce((n,t)=>n+t.weight*((title.includes(t.text)?5:0)+(text.includes(t.text)?1:0)),0);return {a,score};}).filter(v=>v.score>0).sort((a,b)=>b.score-a.score);

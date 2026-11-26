@@ -666,9 +666,11 @@ def normalize_discovery_law(value):
 def ai_candidates(context, discovery_options=None):
     discovery_options = discovery_options or {}
     config = json.loads((ROOT / 'backend' / 'cloudflare' / 'evidence-discovery.json').read_text(encoding='utf-8'))
-    research = web_research(context)
     purpose = ' '.join(i['purpose'] for i in context['items'])
     profiles = [p for p in config['profiles'] if re.search(p['signals'], purpose)]
+    # Known laws: skip the web search and the AI law plan.
+    fast = bool(discovery_options.get('fast') and profiles)
+    research = {'report':'','sources':[]} if fast else web_research(context)
     names = [name for p in profiles for name in p['laws']]
     terms = {term: 4 for p in profiles for term in p['terms']}
     for item in context['items']:
@@ -680,7 +682,7 @@ def ai_candidates(context, discovery_options=None):
     if discovery_options.get('assistant'):
         terms.update({'보존':2,'보유':2,'기재사항':2,'기록':2})
     plan = {}
-    if not names or discovery_options.get('assistant'):
+    if not names or discovery_options.get('assistant') and not fast:
         plan = discovery_json(config['lawPrompt'] + (' 해당 업무의 개인정보 기재사항과 법정 보존기간을 정한 법률·시행령·시행규칙을 포함하라.' if discovery_options.get('assistant') else ''), {**context, 'research': research}, 'laws', 1800)
         chosen = plan['laws'] if isinstance(plan.get('laws'), list) else [c.get('law', '') for c in plan.get('candidates', [])]
         names = names + chosen if discovery_options.get('assistant') else chosen
