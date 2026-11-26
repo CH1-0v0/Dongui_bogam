@@ -37,10 +37,10 @@ def consolidate_questions(questions):
     for q in questions:
         if re.search(r'(?:법적근거|법령|조문|처리.*근거).*(?:있나요|알려|제시|제공)',q):continue
         if re.search(r'기관명|기관의?\s*(?:이름|명칭)|어느 기관',q):continue
-        category='permission' if re.search(r'주민등록번호|민감정보|처리.*근거',q) else 'period' if re.search(r'보유|보존|기간|기산점',q) else 'agency' if re.search(r'기관|제공받',q) else 'items' if re.search(r'항목|개인정보',q) else 'other'
+        category='permission' if re.search(r'주민등록번호|민감정보|처리.*근거',q) else 'period' if re.search(r'보유|보존|기간|기산점',q) else 'agency' if re.search(r'기관|제공받',q) else 'items' if re.search(r'항목|개인정보|계좌|은행|예금주',q) else 'other'
         groups.setdefault(category,[])
         if q not in groups[category]:groups[category].append(q)
-    return [DEFAULTS['questionPeriod'] if k=='period' else DEFAULTS['questionItems'] if k=='items' else max(rows,key=len) if k in ['permission','agency'] else ' '.join(rows) for k,rows in groups.items()][:5]
+    return [DEFAULTS['questionPeriod'] if k=='period' else DEFAULTS['questionItems'] if k=='items' else DEFAULTS['questionPermission'] if k=='permission' else max(rows,key=len) if k=='agency' else ' '.join(rows) for k,rows in groups.items()][:5]
 
 def ref_fingerprint(business, kind, refs, facts, flow):
     return hashlib.sha256(json.dumps([business, kind, refs, facts, flow], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
