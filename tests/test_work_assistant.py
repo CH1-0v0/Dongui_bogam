@@ -60,3 +60,16 @@ class ClinicalTests(unittest.TestCase):
             result=work_plan(data,server)
         self.assertTrue(any(g['basisCode']=='sensitiveLaw' and '진단명' in g['itemNames'] for g in result['grounds']))
         self.assertFalse(any('기관명' in q for q in result['questions']))
+
+class PaymentDefaultsTests(unittest.TestCase):
+    def test_defaults_and_question_consolidation(self):
+        from backend.work_assistant import work_draft,consolidate_questions
+        result=work_draft({},'공공기관 강사료 지급')
+        self.assertIn('계좌번호',[i['name'] for i in result['suggestedItems']])
+        self.assertEqual(result['suggestedPeriod'],'5년')
+        questions=consolidate_questions(['항목을 알려주세요.','추가 항목은?','보유기간은?','보존기간은?'])
+        self.assertEqual(len(questions),2)
+    def test_user_removal_wins(self):
+        from backend.work_assistant import work_draft
+        result=work_draft({'removeItems':[{'name':'계좌번호','quote':'계좌번호는 제외합니다.'}]},'공공기관 강사료 지급','계좌번호는 제외합니다.')
+        self.assertNotIn('계좌번호',[i['name'] for i in result['suggestedItems']])

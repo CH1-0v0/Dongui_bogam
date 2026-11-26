@@ -1,0 +1,3 @@
+import defaults from './work-defaults.json' with {type:'json'};
+export function workQuestionCategory(q){return /주민등록번호|민감정보|처리.*근거/.test(q)?'permission':/보유|보존|기간|기산점/.test(q)?'period':/기관|제공받/.test(q)?'agency':/항목|개인정보/.test(q)?'items':'other';}
+export function consolidateWorkQuestions(questions){const groups=new Map();for(const q of questions){if(/(?:법적근거|법령|조문|처리.*근거).*(?:있나요|알려|제시|제공)/.test(q))continue;if(/기관명|기관의?\s*(?:이름|명칭)|어느 기관/.test(q))continue;const k=workQuestionCategory(q);if(!groups.has(k))groups.set(k,new Set());groups.get(k).add(q);}return [...groups].map(([k,rows])=>k==='period'?defaults.questionPeriod:k==='items'?defaults.questionItems:['permission','agency'].includes(k)?[...rows].sort((a,b)=>b.length-a.length)[0]:[...rows].join(' ')).slice(0,5);}

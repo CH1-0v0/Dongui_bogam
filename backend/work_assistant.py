@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 POLICY = json.loads((Path(__file__).parent / 'cloudflare/assistant-policy.json').read_text())
+DEFAULTS = json.loads((Path(__file__).parent / 'cloudflare/work-defaults.json').read_text())
 REF_KEYS = ('law', 'article', 'paragraph', 'clause', 'basisCode', 'type')
 def clean(value, limit=500):
     return value.strip()[:limit] if isinstance(value, str) else ''
@@ -14,17 +15,32 @@ def norm(value):
 def classification(value):
     name = norm(value)
     return 'rnn' if re.search('주민등록번호|주민번호', name) else 'unique' if re.search('여권|운전면허|외국인등록', name) else 'sensitive' if re.search('종교|사상|신념|성생활|정치|노동조합|정당|건강|진료|유전|범죄|병력|진단|질병|장애|상담|생체|인종|민족|복약|심리|지문|안면|증상|치료|처방|수술|투약|처치|입원|외래|의학|검사결과|맥박|혈압|체온|의료|신체|혈액|가족력', name) else 'general'
-def work_draft(answer):
+def work_draft(answer,business='',user_text=''):
     draft = answer.get('draft') if isinstance(answer.get('draft'),dict) else {}
     rows = draft.get('items') if isinstance(draft.get('items'),list) else []
+    payment=bool(re.search(DEFAULTS['paymentSignals'],business))
+    if payment:rows=rows+[{'name':n,'required':True} for n in DEFAULTS['paymentItems']]
+    excluded={r.get('name') for r in answer.get('removeItems',[]) if isinstance(r,dict) and r.get('quote') and norm(r['quote']) in norm(user_text) and re.search(r'제외|삭제|않|안\s*(?:수집|처리|제공)|불필요',r['quote'])} if isinstance(answer.get('removeItems'),list) else set()
     items = {}
-    for row in rows[:30]:
+    for row in rows[:60]:
         if not isinstance(row,dict):continue
         name=clean(row.get('name'),100)
-        if not name or classification(name)=='rnn' or re.search(r'\d{6}[ -]?[1-8]\d{6}|@|01[016789][ -]?\d{3,4}[ -]?\d{4}',name):continue
+        if not name or name in items or name in excluded or classification(name)=='rnn' or re.search(r'\d{6}[ -]?[1-8]\d{6}|@|01[016789][ -]?\d{3,4}[ -]?\d{4}',name):continue
         items[name]={'name':name,'required':row.get('required') is True,'classification':classification(name),'origin':'draft'}
     period=draft.get('period') if isinstance(draft.get('period'),dict) else {}
-    return {'suggestedItems':list(items.values()),'suggestedPeriod':clean(period.get('value'),300),'suggestionReason':clean(period.get('reason'),500)}
+    value=clean(period.get('value'),300)
+    use_default=payment and re.search(DEFAULTS['publicSignals'],business+' '+user_text) and (not value or re.fullmatch(r'확인\s*필요|미정|미확인|알\s*수\s*없음',value))
+    return {'suggestedItems':list(items.values())[:30],'suggestedPeriod':DEFAULTS['publicPaymentPeriod'] if use_default else value,'suggestionReason':DEFAULTS['periodReason'] if use_default else clean(period.get('reason'),500)}
+
+def consolidate_questions(questions):
+    groups={}
+    for q in questions:
+        if re.search(r'(?:법적근거|법령|조문|처리.*근거).*(?:있나요|알려|제시|제공)',q):continue
+        if re.search(r'기관명|기관의?\s*(?:이름|명칭)|어느 기관',q):continue
+        category='permission' if re.search(r'주민등록번호|민감정보|처리.*근거',q) else 'period' if re.search(r'보유|보존|기간|기산점',q) else 'agency' if re.search(r'기관|제공받',q) else 'items' if re.search(r'항목|개인정보',q) else 'other'
+        groups.setdefault(category,[])
+        if q not in groups[category]:groups[category].append(q)
+    return [DEFAULTS['questionPeriod'] if k=='period' else DEFAULTS['questionItems'] if k=='items' else max(rows,key=len) if k in ['permission','agency'] else ' '.join(rows) for k,rows in groups.items()][:5]
 
 def ref_fingerprint(business, kind, refs, facts, flow):
     return hashlib.sha256(json.dumps([business, kind, refs, facts, flow], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -66,8 +82,11 @@ def work_plan(data, api):
         except api.ApiError:api.verify_review_token(api.os.environ.get('OPENROUTER_API_KEY','').encode(), data['evidenceToken'], fp, grace=86100)
     else:
         refs = []
+    research_material = None
     if not refs or data.get('refresh') is True:
         planned = api.ai_candidates(context, {'assistant':True})
+        research = planned.get('research') or {}
+        research_material = {'report':clean(research.get('report'),6000),'sources':[{'url':s.get('url'),'title':clean(s.get('title'),200),'excerpt':clean(s.get('excerpt'),500)} for s in research.get('sources',[])[:8]]}
         discovery_failures = planned.get('rejected',[])
         found = list({(c.get('law'),c.get('article'),c.get('basisCode'),c.get('type')):{k:clean(c.get(k),100) for k in REF_KEYS} for c in planned['candidates'] if not c.get('discoveryError')}.values())[:8]
         def identity(ref):return tuple(ref[k] for k in ['law','article','basisCode','type'])
@@ -108,7 +127,7 @@ def work_plan(data, api):
         return {'evidenceRefs':refs,'evidenceFacts':facts,'evidenceToken':api.create_review_token((api.os.environ.get('OPENROUTER_API_KEY','')+':work-state-v2').encode(),ref_fingerprint(business,kind,refs,facts,flow),ttl=86400),'evidenceExpiresAt':int(time.time()*1000)+86400000}
     if not sources and failures and (previous['items'] or previous['period']):
         return dict({'agency':manual['agency'],'purpose':business,'shortPurpose':'','recipient':manual['recipient'],'items':[],'period':'','periodOrigin':'','grounds':[],'verifiedSources':[],'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in previous['items']],'retainedPeriod':previous['period']['value'] if previous['period'] else '', 'incomplete':True,'reply':'공식 원문을 재확인하지 못했습니다. 이전에 확인한 항목과 기간은 지우지 않고 보관했습니다.','questions':['잠시 후 근거를 다시 확인해 주세요. 항목을 다시 입력하실 필요는 없습니다.'],'failures':failures,'residentCheck':{'status':'unavailable','checks':['공식 원문 재확인 필요']},'checkedAt':0,'legalChecked':False},**checkpoint(previous))
-    answer = api.discovery_json(POLICY['prompt'], {'business':business,'type':kind,'flow':flow,'messages':messages,'manual':manual,'previousFacts':previous,'sources':[{'id':s['id'],'cite':s['proof'].get('cite'),'text':s['text'][:11000]} for s in sources]}, field='plan', max_tokens=4500)
+    answer = api.discovery_json(POLICY['prompt'], {'business':business,'type':kind,'flow':flow,'messages':messages,'manual':manual,'research':research_material,'previousFacts':previous,'sources':[{'id':s['id'],'cite':s['proof'].get('cite'),'text':s['text'][:11000]} for s in sources]}, field='plan', max_tokens=4500)
     if not isinstance(answer.get('items'), list) or len(answer['items']) > 30 or not isinstance(answer.get('period'),dict):
         raise api.ApiError('업무 정리 응답을 읽지 못했습니다. 다시 시도하세요.',502)
     def supported(value, claim):
@@ -138,8 +157,8 @@ def work_plan(data, api):
             period, period_origin = '', ''
             period_status = review.get('verdict') if review.get('verdict') in ['needs_information','not_supported'] else 'review_incomplete'
         else:period_status = 'verified'
-    medical_drafts = [dict(i,classification=item_class(i)) for i in work_draft(answer)['suggestedItems'] if not any(a['name']==i['name'] for a in items)] if re.search('진료',business) else []
-    review_items = items + medical_drafts
+    necessary_drafts = [dict(i,classification=item_class(i)) for i in work_draft(answer,business,user_text)['suggestedItems'] if i['name'] not in removed and not any(a['name']==i['name'] for a in items)]
+    review_items = items + necessary_drafts
     grounds = []
     resident_check = {'status':'unavailable' if failures else 'not_found','checks':['주민등록번호는 일반 처리 근거와 별도 허용 근거를 함께 확인해야 합니다.']}
     for source in sources:
@@ -169,4 +188,4 @@ def work_plan(data, api):
     facts['items'].extend(i for i in retained if not any(a['name']==i['name'] for a in facts['items']))
     if retained or retained_period:questions.insert(0,'이전에 확인한 내용은 보관하고 있습니다. 현재 원문·허용 요건을 다시 확인해 주세요.')
     import time
-    return {**work_draft(answer),**({'suggestedItems':medical_drafts} if re.search('진료',business) else {}),'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+medical_drafts)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed+medical_drafts)],'reply':('공식 조문과 입력 내용을 대조해 항목 '+str(len(allowed))+'개를 정리했습니다. 문서로 이동하기 전에 아래 내용을 확인해 주세요.' if sources else '공식 원문 조회를 완료하지 못했습니다. 필요한 항목과 기간을 추가로 알려주시거나 나중에 확인할 수 있습니다.' if failures else '적용할 개별 법령 근거를 확인하지 못했습니다. 추가 항목과 보유기간의 직접 입력은 선택사항입니다.'),'questions':[q for q in dict.fromkeys(questions) if not re.search(r'기관명|기관의?\s*(?:이름|명칭)|어느 기관',q)][:5],'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}
+    return {**work_draft(answer,business,user_text),'suggestedItems':necessary_drafts,'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+necessary_drafts)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed+necessary_drafts)],'reply':('공식 조문과 입력 내용을 대조해 항목 '+str(len(allowed))+'개를 정리했습니다. 문서로 이동하기 전에 아래 내용을 확인해 주세요.' if sources else '공식 원문 조회를 완료하지 못했습니다. 필요한 항목과 기간을 추가로 알려주시거나 나중에 확인할 수 있습니다.' if failures else '적용할 개별 법령 근거를 확인하지 못했습니다. 추가 항목과 보유기간의 직접 입력은 선택사항입니다.'),'questions':consolidate_questions(questions),'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}

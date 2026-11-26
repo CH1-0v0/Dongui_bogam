@@ -574,7 +574,7 @@ def web_research(context):
         raise ApiError('AI 근거 검색을 위해 OPENROUTER_API_KEY를 설정해 주세요.', 503)
     config = json.loads((ROOT / 'backend' / 'cloudflare' / 'web-search.json').read_text(encoding='utf-8'))
     payload = {'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'instructions': config['instructions'],
-               'input': json.dumps(context, ensure_ascii=False), 'tools': [dict(config['tool'], parameters={**config['tool']['parameters'], 'allowed_domains': config['domains']})],
+               'input': json.dumps({**context,'researchPlan':config['researchPlan']}, ensure_ascii=False), 'tools': [dict(config['tool'], parameters={**config['tool']['parameters'], 'allowed_domains': config['domains']})],
                'max_tool_calls': 3, 'max_output_tokens': config['max_output_tokens'], 'provider': {'data_collection': 'deny'}}
     if 'gpt-oss' in payload['model'] or re.match(r'^openai/gpt-[56](?:[.-]|$)', payload['model']):
         payload['reasoning'] = {'effort': 'low'}
@@ -691,6 +691,7 @@ def ai_candidates(context, discovery_options=None):
     if MCP_CONTEXT.get() is not None:
         MCP_CONTEXT.get().terms = terms
         MCP_CONTEXT.get().max_articles = 2 if discovery_options.get('assistant') else 4
+    if discovery_options.get('assistant') and isinstance(plan.get('retentionLaws'),list):names = names[:2] + [n for n in plan['retentionLaws'] if isinstance(n,str)] + names[2:]
     names = list(dict.fromkeys(normalize_discovery_law(n) for n in names if isinstance(n, str)))
     names = [n for n in names if n and not compact(n).startswith('개인정보보호법')][:config['assistantMaxLaws'] if discovery_options.get('assistant') else config['maxLaws']]
     evidence_pool, rejected = [], []
@@ -753,7 +754,7 @@ def ai_candidates(context, discovery_options=None):
             grounded.append({**candidate, 'law': '개인정보 보호법', **{k: rule.get(k, '') for k in ['article','paragraph','clause']}})
         elif not any(compact(r['law']) == compact(normalize_discovery_law(candidate.get('law'))) for r in rejected):
             grounded.append({**candidate, 'law': normalize_discovery_law(candidate.get('law')) or '원문 후보 없음', 'discoveryError': '공식 원문 후보 목록에 없는 조문을 제안하여 제외했습니다.'})
-    return {**selected, 'candidates': grounded, 'rejected': rejected}
+    return {**selected, 'candidates': grounded, 'rejected': rejected, 'research': research if discovery_options.get('assistant') else None}
 
 
 def validate_context(data):
