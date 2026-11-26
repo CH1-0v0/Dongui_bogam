@@ -1,7 +1,7 @@
 import defaults from './work-defaults.json' with {type:'json'};
 import {consolidateWorkQuestions} from './work-questions.mjs';
 import {ApiError,validateContext,signReview,checkReview} from './legal.mjs';
-import {hasPermissionText} from './evidence-discovery.mjs';
+import {hasPermissionText,discoveryScope} from './evidence-discovery.mjs';
 import policy from './assistant-policy.json' with {type:'json'};
 const clean=(v,n=500)=>typeof v==='string'?v.trim().slice(0,n):'';
 const norm=v=>String(v||'').normalize('NFKC').replace(/\s+/g,'');
@@ -15,6 +15,14 @@ export function workDraft(answer,business='',userText=''){
  const items=rows.slice(0,60).flatMap(row=>{const name=clean(row?.name,100);if(!name||excluded.has(name)||classification(name)==='rnn'||seen.has(name)||/\d{6}[ -]?[1-8]\d{6}|@|01[016789][ -]?\d{3,4}[ -]?\d{4}/.test(name))return [];seen.add(name);return [{name,required:row.required===true,classification:classification(name),origin:'draft'}];});
  const publicPayment=payment&&new RegExp(defaults.publicSignals).test(business+' '+userText),value=clean(draft.period?.value,300),useDefault=publicPayment&&(!value||/^(?:확인\s*필요|미정|미확인|알\s*수\s*없음)$/.test(value));
  return {suggestedItems:items.slice(0,30),suggestedPeriod:useDefault?defaults.publicPaymentPeriod:value,suggestionReason:useDefault?defaults.periodReason:clean(draft.period?.reason,500)};
+}
+export function irrelevantIncomeSource(proof,userMessages){
+ const types=['기타소득','사업소득','근로소득','퇴직소득','연금소득','이자소득','배당소득'];
+ const latest=[...userMessages].reverse().find(t=>types.some(k=>t.includes(k)))||'';
+ const declared=types.filter(k=>latest.includes(k));
+ const title=proof.articleTitle||(proof.articleExcerpt||proof.excerpt||'').match(/제\d+조(?:의\d+)?[（(]([^）)]+)[）)]/)?.[1]||'';
+ if(/가산세|과태료|벌칙/.test(title))return true;
+ return proof.law==='소득세법'&&declared.length===1&&types.some(k=>k!==declared[0]&&title.includes(k))&&!title.includes(declared[0]);
 }
 export function assistantInput(data){
  const business=clean(data.business,1500),type=data.type||'collect';
@@ -31,9 +39,12 @@ export async function workPlan(api,data){
  const input=assistantInput(data),{business,type,flow,messages,manual,userText}=input;
  if(!api.env.OPENROUTER_API_KEY||!api.env.LAW_API_OC)throw new ApiError('AI 및 공식 법령 연결 설정을 확인해 주세요.',503);
  const reviewPurpose=[flow==='provide'?(type==='outside'?'처리: 목적 외 제공':'처리: 제3자 제공'):flow==='extra'?'처리: 목적 외 이용':'처리: 수집·이용',business.slice(0,500),...messages.filter(m=>m.role==='user').slice(-3).map(m=>m.content.slice(0,250)),manual.agency?'처리 기관: '+manual.agency:''].join('\n').slice(0,1500);
- const context={items:['성명','주민등록번호','건강정보'].map(name=>({name,purpose:business,recipient:manual.recipient||'',type,context:type,classification:classification(name)}))};
+ const recentUsers=messages.filter(m=>m.role==='user');
+ const asksGround=/근거|법령|수집.*가능/.test(recentUsers.at(-1)?.content||'')&&/[?？]|나요|가요|까요|습니까|정말|궁금|확인해|알려/.test(recentUsers.at(-1)?.content||'');
+ const searchPurpose=[business.slice(0,170),...recentUsers.slice(-2).map(m=>m.content.slice(0,150))].join('\n').slice(0,500);
+ const context={additionalAnswers:recentUsers.slice(-4).map(m=>m.content),items:['성명','주민등록번호','건강정보'].map(name=>({name,purpose:searchPurpose,recipient:manual.recipient||'',type,context:type,classification:classification(name)}))};
  let researchMaterial=null;let refs=[],discoveryFailures=[],previous={items:[],period:null};
- const quoteWindow=(quote,value,limit=250)=>{const text=norm(clean(quote,1500)),at=text.indexOf(norm(value));return text.slice(Math.max(0,at-40),Math.max(0,at-40)+limit);};
+ const quoteWindow=(quote,value,limit=250)=>{const text=norm(clean(quote,1500)),at=text.indexOf(norm(value))>=0?text.indexOf(norm(value)):(classification(value)==='rnn'?text.indexOf('주민번호'):-1);return text.slice(Math.max(0,at-40),Math.max(0,at-40)+limit);};
  const factItem=i=>({name:clean(i?.name,100),required:i?.required===true,sourceId:clean(i?.sourceId,20),quote:quoteWindow(i?.quote,i?.name)});
  const factPeriod=i=>i?{value:clean(i.value,300),sourceId:clean(i.sourceId,20),quote:quoteWindow(i.quote,i.value,400)}:null;
  if(data.evidenceToken){
@@ -42,15 +53,21 @@ export async function workPlan(api,data){
   if(data.evidenceFacts){if(!Array.isArray(data.evidenceFacts.items)||data.evidenceFacts.items.length>30)throw new ApiError('이전 입력 정보를 확인해 주세요.',400);previous={items:data.evidenceFacts.items.map(factItem),period:factPeriod(data.evidenceFacts.period)};}
   const fp=await digest({business,type,flow,refs,facts:previous});
   try{await checkReview(api.env.OPENROUTER_API_KEY+':work-state-v2',data.evidenceToken,fp);}catch(error){if(!(error instanceof ApiError))throw error;await checkReview(api.env.OPENROUTER_API_KEY,data.evidenceToken,fp,86100000);}
+  previous.items=previous.items.map(i=>classification(i.name)==='rnn'?{...i,name:'주민등록번호'}:i);
  }
- if(!refs.length||data.refresh===true){
+ if(!refs.length||data.refresh===true||messages.at(-1)?.role==='user'){
   const research=await api.research(context),planned=await api.discover(context,research,{assistant:true});researchMaterial={report:clean(research.report,6000),sources:(research.sources||[]).slice(0,8).map(s=>({url:s.url,title:clean(s.title,200),excerpt:clean(s.excerpt,500)}))};
   discoveryFailures=planned.rejected||[];const found=[...new Map(planned.candidates.filter(c=>!c.discoveryError).map(c=>[JSON.stringify([c.law,c.article,c.basisCode,c.type]),Object.fromEntries(['law','article','paragraph','clause','basisCode','type'].map(k=>[k,clean(c[k],100)]))])).values()].slice(0,8);
   const identity=r=>JSON.stringify([r.law,r.article,r.basisCode,r.type]),protectedIds=new Set([...previous.items.map(i=>i.sourceId),previous.period?.sourceId]);
   for(const ref of found)if(!refs.some(r=>identity(r)===identity(ref))){if(refs.length<8)refs.push(ref);else{const replace=refs.findIndex((r,i)=>!protectedIds.has('S'+i)&&!found.some(n=>identity(n)===identity(r)));if(replace>=0)refs[replace]=ref;}}
  }
  const sources=[],failures=discoveryFailures.map(r=>({law:r.law,reason:r.reason}));
- for(const [index,ref] of refs.entries()){if(api.calls+api.cacheOperations>=34){failures.push({law:ref.law,reason:'request_budget'});continue;}try{let proof;try{proof=await api.verify(ref);}catch(error){if(error instanceof ApiError&&(ref.paragraph||ref.clause)&&/요청한 항|요청한 호|조·항·호 번호/.test(error.message)){const articleRef={...ref,paragraph:'',clause:''};proof=await api.verify(articleRef);refs[index]=articleRef;}else throw error;}sources.push({id:'S'+index,proof,text:proof.articleExcerpt||proof.paragraphExcerpt||proof.excerpt});}catch(e){if(!(e instanceof ApiError))throw e;failures.push({law:ref.law,reason:e.status>=500?'unavailable':'not_verified'});}}
+ const focusResident=/주민(?:등록)?번호/.test(userText)||previous.items.some(i=>classification(i.name)==='rnn');
+ const identifierLaws=discoveryScope(context).identifierLaws||[];
+ const refPriority=r=>r.basisCode==='residentLaw'?(identifierLaws.includes(r.law)?0:1):['sensitiveLaw','uniqueLaw'].includes(r.basisCode)?3:2;
+ const verificationOrder=[...refs.entries()].sort((a,b)=>focusResident?refPriority(a[1])-refPriority(b[1]):a[0]-b[0]);
+ const critical=new Set(focusResident?[verificationOrder.find(([,r])=>r.basisCode==='residentLaw')?.[0],verificationOrder.find(([,r])=>!['residentLaw','sensitiveLaw','uniqueLaw'].includes(r.basisCode))?.[0]].filter(Number.isInteger):[]);
+ for(const [index,ref] of verificationOrder){if(api.calls+api.cacheOperations>=(critical.has(index)?40:34)){failures.push({law:ref.law,reason:'request_budget'});continue;}try{let proof;try{proof=await api.verify(ref);}catch(error){if(error instanceof ApiError&&(ref.paragraph||ref.clause)&&/요청한 항|요청한 호|조·항·호 번호/.test(error.message)){const articleRef={...ref,paragraph:'',clause:''};proof=await api.verify(articleRef);refs[index]=articleRef;}else throw error;}sources.push({id:'S'+index,proof,text:proof.articleExcerpt||proof.paragraphExcerpt||proof.excerpt});}catch(e){if(!(e instanceof ApiError))throw e;failures.push({law:ref.law,reason:e.status>=500?'unavailable':'not_verified'});}}
  for(const source of [...sources])for(const [basisCode,pattern] of [['residentLaw',/주민등록번호/],['sensitiveLaw',/민감정보|건강에\s*관한\s*정보/]])if(!(api.calls+api.cacheOperations>=34)&&refs.length<8&&['법률','대통령령'].includes(source.proof.kind)&&pattern.test(source.text)&&!refs.some(r=>r.law===source.proof.law&&r.article===source.proof.article&&r.basisCode===basisCode)){
   const ref={law:source.proof.law,article:source.proof.article,paragraph:source.proof.paragraph||'',clause:source.proof.clause||'',basisCode,type};
   const index=refs.length;refs.push(ref);try{const proof=await api.verify(ref);sources.push({id:'S'+index,proof,text:proof.articleExcerpt||proof.excerpt});}catch(error){if(!(error instanceof ApiError))throw error;failures.push({law:ref.law,reason:error.status>=500?'unavailable':'not_verified'});}
@@ -61,9 +78,11 @@ export async function workPlan(api,data){
  const material={business,type,flow,messages,manual,research:researchMaterial,previousFacts:previous,sources:sources.map(s=>({id:s.id,cite:s.proof.cite,text:s.text.slice(0,11000)}))};
  const answer=await api.ai(policy.prompt,material,4500);
  if(!Array.isArray(answer.items)||answer.items.length>30||!answer.period||typeof answer.period!=='object'||Array.isArray(answer.period))throw new ApiError('업무 정리 응답을 읽지 못했습니다. 다시 시도하세요.',502);
- const supported=(value,claim)=>{const quote=clean(claim?.quote,1500),source=sources.find(s=>s.id===claim?.sourceId);return quote&&norm(quote).includes(norm(value))&&(claim.sourceId==='user'?norm(userText).includes(norm(quote)):source&&norm(source.text).includes(norm(quote)));};
- const removed=new Set((Array.isArray(answer.removeItems)?answer.removeItems:[]).filter(i=>i&&norm(userText).includes(norm(clean(i.quote,500)))&&norm(i.quote).includes(norm(i.name))&&/제외|삭제|않|안\s*(?:수집|처리|제공)|불필요/.test(i.quote)).map(i=>i.name));
- const proposed=[...previous.items.filter(i=>!removed.has(i.name)&&(i.sourceId==='user'||supported(i.name,i))),...answer.items.filter(i=>i&&clean(i.name,100)&&supported(clean(i.name,100),i))];
+ const supported=(value,claim)=>{const quote=clean(claim?.quote,1500),source=sources.find(s=>s.id===claim?.sourceId);return quote&&norm(quote).replaceAll('주민번호','주민등록번호').includes(norm(value).replaceAll('주민번호','주민등록번호'))&&(claim.sourceId==='user'?norm(userText).includes(norm(quote)):source&&norm(source.text).includes(norm(quote)));};
+ const removed=new Set((Array.isArray(answer.removeItems)?answer.removeItems:[]).filter(i=>i&&norm(userText).includes(norm(clean(i.quote,500)))&&norm(i.quote).replaceAll('주민번호','주민등록번호').includes(norm(i.name).replaceAll('주민번호','주민등록번호'))&&/제외|삭제|않|안\s*(?:수집|처리|제공)|불필요/.test(i.quote)).map(i=>classification(i.name)==='rnn'?'주민등록번호':i.name));
+ const residentLine=[...userText.split('\n')].reverse().find(t=>/주민(?:등록)?번호/.test(t));
+ const requestedResident=residentLine&&(/주민(?:등록)?번호.{0,40}(?:수집(?:해야|하고|합니다|할|하려|이필요)|처리(?:해야|할예정|할계획)|필수|필요|추가|포함)/.test(norm(residentLine))||/주민(?:등록)?번호/.test(manual.items||''))&&!/제외|삭제|불필요|안\s*(?:수집|처리)|(?:수집|처리)(?:하지|할필요가)\s*(?:않|없)/.test(norm(residentLine))?{name:'주민등록번호',required:true,sourceId:'user',quote:residentLine.slice(0,1500)}:null;
+ const proposed=[...(requestedResident?[requestedResident]:[]),...previous.items.filter(i=>!removed.has(i.name)&&(i.sourceId==='user'||supported(i.name,i))),...answer.items.filter(i=>i&&clean(i.name,100)&&supported(clean(i.name,100),i))].map(i=>classification(i.name)==='rnn'?{...i,name:'주민등록번호'}:i);
  const periodClaim=clean(answer.period.value,300)&&supported(clean(answer.period.value,300),answer.period)?answer.period:previous.period&&(previous.period.sourceId==='user'||supported(previous.period.value,previous.period))?previous.period:answer.period;
  const itemClass=i=>{const value=classification(i.name);if(value!=='general')return value;const name=norm(i.name),source=sources.find(s=>s.id===i.sourceId);const medical=source?.proof?.law?.startsWith('의료법')||/진료|의료기관|환자/.test(business);const identity=/^(?:환자(?:의)?)?(?:성명|이름|주소|연락처|전화번호|휴대전화번호|생년월일|성별|연령|나이|직업|국적|환자번호|등록번호)$/.test(name);return medical&&!identity?'sensitive':'general';};
  const items=[...new Map(proposed.map(i=>[clean(i.name,100),{name:clean(i.name,100),required:i.required===true,classification:itemClass(i),sourceId:i.sourceId,origin:i.sourceId==='user'?'user':'law'}])).values()];
@@ -75,8 +94,8 @@ export async function workPlan(api,data){
  const necessaryDrafts=workDraft(answer,business,userText).suggestedItems.map(i=>({...i,classification:itemClass(i)})).filter(i=>i.classification!=='rnn'&&!removed.has(i.name)&&!items.some(a=>a.name===i.name));
  const reviewItems=[...items,...necessaryDrafts];
  const grounds=[];let residentCheck={status:failures.length?'unavailable':'not_found',checks:['주민등록번호는 일반 처리 근거와 별도 허용 근거를 함께 확인해야 합니다.']};
- for(const source of sources){const proof=source.proof;if(!hasPermissionText(proof))continue;const supplement={residentLaw:'rnn',sensitiveLaw:'sensitive',uniqueLaw:'unique'}[proof.basisCode];const reviewRows=proof.basisCode==='residentLaw'&&!reviewItems.some(i=>i.classification==='rnn')?[...reviewItems,{name:'주민등록번호',classification:'rnn'}]:reviewItems;const scope=reviewRows.filter(i=>!supplement||i.classification===supplement).map((i,n)=>({...i,id:'assistant-'+n,purpose:reviewPurpose,recipient:clean(answer.recipient)||manual.recipient||'',type,context:type}));if(!scope.length)continue;
-  let review;try{({review}=await api.reviewEvidence(proof,scope,false));}catch(error){if(error instanceof ApiError&&error.requestBudget){failures.push({law:proof.law,reason:'request_budget'});continue;}throw error;}if(proof.basisCode==='residentLaw'){const row=review.items.find(i=>i.name==='주민등록번호');if(row&&(residentCheck.status!=='confirmed'||row.verdict==='possible'))residentCheck={status:row.verdict==='possible'?'confirmed':row.verdict,cite:proof.cite,excerpt:proof.excerpt,checks:row.checks||[],explanation:row.explanation||''};}const names=review.items.filter(i=>i.verdict==='possible').map(i=>i.name);if(names.length)grounds.push({...proof,itemNames:names});
+ for(const source of sources){const proof=source.proof;if(!hasPermissionText(proof)||irrelevantIncomeSource(proof,[business,...recentUsers.map(m=>m.content)]))continue;const supplement={residentLaw:'rnn',sensitiveLaw:'sensitive',uniqueLaw:'unique'}[proof.basisCode];const reviewRows=proof.basisCode==='residentLaw'&&!reviewItems.some(i=>i.classification==='rnn')?[...reviewItems,{name:'주민등록번호',classification:'rnn'}]:reviewItems;const scope=reviewRows.filter(i=>!supplement||i.classification===supplement).map((i,n)=>({...i,id:'assistant-'+n,purpose:reviewPurpose,recipient:clean(answer.recipient)||manual.recipient||'',type,context:type}));if(!scope.length)continue;
+  let review;try{({review}=await api.reviewEvidence({...proof,additionalGrounds:sources.filter(s=>s.proof!==proof&&['residentLaw','sensitiveLaw','uniqueLaw'].includes(s.proof.basisCode)&&hasPermissionText(s.proof)).slice(0,4).map(s=>s.proof)},scope,false));}catch(error){if(error instanceof ApiError&&error.requestBudget){failures.push({law:proof.law,reason:'request_budget'});continue;}throw error;}if(proof.basisCode==='residentLaw'){const row=review.items.find(i=>i.name==='주민등록번호');if(row&&(residentCheck.status!=='confirmed'||row.verdict==='possible'))residentCheck={status:row.verdict==='possible'?'confirmed':row.verdict,cite:proof.cite,excerpt:proof.excerpt,checks:row.checks||[],explanation:row.explanation||''};}const names=review.items.filter(i=>i.verdict==='possible').map(i=>i.name);if(names.length)grounds.push({...proof,itemNames:names});
  }
  const allowed=items.filter(i=>{if(i.classification!=='rnn')return true;return grounds.some(g=>!['residentLaw','sensitiveLaw','uniqueLaw'].includes(g.basisCode)&&g.itemNames.includes(i.name))&&grounds.some(g=>g.basisCode==='residentLaw'&&g.itemNames.includes(i.name));});
  const withheld=items.filter(i=>!allowed.includes(i)).map(i=>i.name);
@@ -85,13 +104,13 @@ export async function workPlan(api,data){
  if(withheld.length)questions.push(withheld.join(', ')+'의 별도 처리 허용 요건을 확인하지 못해 자동 입력하지 않았습니다. 필요한 경우 3단계에서 근거를 확인해 주세요.');
  if(!allowed.length&&!previous.items.length)questions.push('수집하거나 제공할 개인정보 항목을 알려주세요. 직접 입력은 선택사항입니다.');
  if(!period&&!previous.period)questions.push('보유 및 이용기간을 알려주세요. 직접 입력은 선택사항입니다.');
- const retained=previous.items.filter(i=>!removed.has(i.name)&&!allowed.some(a=>a.name===i.name));
+ const retained=[...new Map([...previous.items,...proposed.filter(i=>i.sourceId==='user'&&classification(i.name)==='rnn')].map(i=>[i.name,i])).values()].filter(i=>!removed.has(i.name)&&!allowed.some(a=>a.name===i.name));
  const retainedPeriod=!period&&previous.period?previous.period.value:'';
  const facts={items:allowed.map(i=>factItem(proposed.findLast(p=>clean(p.name,100)===i.name))),period:period?factPeriod({...periodClaim,value:period}):previous.period};
- facts.items.push(...retained.filter(i=>!facts.items.some(a=>a.name===i.name)));
- if(retained.length||retainedPeriod)questions.unshift('이전에 확인한 내용은 보관하고 있습니다. 현재 원문·허용 요건을 다시 확인해 주세요.');
+ facts.items.push(...retained.filter(i=>!facts.items.some(a=>a.name===i.name)).map(factItem));
+ if(retained.length||retainedPeriod)questions.unshift('요청한 항목은 보관하고 있습니다. 미확인 항목의 원문·허용 요건을 다시 확인해 주세요.');
  const agency=clean(answer.agency,100);const recipient=clean(answer.recipient,100);
 
  if(flow==='provide'&&!recipient&&!manual.recipient)questions.push('제공받는 기관을 알려주세요.');
- return {...workDraft(answer,business,userText),suggestedItems:necessaryDrafts,agency:norm(userText).includes(norm(agency))?agency:'',purpose:clean(answer.purpose)||business,shortPurpose:clean(answer.shortPurpose,40),recipient:norm(userText).includes(norm(recipient))?recipient:'',items:allowed,removedItems:[...removed],verifiedSources:[...new Map(sources.map(s=>[s.proof.cite,{law:s.proof.law,article:s.proof.article,cite:s.proof.cite,excerpt:(s.proof.excerpt||'').slice(0,3000)}])).values()],retainedItems:retained.map(i=>({...i,classification:classification(i.name),origin:i.sourceId==='user'?'user':'law'})),retainedPeriod,incomplete:Boolean(retained.length||retainedPeriod),residentCheck,checkedAt:Date.now(),period,periodOrigin,periodStatus,grounds:grounds.map(g=>({...g,itemNames:g.itemNames.filter(n=>[...allowed,...necessaryDrafts].some(i=>i.name===n))})).filter(g=>g.itemNames.length),reply:sources.length?'공식 조문과 입력 내용을 대조해 항목 '+allowed.length+'개를 정리했습니다. 문서로 이동하기 전에 아래 내용을 확인해 주세요.':failures.length?'공식 원문 조회를 완료하지 못했습니다. 필요한 항목과 기간을 추가로 알려주시거나 나중에 확인할 수 있습니다.':'적용할 개별 법령 근거를 확인하지 못했습니다. 추가 항목과 보유기간의 직접 입력은 선택사항입니다.',questions:consolidateWorkQuestions(questions),failures,...await checkpoint(facts),legalChecked:sources.length>0};
+ return {...workDraft(answer,business,userText),suggestedItems:necessaryDrafts,agency:norm(userText).includes(norm(agency))?agency:'',purpose:clean(answer.purpose)||business,shortPurpose:clean(answer.shortPurpose,40),recipient:norm(userText).includes(norm(recipient))?recipient:'',items:allowed,removedItems:[...removed],verifiedSources:[...new Map(sources.map(s=>[s.proof.cite,{law:s.proof.law,article:s.proof.article,cite:s.proof.cite,excerpt:(s.proof.excerpt||'').slice(0,3000)}])).values()],retainedItems:retained.map(i=>({...i,classification:classification(i.name),origin:i.sourceId==='user'?'user':'law'})),retainedPeriod,incomplete:Boolean(retained.length||retainedPeriod),residentCheck,checkedAt:Date.now(),period,periodOrigin,periodStatus,grounds:grounds.map(g=>({...g,itemNames:g.itemNames.filter(n=>[...allowed,...necessaryDrafts].some(i=>i.name===n))})).filter(g=>g.itemNames.length),reply:'항목 총 '+new Set([...allowed,...necessaryDrafts,...retained].map(i=>i.name)).size+'개를 정리했습니다. 입력·원문 확인 '+allowed.length+'개, AI 초안 '+necessaryDrafts.length+'개, 재확인 '+retained.length+'개입니다.'+(requestedResident||/근거.*없|정말.*근거/.test(recentUsers.at(-1)?.content||'')?(residentCheck.status==='confirmed'?' 주민등록번호 허용 근거를 확인했습니다: '+residentCheck.cite:residentCheck.status==='unavailable'?' 주민등록번호 근거가 없다는 판단이 아니라, 원문 조회를 완료하지 못한 상태입니다.':' 주민등록번호 허용 규정의 현재 업무 적용 여부를 추가로 확인하고 있습니다.'):''),questions:asksGround?[]:consolidateWorkQuestions(questions.filter(q=>!(/기타소득/.test(userText)&&/사업소득|소득.*구분|기타소득/.test(q))&&!((requestedResident||previous.items.some(i=>classification(i.name)==='rnn'))&&/주민등록번호|주민번호/.test(q)))),failures,...await checkpoint(facts),legalChecked:sources.length>0};
 }

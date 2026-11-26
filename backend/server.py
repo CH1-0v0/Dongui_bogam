@@ -495,7 +495,7 @@ def verify_citation(candidate):
     if clause:
         cite += ' 제' + clause.replace('의', '호의') + ('' if '의' in clause else '호')
     return {'law': text(row, '법령명한글'), 'article': article, 'paragraph': paragraph, 'clause': clause,
-            'retrievalProvider': root.get('retrievalProvider', 'api'), 'cite': cite, 'excerpt': excerpt, 'articleExcerpt': extract_article(root, article),
+            'articleTitle':text(article_node(root,article),'조문제목'),'retrievalProvider': root.get('retrievalProvider', 'api'), 'cite': cite, 'excerpt': excerpt, 'articleExcerpt': extract_article(root, article),
             'paragraphExcerpt': extract_article(root, article, paragraph) if paragraph else '',
             'paragraphSegments': paragraph_segments(article_node(root, article, paragraph)) if paragraph else [], 'verified': True, 'mst': mst,
             'kind': text(row, '법령구분명'), 'effectiveDate': text(row, '시행일자'), 'verifiedAt': dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -691,7 +691,7 @@ def ai_candidates(context, discovery_options=None):
     if MCP_CONTEXT.get() is not None:
         MCP_CONTEXT.get().terms = terms
         MCP_CONTEXT.get().max_articles = 2 if discovery_options.get('assistant') else 4
-    if discovery_options.get('assistant') and isinstance(plan.get('retentionLaws'),list):names = names[:2] + [n for n in plan['retentionLaws'] if isinstance(n,str)] + names[2:]
+    if discovery_options.get('assistant') and isinstance(plan.get('retentionLaws'),list):names = ([n for p in profiles for n in p.get('identifierLaws',[])] if re.search(r'주민(?:등록)?번호',purpose) else []) + names[:2] + [n for n in plan['retentionLaws'] if isinstance(n,str)] + names[2:]
     names = list(dict.fromkeys(normalize_discovery_law(n) for n in names if isinstance(n, str)))
     names = [n for n in names if n and not compact(n).startswith('개인정보보호법')][:config['assistantMaxLaws'] if discovery_options.get('assistant') else config['maxLaws']]
     evidence_pool, rejected = [], []
@@ -994,7 +994,7 @@ def review_evidence_for(actual):
     def cite(record):
         if not isinstance(record, dict):
             return None
-        result = {k: record[k] for k in ('law', 'article', 'paragraph', 'clause', 'cite', 'excerpt', 'basisCode') if k in record}
+        result = {k: record[k] for k in ('law', 'article', 'paragraph', 'clause', 'cite', 'excerpt', 'basisCode', 'articleTitle') if k in record}
         if record.get('articleExcerpt') and record['articleExcerpt'] != record.get('excerpt'):
             result['articleExcerpt'] = record['articleExcerpt']
         return result

@@ -538,3 +538,5 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 @media(prefers-reduced-motion:reduce){.work-dots i{animation:none;opacity:.8}}
 
 .work-item-details summary,.work-proposal summary{cursor:pointer;font-weight:700;padding:10px 0}.work-proposal[open]{display:grid;gap:12px}.output-setting{border:1px solid var(--line);border-radius:16px;padding:24px}.output-setting h2{margin:0 0 12px}.output-settings>.auto-draft-fields{padding:20px;border:1px solid var(--line);border-radius:16px;background:white}
+
+.work-next .actions [data-work-finish]{margin-left:auto}

@@ -14,7 +14,7 @@ class WorkAssistantTests(unittest.TestCase):
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server,'ai_candidates',return_value={'candidates':[REF]}) as search,patch.object(server,'verify_with_basis',return_value={**REF,'cite':'합성법 제10조','articleExcerpt':SOURCE,'excerpt':SOURCE}),patch.object(server,'discovery_json',side_effect=ai),patch.object(server,'ai_application_review',side_effect=lambda proof,items:{'items':[dict(i,verdict='possible') for i in items]}):
             result=work_plan(data,server)
             again=work_plan({**data,'evidenceRefs':result['evidenceRefs'],'evidenceFacts':result['evidenceFacts'],'evidenceToken':result['evidenceToken']},server)
-            self.assertEqual(search.call_count,1)
+            self.assertEqual(search.call_count,2)
             with self.assertRaises(server.ApiError):work_plan({**data,'business':'다른 업무입니다','evidenceRefs':result['evidenceRefs'],'evidenceFacts':result['evidenceFacts'],'evidenceToken':result['evidenceToken']},server)
             return result
     def test_official_facts_and_reusable_source_binding(self):
@@ -32,14 +32,14 @@ class WorkAssistantTests(unittest.TestCase):
     def test_source_failure_retains_previous_facts_without_current_grounds(self):
         first=self.run_plan()
         data={'business':'합성 기관 기록 업무','messages':[{'role':'user','content':'합성 기관에서 기록을 작성합니다.'}],'evidenceRefs':first['evidenceRefs'],'evidenceFacts':first['evidenceFacts'],'evidenceToken':first['evidenceToken']}
-        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server,'verify_with_basis',side_effect=server.ApiError('합성 일시 장애',504)):
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server,'ai_candidates',return_value={'candidates':[]}),patch.object(server,'verify_with_basis',side_effect=server.ApiError('합성 일시 장애',504)):
             result=work_plan(data,server)
         self.assertTrue(result['incomplete']);self.assertEqual(result['retainedItems'][0]['name'],'성명');self.assertEqual(result['retainedPeriod'],'5년');self.assertEqual(result['grounds'],[])
     def test_conversation_checkpoint_survives_ten_minutes(self):
         first=self.run_plan();data={'business':'합성 기관 기록 업무','messages':[{'role':'user','content':'합성 기관에서 기록을 작성합니다.'}],'evidenceRefs':first['evidenceRefs'],'evidenceFacts':first['evidenceFacts'],'evidenceToken':first['evidenceToken']}
         import time
         now=time.time()
-        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server.time,'time',return_value=now+600),patch.object(server,'verify_with_basis',return_value={**REF,'cite':'합성법 제10조','articleExcerpt':SOURCE,'excerpt':SOURCE}),patch.object(server,'discovery_json',side_effect=lambda prompt,material,**kwargs:ANSWER if 'sources' in material else {'verdict':'possible'}),patch.object(server,'ai_application_review',side_effect=lambda proof,items:{'items':[dict(i,verdict='possible') for i in items]}):
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server.time,'time',return_value=now+600),patch.object(server,'ai_candidates',return_value={'candidates':[]}),patch.object(server,'verify_with_basis',return_value={**REF,'cite':'합성법 제10조','articleExcerpt':SOURCE,'excerpt':SOURCE}),patch.object(server,'discovery_json',side_effect=lambda prompt,material,**kwargs:ANSWER if 'sources' in material else {'verdict':'possible'}),patch.object(server,'ai_application_review',side_effect=lambda proof,items:{'items':[dict(i,verdict='possible') for i in items]}):
             result=work_plan(data,server)
         self.assertEqual(result['period'],'5년')
 
@@ -73,3 +73,30 @@ class PaymentDefaultsTests(unittest.TestCase):
         from backend.work_assistant import work_draft
         result=work_draft({'removeItems':[{'name':'계좌번호','quote':'계좌번호는 제외합니다.'}]},'공공기관 강사료 지급','계좌번호는 제외합니다.')
         self.assertNotIn('계좌번호',[i['name'] for i in result['suggestedItems']])
+
+class FollowupSearchTests(unittest.TestCase):
+    def test_latest_income_and_resident_answer_is_researched_and_kept(self):
+        data={'business':'공공기관 강사료 지급','messages':[]}
+        contexts=[]
+        def discover(context,*args):
+            contexts.append(context)
+            return {'candidates':[REF]+([{'law':'합성허용령','article':'20','basisCode':'residentLaw','type':'collect'}] if len(contexts)>1 else [])}
+        def verify(ref):
+            text='[합성] 원천징수의무자는 주민등록번호를 처리한다.' if ref['basisCode']=='residentLaw' else SOURCE
+            return dict(ref,kind='대통령령',cite='합성 조문',articleExcerpt=text,excerpt=text)
+        def ai(_p,m,**kw):return dict(ANSWER,items=[],period={'value':''}) if 'sources' in m else {'verdict':'possible'}
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server,'ai_candidates',side_effect=discover),patch.object(server,'verify_with_basis',side_effect=verify),patch.object(server,'discovery_json',side_effect=ai),patch.object(server,'ai_application_review',side_effect=lambda proof,items:{'items':[dict(i,verdict='possible') for i in items]}):
+            first=work_plan(data,server)
+            self.assertIn('항목 총 4개',first['reply'])
+            next_data={**data,'messages':[{'role':'user','content':'기타소득으로 하며 주민번호를 수집해야 합니다.'}],**{k:first[k] for k in ['evidenceRefs','evidenceFacts','evidenceToken']}}
+            second=work_plan(next_data,server)
+        self.assertEqual(len(contexts),2)
+        self.assertIn('기타소득',contexts[-1]['items'][0]['purpose'])
+        self.assertTrue(any(i['name']=='주민등록번호' for i in second['items']))
+        self.assertEqual(second['residentCheck']['status'],'confirmed')
+
+class IncomeScopeTests(unittest.TestCase):
+    def test_income_category_and_penalties(self):
+        from backend.work_assistant import irrelevant_income_source
+        self.assertTrue(irrelevant_income_source({'law':'소득세법','articleExcerpt':'제144조(사업소득에 대한 원천징수)'},['기타소득으로 합니다.']))
+        self.assertFalse(irrelevant_income_source({'law':'소득세법','articleExcerpt':'제145조(기타소득에 대한 원천징수)'},['기타소득으로 합니다.']))

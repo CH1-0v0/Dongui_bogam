@@ -36,7 +36,7 @@ export class LawMcp {
  constructor(env,send){this.env=env;this.send=send;this.session='';this.id=0;this.rows=new Map();this.memo=new Map();}
  async rpc(method,params,notification=false){
   if(this.unavailable)throw Error('MCP unavailable for this request');
-  try{return await this.requestRpc(method,params,notification);}catch(error){this.unavailable=true;throw error;}
+  try{return await this.requestRpc(method,params,notification);}catch(error){if(!error.requestBudget)this.unavailable=true;else if(['initialize','notifications/initialized'].includes(method))this.ready=null;throw error;}
  }
  async requestRpc(method,params,notification=false){
   const url=new URL(this.env.LAW_MCP_URL||'https://mcp.gomdori.app/law');
