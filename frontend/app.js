@@ -1186,7 +1186,9 @@ function validateBasics(){
 function startBlankConsent(){
  clearTimeout(sensitivityTimer);workSession=null;clearWorkSession();state=newDraft();
  lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};
- freshLawPicker();editorOpen=false;documentEditing=false;a4PreviewCache=null;finalDocument=null;basicsChecked=false;message='';tab='collect';reached=0;go(1);
+ freshLawPicker();editorOpen=false;documentEditing=false;a4PreviewCache=null;finalDocument=null;basicsChecked=false;message='';tab='collect';reached=0;
+ // A new consent starts from the chatbot description box on the home screen.
+ Promise.resolve(go(0)).then(()=>{const box=document.querySelector('[data-work-home] textarea');if(box){box.value='';box.scrollIntoView({block:'center'});box.focus({preventScroll:true});}});
 }
 function positionItemMenu(menu,trigger){const r=trigger.getBoundingClientRect(),height=window.visualViewport?.height||innerHeight,below=height-r.bottom-8,above=r.top-8,up=below<180&&above>below;menu.style.top=up?'auto':'calc(100% + 4px)';menu.style.bottom=up?'calc(100% + 4px)':'auto';menu.style.maxHeight=Math.min(180,Math.max(40,up?above:below))+'px';}
 function closeItemMenus(){document.querySelectorAll('.item-options').forEach(menu=>menu.hidden=true);document.querySelectorAll('[data-item-menu]').forEach(button=>button.setAttribute('aria-expanded','false'));}
