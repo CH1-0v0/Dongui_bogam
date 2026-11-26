@@ -5,7 +5,7 @@
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
   "assets": {"directory": "./dist", "binding": "ASSETS", "run_worker_first": true},
-  // MCP connection settings are reserved; retrieval integration is not implemented yet.
+  // AI source retrieval uses MCP first; direct registration remains on the official API.
   "vars": {
     "OPENROUTER_MODEL": "openai/gpt-6-luna",
     "LAW_MCP_URL": "https://mcp.gomdori.app/law",

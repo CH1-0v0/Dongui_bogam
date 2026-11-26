@@ -21,6 +21,14 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
+
+# A request-scoped client follows AI work into existing executor tasks only.
+import contextvars
+MCP_CONTEXT = contextvars.ContextVar('law_mcp', default=None)
+class LawExecutor(concurrent.futures.ThreadPoolExecutor):
+    def submit(self, fn, /, *args, **kwargs):
+        return super().submit(contextvars.copy_context().run, fn, *args, **kwargs)
+
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = 'openai/gpt-6-luna'
 LAW_KINDS = ('법률', '대통령령', '총리령', '부령')
@@ -110,6 +118,15 @@ def request_bytes(url, payload=None, headers=None, timeout=15):
         raise ApiError(f'{service}에 연결하지 못했습니다. 네트워크 허용 도메인과 연결 상태를 확인하세요.') from None
 
 def law_request(endpoint, **params):
+    client = MCP_CONTEXT.get()
+    if client is not None:
+        try:
+            root = client.law(endpoint, params)
+            root.set('retrievalProvider', 'mcp')
+            return root
+        except Exception:
+            pass  # MCP error text may echo credentials; use only the official fallback.
+
     oc = os.environ.get('LAW_API_OC', '')
     if not oc:
         raise ApiError('법령 검색을 위해 서버에 LAW_API_OC를 설정해 주세요.', 503)
@@ -443,7 +460,8 @@ def verify_citation(candidate):
     row, mst = resolve_law(name)
     if candidate.get('mst') and str(candidate['mst']) != mst:
         raise ApiError('법령 버전이 변경되었습니다. 법령을 다시 검색해 선택하세요.', 422)
-    root = law_request('lawService.do', MST=mst)
+    major, _, sub = article.partition('의')
+    root = law_request('lawService.do', MST=mst, **({'JO': major.zfill(4)+(sub or '0').zfill(2)} if MCP_CONTEXT.get() is not None else {}))
     excerpt = extract_article(root, article, paragraph, clause)
     # Confirm the body itself belongs to the searched current law version.
     official_name = root.findtext('.//기본정보/법령명_한글')
@@ -456,7 +474,7 @@ def verify_citation(candidate):
     if clause:
         cite += ' 제' + clause.replace('의', '호의') + ('' if '의' in clause else '호')
     return {'law': text(row, '법령명한글'), 'article': article, 'paragraph': paragraph, 'clause': clause,
-            'cite': cite, 'excerpt': excerpt, 'articleExcerpt': extract_article(root, article),
+            'retrievalProvider': root.get('retrievalProvider', 'api'), 'cite': cite, 'excerpt': excerpt, 'articleExcerpt': extract_article(root, article),
             'paragraphExcerpt': extract_article(root, article, paragraph) if paragraph else '',
             'paragraphSegments': paragraph_segments(article_node(root, article, paragraph)) if paragraph else [], 'verified': True, 'mst': mst,
             'kind': text(row, '법령구분명'), 'effectiveDate': text(row, '시행일자'), 'verifiedAt': dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -472,7 +490,7 @@ def verify_basis(candidate):
     rule = basis_rules().get(code)
     if not rule or rule['effect'] == 'consent':
         raise ApiError('동의 외의 개인정보 보호법 근거를 먼저 선택하세요.', 400)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+    with LawExecutor(max_workers=2) as pool:
         pipa_task = pool.submit(verify_citation, {'law': '개인정보 보호법', **{k: rule[k] for k in ('article', 'paragraph', 'clause')}})
         support_task = pool.submit(verify_citation, {'law': '개인정보 보호법', **rule['support']}) if rule.get('support') else None
         pipa = pipa_task.result()
@@ -496,7 +514,7 @@ def verify_with_basis(candidate):
             raise ApiError('행정규칙만으로는 법령상 처리 근거를 적용할 수 없습니다. 상위 법률·시행령의 구체적 조문을 선택하세요.', 422)
         if compact(candidate.get('law')) in ('개인정보보호법', '개인정보보호법시행령', '개인정보보호법시행규칙'):
             raise ApiError('개인정보 보호법의 포괄 조항이 아니라 해당 업무의 수집·이용·제공을 구체적으로 정한 개별 법률·시행령·시행규칙을 선택하세요.', 422)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        with LawExecutor(max_workers=2) as pool:
             actual_task = pool.submit(verify_citation, candidate)
             basis_task = pool.submit(verify_basis, candidate)
             actual = actual_task.result()
@@ -649,6 +667,7 @@ def ai_candidates(context, discovery_options=None):
         for term in (extra_terms if isinstance(extra_terms, list) else [])[:12]:
             if isinstance(term, str) and 2 <= len(term) <= 30:
                 terms.setdefault(term, 2)
+    if MCP_CONTEXT.get() is not None: MCP_CONTEXT.get().terms = terms
     names = list(dict.fromkeys(normalize_discovery_law(n) for n in names if isinstance(n, str)))
     names = [n for n in names if n and not compact(n).startswith('개인정보보호법')][:config['assistantMaxLaws'] if discovery_options.get('assistant') else config['maxLaws']]
     evidence_pool, rejected = [], []
@@ -808,7 +827,7 @@ def search(context):
             return actual, None
         except ApiError as e:
             return None, {'law': str(candidate.get('law', ''))[:100], **{k: str(candidate.get(k, '')) if re.fullmatch(r'\d{1,4}(?:의\d{1,3})?', str(candidate.get(k, ''))) else '' for k in ['article','paragraph','clause']}, 'message': str(e), 'reason': 'timeout' if e.status == 504 else 'service_unavailable' if e.status >= 500 or e.status == 429 else 'not_verified'}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+    with LawExecutor(max_workers=4) as pool:
         for actual, failure in pool.map(verify_candidate, planned['candidates']):
             if actual:
                 results.append(actual)
@@ -828,7 +847,7 @@ def classify_privacy_items(data):
     key = os.environ.get('OPENROUTER_API_KEY')
     if not key or not os.environ.get('LAW_API_OC'):
         raise ApiError('민감정보 API 분류를 위한 서버 연결 설정을 확인하세요.', 503)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+    with LawExecutor(max_workers=2) as pool:
         sources = list(pool.map(verify_citation, [
             {'law': '개인정보 보호법', 'article': '23', 'paragraph': '', 'clause': ''},
             {'law': '개인정보 보호법 시행령', 'article': '18', 'paragraph': '', 'clause': ''}]))
@@ -910,7 +929,7 @@ def verify_with_additional(data, items):
             with fresh_law_requests(memo):
                 return verify_with_basis({**data, 'basisCode': code})
         return verify_with_basis({**data, 'basisCode': code})
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+    with LawExecutor(max_workers=3) as pool:
         proofs = list(pool.map(verify_extra, codes))
     return {**actual, 'additionalGrounds': proofs}
 
@@ -1123,6 +1142,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length))
             if not isinstance(data, dict):
                 raise ApiError('JSON 객체가 필요합니다.', 400)
+            from backend.law_mcp import LawMcp
+            MCP_CONTEXT.set(LawMcp() if path in ('/api/law/search','/api/work/plan') and os.getenv('LAW_MCP_ENABLED') == 'true' else None)
             demo = data.get('demo') is True
             if demo and not self.server.demo:
                 raise ApiError('이 서버에서는 시연 모드를 사용할 수 없습니다.', 403)

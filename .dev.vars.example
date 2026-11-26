@@ -2,6 +2,6 @@
 OPENROUTER_API_KEY=
 LAW_API_OC=
 
-# Reserved for MCP integration; current code still uses the existing law API.
+# AI source retrieval: MCP first, official API fallback. Direct registration stays API.
 LAW_MCP_URL=https://mcp.gomdori.app/law
 LAW_MCP_ENABLED=true

@@ -10,7 +10,7 @@
     "dev:cloudflare": "npm run build && wrangler dev --ip 0.0.0.0",
     "deploy": "npm run build && wrangler deploy",
     "check:cloudflare": "npm run build && wrangler deploy --dry-run --outdir .worker-build",
-    "test:cloudflare": "node --test tests/worker.test.mjs tests/worker-runtime.cjs tests/work-assistant.test.mjs"
+    "test:cloudflare": "node --test tests/worker.test.mjs tests/worker-runtime.cjs tests/work-assistant.test.mjs tests/law-mcp.test.mjs"
   },
   "dependencies": {
     "fast-xml-parser": "5.12.1"
