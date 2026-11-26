@@ -137,6 +137,11 @@ def kept_period_choice(user_text):
     m=re.search(r'보유\s*및\s*이용기간[:：]\s*(.+?)\.?\s*현재 기간을 그대로 사용합니다',line)
     value=clean(m.group(1),300) if m else ''
     return {'value':value,'sourceId':'user','quote':line[:1500]} if re.search(r'[0-9가-힣A-Za-z]',value) else None
+def period_value(value):
+    """Drop a document label before the period ("진료기록부 : 10년" -> "10년"); start points such as "…부터 10년" stay."""
+    text=clean(value,300)
+    stripped=re.sub(r'^[^:：\d]{1,30}[:：]\s*','',text)
+    return stripped if re.search(r'\d',stripped) else text
 def retention_source_for(value, source_id, sources):
     """A period value the AI could not quote exactly, but which appears in a verified retention provision."""
     v=norm(value)
@@ -146,7 +151,7 @@ def retention_source_for(value, source_id, sources):
 def law_period_suggestion(value, cite, reason):
     """A period quoted from the law whose application is not yet confirmed becomes an editable draft."""
     text=(cite+'에서 찾은 보유기간입니다. ' if cite else '법령 원문에서 찾은 보유기간입니다. ')+(clean(reason,300)+' ' if clean(reason,300) else '')+'적용 대상 서류와 기산점을 확인해 수정해 주세요.'
-    return {'suggestedPeriod':value,'suggestionReason':clean(text,500)}
+    return {'suggestedPeriod':period_value(value),'suggestionReason':clean(text,500)}
 def question_category(q):
     return 'permission' if re.search(r'주민등록번호|주민번호|민감정보|처리.*근거',q) else 'period' if re.search(r'보유|보존|기간|기산점',q) else 'items' if re.search(r'항목|개인정보|계좌|은행|예금주',q) else 'other'
 
@@ -286,7 +291,9 @@ def work_plan(data, api):
             if review.get('verdict') != 'not_supported':law_period_draft = law_period_suggestion(period, source['proof'].get('cite'), review.get('reason'))
             period, period_origin = '', ''
             period_status = review.get('verdict') if review.get('verdict') in ['needs_information','not_supported'] else 'review_incomplete'
-        else:period_status = 'verified'
+        else:
+            period_status = 'verified'
+            period = period_value(period)
     kept = kept_period_choice(user_text)
     if not period and kept:
         period, period_origin, period_status, period_claim, law_period_draft = kept['value'], 'user', 'user_confirmed', kept, None
