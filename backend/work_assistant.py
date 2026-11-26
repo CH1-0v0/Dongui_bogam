@@ -120,6 +120,12 @@ def finish_questions(questions,messages,resident_confirmed=False,items_missing=F
         if limit_reached and not (k=='items' and items_missing or k=='period' and period_missing or '제공받는 기관' in q):continue
         result.append(q)
     return result
+def kept_period_choice(user_text):
+    """The user's explicit "keep this period" choice is a user-entered value and must survive later turns."""
+    line=next((t for t in reversed(str(user_text or '').split('\n')) if re.search(r'보유\s*및\s*이용기간[:：].+현재 기간을 그대로 사용합니다',t)),'')
+    m=re.search(r'보유\s*및\s*이용기간[:：]\s*(.+?)\.?\s*현재 기간을 그대로 사용합니다',line)
+    value=clean(m.group(1),300) if m else ''
+    return {'value':value,'sourceId':'user','quote':line[:1500]} if re.search(r'[0-9가-힣A-Za-z]',value) else None
 def law_period_suggestion(value, cite, reason):
     """A period quoted from the law whose application is not yet confirmed becomes an editable draft."""
     text=(cite+'에서 찾은 보유기간입니다. ' if cite else '법령 원문에서 찾은 보유기간입니다. ')+(clean(reason,300)+' ' if clean(reason,300) else '')+'적용 대상 서류와 기산점을 확인해 수정해 주세요.'
@@ -260,6 +266,9 @@ def work_plan(data, api):
             period, period_origin = '', ''
             period_status = review.get('verdict') if review.get('verdict') in ['needs_information','not_supported'] else 'review_incomplete'
         else:period_status = 'verified'
+    kept = kept_period_choice(user_text)
+    if not period and kept:
+        period, period_origin, period_status, period_claim, law_period_draft = kept['value'], 'user', 'user_confirmed', kept, None
     necessary_drafts = [dict(i,classification=item_class(i)) for i in work_draft(answer,business,user_text)['suggestedItems'] if i['name'] not in removed and not any(a['name']==i['name'] for a in items)]
     review_items = items + necessary_drafts
     grounds = []

@@ -49,6 +49,8 @@ export function linkResidentGrounds(grounds,proposedGrounds=[]){
 // Unconfirmed resident permission: each fact still to check becomes its own O/X question.
 // A period quoted from the law whose application to this work is not yet confirmed: offer it as an editable draft.
 export function lawPeriodSuggestion(value,cite,reason){return {suggestedPeriod:value,suggestionReason:clean((cite?cite+'에서 찾은 보유기간입니다. ':'법령 원문에서 찾은 보유기간입니다. ')+(clean(reason,300)?clean(reason,300)+' ':'')+'적용 대상 서류와 기산점을 확인해 수정해 주세요.',500)};}
+// The user's explicit "keep this period" choice is a user-entered value and must survive later turns.
+export function keptPeriodChoice(userText){const line=String(userText||'').split('\n').reverse().find(t=>/보유\s*및\s*이용기간[:：].+현재 기간을 그대로 사용합니다/.test(t));const value=clean(line?.match(/보유\s*및\s*이용기간[:：]\s*(.+?)\.?\s*현재 기간을 그대로 사용합니다/)?.[1],300);return /[0-9가-힣A-Za-z]/.test(value)?{value,sourceId:'user',quote:line.slice(0,1500)}:null;}
 export function residentChoiceQuestions(check,relevant){return relevant&&check?.status==='needs_information'?[...new Set((check.checks||[]).map(checkToChoiceQuestion).filter(Boolean))].slice(0,3):[];}
 export function residentSummary(check,grounds){
  const general=[...new Set(grounds.filter(g=>!supplementCodes.includes(g.basisCode)&&g.itemNames?.includes('주민등록번호')).map(g=>g.cite))];
@@ -115,7 +117,7 @@ export async function workPlan(api,data){
  const residentLine=[...userText.split('\n')].reverse().find(t=>/주민(?:등록)?번호/.test(t));
  const requestedResident=residentLine&&(/주민(?:등록)?번호.{0,40}(?:수집(?:해야|하고|합니다|할|하려|이필요)|처리(?:해야|할예정|할계획|합니다|한다|하고|하려|할것|할거|할게)|사용(?:합니다|한다|하고|하려|할)|필수|필요|추가|포함|가능|되나|될까|되는지|할수있|받아도|받을수)/.test(norm(residentLine))||/주민(?:등록)?번호/.test(manual.items||''))&&!/제외|삭제|불필요|안\s*(?:수집|처리)|(?:수집|처리|사용)(?:하지|할필요가)\s*(?:않|없)/.test(norm(residentLine))?{name:'주민등록번호',required:true,sourceId:'user',quote:residentLine.slice(0,1500)}:null;
  const proposed=[...(requestedResident?[requestedResident]:[]),...previous.items.filter(i=>!removed.has(i.name)&&(i.sourceId==='user'||supported(i.name,i))),...answer.items.filter(i=>i&&clean(i.name,100)&&supported(clean(i.name,100),i))].map(i=>classification(i.name)==='rnn'?{...i,name:'주민등록번호'}:i);
- const periodClaim=clean(answer.period.value,300)&&supported(clean(answer.period.value,300),answer.period)?answer.period:previous.period&&(previous.period.sourceId==='user'||supported(previous.period.value,previous.period))?previous.period:answer.period;
+ let periodClaim=clean(answer.period.value,300)&&supported(clean(answer.period.value,300),answer.period)?answer.period:previous.period&&(previous.period.sourceId==='user'||supported(previous.period.value,previous.period))?previous.period:answer.period;
  const itemClass=i=>{const value=classification(i.name);if(value!=='general')return value;const name=norm(i.name),source=sources.find(s=>s.id===i.sourceId);const medical=source?.proof?.law?.startsWith('의료법')||/진료|의료기관|환자/.test(business);const identity=/^(?:환자(?:의)?)?(?:성명|이름|주소|연락처|전화번호|휴대전화번호|생년월일|성별|연령|나이|직업|국적|환자번호|등록번호)$/.test(name);return medical&&!identity?'sensitive':'general';};
  const items=[...new Map(proposed.map(i=>[clean(i.name,100),{name:clean(i.name,100),required:i.required===true,classification:itemClass(i),sourceId:i.sourceId,origin:i.sourceId==='user'?'user':'law'}])).values()];
  let periodStatus=clean(periodClaim.value,300)?'quote_not_verified':'not_found';
@@ -124,6 +126,8 @@ export async function workPlan(api,data){
  let periodOrigin=period?(periodClaim.sourceId==='user'?'user':'law'):'';
  let lawPeriodDraft=null;
  if(period&&periodOrigin==='law'){const source=sources.find(s=>s.id===periodClaim.sourceId);const review=await api.ai(policy.periodReview,{business,messages,period,evidence:source?.text,verifiedSources:material.sources},1000);if(review.verdict!=='possible'){if(review.verdict!=='not_supported')lawPeriodDraft=lawPeriodSuggestion(period,source?.proof?.cite,review.reason);period='';periodOrigin='';periodStatus=['needs_information','not_supported'].includes(review.verdict)?review.verdict:'review_incomplete';}else periodStatus='verified';}
+ const kept=keptPeriodChoice(userText);
+ if(!period&&kept){period=kept.value;periodOrigin='user';periodStatus='user_confirmed';periodClaim=kept;lawPeriodDraft=null;}
  const draftResult={...workDraft(answer,business,userText),...(lawPeriodDraft||{})};
  const necessaryDrafts=workDraft(answer,business,userText).suggestedItems.map(i=>({...i,classification:itemClass(i)})).filter(i=>i.classification!=='rnn'&&!removed.has(i.name)&&!items.some(a=>a.name===i.name));
  const reviewItems=[...items,...necessaryDrafts];

@@ -147,5 +147,11 @@ class LawPeriodDraftTests(unittest.TestCase):
         result=WorkAssistantTests.run_plan(WorkAssistantTests(),period_verdict='not_supported')
         self.assertEqual(result['suggestedPeriod'],'')
 
+class KeptPeriodTests(unittest.TestCase):
+    def test_keep_choice_is_read_as_user_period(self):
+        from backend.work_assistant import kept_period_choice
+        self.assertEqual(kept_period_choice('답변: 진료기록부만 포함\n보유 및 이용기간: 10년. 현재 기간을 그대로 사용합니다.')['value'],'10년')
+        self.assertIsNone(kept_period_choice('보유 및 이용기간: . 현재 기간을 그대로 사용합니다.'))
+
 if __name__=='__main__':
     unittest.main()
