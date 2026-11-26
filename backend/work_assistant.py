@@ -99,6 +99,27 @@ def resident_summary(check,grounds):
     if check.get('status')=='unavailable':return '주민등록번호 근거가 없다는 판단이 아니라, 원문 조회를 완료하지 못한 상태입니다.'
     checks=check.get('checks') or []
     return '주민등록번호의 구체적 허용 근거'+('('+check['cite']+')' if check.get('cite') else '')+'가 현재 업무에 적용되는지 확정하지 못했습니다.'+(' 아래 O/X 질문에 답해 주시면 다시 확인합니다.' if checks else '')
+FOLLOW_UP_LIMIT=3
+QUESTIONS_DONE_NOTE=" 추가로 확인할 질문은 없습니다. 아래 '이 내용으로 계속'을 누르면 문서 작성으로 이동합니다."
+def question_key(q):
+    return re.sub(r'[\s?？.]','',re.sub(r'\s*O\s*[:：].*$','',str(q or ''),flags=re.S))
+def finish_questions(questions,messages,resident_confirmed=False,items_missing=False,period_missing=False):
+    """An answered question is not asked again; after three answers only questions filling an empty field remain."""
+    users=[str(m.get('content') or '') for m in messages if m.get('role')=='user']
+    answered={question_key(m) for t in users for m in re.findall(r'질문:\s*([^\n]+)',t)}
+    period_answered=any(re.search(r'보유 및 이용기간[:：].*(?:그대로 사용|변경)',t) for t in users)
+    items_answered=any(re.search(r'개인정보 항목[:：].*(?:그대로 사용|변경)',t) for t in users)
+    limit_reached=len(users)-1>=FOLLOW_UP_LIMIT
+    result=[]
+    for q in questions:
+        k=question_category(q)
+        if question_key(q) in answered:continue
+        if resident_confirmed and re.search(r'원천징수의무자|주민(?:등록)?번호|불가피',q):continue
+        if k=='period' and period_answered and not period_missing:continue
+        if k=='items' and items_answered and not items_missing:continue
+        if limit_reached and not (k=='items' and items_missing or k=='period' and period_missing or '제공받는 기관' in q):continue
+        result.append(q)
+    return result
 def question_category(q):
     return 'permission' if re.search(r'주민등록번호|주민번호|민감정보|처리.*근거',q) else 'period' if re.search(r'보유|보존|기간|기산점',q) else 'items' if re.search(r'항목|개인정보|계좌|은행|예금주',q) else 'other'
 
@@ -276,5 +297,6 @@ def work_plan(data, api):
     period_settled=bool(period and period_origin in ['law','user'])
     items_settled=bool(manual['items'] or any(i['sourceId']=='user' and i['classification']!='rnn' for i in items))
     asked_resident=bool(requested_resident or re.search(r'근거.*없|정말.*근거',recent_users[-1]['content'] if recent_users else ''))
+    final_questions=finish_questions((resident_choice_questions(resident_check,bool(requested_resident or special_requested))+([] if asks_ground else consolidate_questions([q for q in questions if not (question_category(q)=='permission' and (not special_requested or known_resident_use)) and not (period_settled and question_category(q)=='period') and not (items_settled and question_category(q)=='items') and not ('기타소득' in user_text and re.search('사업소득|소득.*구분|기타소득',q)) and not ((requested_resident or any(classification(i['name'])=='rnn' for i in previous['items'])) and re.search('주민등록번호|주민번호',q))])))[:5],messages,resident_check['status']=='confirmed',not allowed and not necessary_drafts and not retained,not period and not retained_period and not work_draft(answer,business,user_text)['suggestedPeriod'])
     import time
-    return {**work_draft(answer,business,user_text),'suggestedItems':necessary_drafts,'proposedGrounds':proposed_grounds,'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+necessary_drafts)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed+necessary_drafts)],'reply':((resident_summary(resident_check,grounds)+' ') if asked_resident else '')+'개인정보 항목 '+str(len({i['name'] for i in allowed+necessary_drafts+retained}))+'개와 보유기간을 오른쪽에 정리했습니다.'+('' if requested_resident and resident_check['status']=='confirmed' else applicable_ground_summary(grounds)),'questions':(resident_choice_questions(resident_check,bool(requested_resident or special_requested))+([] if asks_ground else consolidate_questions([q for q in questions if not (question_category(q)=='permission' and (not special_requested or known_resident_use)) and not (period_settled and question_category(q)=='period') and not (items_settled and question_category(q)=='items') and not ('기타소득' in user_text and re.search('사업소득|소득.*구분|기타소득',q)) and not ((requested_resident or any(classification(i['name'])=='rnn' for i in previous['items'])) and re.search('주민등록번호|주민번호',q))])))[:5],'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}
+    return {**work_draft(answer,business,user_text),'suggestedItems':necessary_drafts,'proposedGrounds':proposed_grounds,'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+necessary_drafts)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed+necessary_drafts)],'reply':((resident_summary(resident_check,grounds)+' ') if asked_resident else '')+'개인정보 항목 '+str(len({i['name'] for i in allowed+necessary_drafts+retained}))+'개와 보유기간을 오른쪽에 정리했습니다.'+('' if requested_resident and resident_check['status']=='confirmed' else applicable_ground_summary(grounds))+('' if final_questions else QUESTIONS_DONE_NOTE),'questions':final_questions,'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}

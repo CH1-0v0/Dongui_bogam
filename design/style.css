@@ -550,3 +550,8 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .work-law-plan ul{margin:0;padding-left:18px}
 .work-law-plan li{margin:2px 0}
 .work-session-note{font-size:13px;margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
+.work-ai-note{display:flex;align-items:center;gap:12px;margin:4px 0 24px;padding:14px 18px;background:var(--warn-bg);border:1px solid color-mix(in srgb,var(--warn) 22%,transparent);border-left:4px solid var(--warn);border-radius:12px;color:var(--warn)}
+.work-ai-note p{margin:0;display:flex;flex-wrap:wrap;column-gap:8px;row-gap:2px;font-size:14px;line-height:1.5}
+.work-ai-note strong{font-weight:700}
+.work-ai-note span:not(.work-ai-note-icon){color:var(--ink,#1f2937);opacity:.85}
+.work-ai-note-icon{flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--warn);color:#fff;font-weight:800;font-size:14px}
