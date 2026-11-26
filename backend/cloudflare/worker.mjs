@@ -46,7 +46,7 @@ export default {async fetch(request,env,ctx){
    if(!(await env.API_LIMITER.limit({key:ip})).success)return json({error:'요청 한도에 도달했습니다. 잠시 후 다시 시도하세요.'},429,{'Retry-After':'60'});
    if(aiPaths.has(path)&&!(await env.AI_LIMITER.limit({key:ip})).success)return json({error:'분당 AI 요청 한도에 도달했습니다. 잠시 후 다시 시도하세요.'},429,{'Retry-After':'60'});
    const data=await requestData(request,path==='/api/work/plan'?98304:24000);if(data.demo===true)return json({error:'운영 서버에서는 시연 모드를 사용할 수 없습니다.'},403);
-   const api=new LegalApi(env,fetch,ctx,url.origin);api.preferMcp=['/api/work/plan','/api/law/search'].includes(path);
+   const api=new LegalApi(env,fetch,ctx,url.origin);api.allowMcp=['/api/work/plan','/api/law/search'].includes(path);
    return json(await routes[path](api,data));
   }
   // Defense in depth: even if dist/ is misbuilt, sensitive paths cannot reach the asset binding.

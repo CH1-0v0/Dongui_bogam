@@ -16,11 +16,17 @@ class McpTests(unittest.TestCase):
     def test_reject_incomplete(self):
         for raw in [BODY+'응답이 잘렸습니다.',BODY.replace('합성법','다른법'),BODY.replace('20260101','20250101')]:
             with self.assertRaises(ValueError):law_xml(raw,'합성법','20260101','10')
+    def test_api_priority(self):
+        client=LawMcp();token=server.MCP_CONTEXT.set(client)
+        try:
+            with patch.object(client,'law',side_effect=AssertionError('MCP should not run')),patch.dict(server.os.environ,{'LAW_API_OC':'synthetic'}),patch.object(server,'request_bytes',return_value=b'<LawSearch><totalCnt>0</totalCnt></LawSearch>') as api:
+                server.law_request('lawSearch.do',query='API priority');api.assert_called_once()
+        finally:server.MCP_CONTEXT.reset(token)
     def test_fallback(self):
         client=LawMcp();token=server.MCP_CONTEXT.set(client)
         try:
-            with patch.object(client,'law',side_effect=ValueError('secret upstream')),patch.dict(server.os.environ,{'LAW_API_OC':'synthetic'}),patch.object(server,'request_bytes',return_value=b'<LawSearch><totalCnt>0</totalCnt></LawSearch>') as api:
-                server.law_request('lawSearch.do',query='합성fallback');api.assert_called_once()
+            with patch.object(server,'api_law_request',side_effect=server.ApiError('synthetic outage',503)),patch.object(client,'law',return_value=search_xml(SEARCH,'합성법','20261126')) as mcp:
+                root=server.law_request('lawSearch.do',query='合成fallback');self.assertEqual(root.get('retrievalProvider'),'mcp');mcp.assert_called_once()
         finally:server.MCP_CONTEXT.reset(token)
     def test_toc(self):
         client=LawMcp();client.rows['123']=('합성법','20260101');client.terms={'기록':2}

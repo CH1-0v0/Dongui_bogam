@@ -135,7 +135,19 @@ export class LegalApi {
   try{return await readLimited(response);}catch(error){if(error instanceof ApiError)throw error;const failure=new ApiError(service+' 응답을 받는 중 연결이 끊겼습니다. 잠시 후 다시 시도하세요.',502);if(service==='AI 서비스')failure.requestKind='stream';throw failure;}
  }
  async law(endpoint,params={}){
-  if(this.preferMcp&&this.env.LAW_MCP_ENABLED==='true'){this.mcp??=new LawMcp(this.env,(url,options)=>{this.reserveRequest();const send=this.fetcher;return send(url,options);});this.mcp.terms=this.mcpTerms;this.mcp.maxArticles=this.mcpArticleLimit||4;try{const root=parseXml(await this.mcp.law(endpoint,params,today()));root.retrievalProvider='mcp';return root;}catch{/* Incomplete or unavailable MCP results use the original official API. */}}
+  try{const root=await this.apiLaw(endpoint,params);
+   if(endpoint==='lawSearch.do'){this.apiLawRows??=new Map();for(const row of descendants(root,'law'))if(compact(text(row,'법령명한글'))===compact(params.query)&&this.eligible(row,'law'))this.apiLawRows.set(text(row,'법령일련번호'),{name:text(row,'법령명한글'),date:text(row,'시행일자')});}
+   if(this.allowMcp&&endpoint==='lawService.do'&&params.JO){const code=String(params.JO),article=String(Number(code.slice(0,4)))+(Number(code.slice(4))?'의'+Number(code.slice(4)):'');extract(root,article);}
+   return root;
+  }catch(error){
+   if(!(error instanceof ApiError)||error.requestBudget||!this.allowMcp||this.env.LAW_MCP_ENABLED!=='true')throw error;
+   this.mcp??=new LawMcp(this.env,(url,options)=>{this.reserveRequest();const send=this.fetcher;return send(url,options);});
+   this.mcp.terms=this.mcpTerms;this.mcp.maxArticles=this.mcpArticleLimit||4;
+   for(const [mst,row] of this.apiLawRows||[])this.mcp.rows.set(mst,row);
+   try{const root=parseXml(await this.mcp.law(endpoint,params,today()));root.retrievalProvider='mcp';return root;}catch{throw error;}
+  }
+ }
+ async apiLaw(endpoint,params={}){
   const oc=this.env.LAW_API_OC;if(!oc)fail('법령 검색을 위해 서버에 LAW_API_OC를 설정해 주세요.',503);
   const query=new URLSearchParams({OC:oc,target:'law',type:'JSON',...params});query.sort();
   // Hash credentials and parameters before using any persistent cache key. The day
@@ -148,7 +160,7 @@ export class LegalApi {
   const remember=(raw,root,expires)=>{while(lawCache.size>=16||([...lawCache.values()].reduce((sum,v)=>sum+v.bytes,0)+raw.length*2>16_000_000&&lawCache.size))lawCache.delete(lawCache.keys().next().value);if(raw.length*2<=16_000_000)lawCache.set(key,{root,bytes:raw.length*2,expires});};
   const pending=(async()=>{
    const edge=globalThis.caches?.default;
-   const canUseEdge=()=>!this.preferMcp&&edge&&this.cacheOperations<24&&this.calls+this.cacheOperations<46;
+   const canUseEdge=()=>!this.allowMcp&&edge&&this.cacheOperations<24&&this.calls+this.cacheOperations<46;
    if(!this.forceFresh&&canUseEdge()){this.cacheOperations++;try{const cached=await edge.match(cacheRequest);if(cached&&Number(cached.headers.get('X-Law-Expires'))>Date.now()){const raw=await readLimited(cached);const root=parseLaw(raw);if(!officialLawPayload(root))throw Error('invalid cached law');remember(raw,root,Number(cached.headers.get('X-Law-Expires')));return root;}}catch{}}
    const raw=await this.upstream('https://www.law.go.kr/DRF/'+endpoint+'?'+query);const root=parseLaw(raw);
    // Cache only recognized successful public-law payloads, never errors, user

@@ -2,6 +2,6 @@
 OPENROUTER_API_KEY=
 LAW_API_OC=
 
-# AI source retrieval: MCP first, official API fallback. Direct registration stays API.
+# AI source retrieval: Official API first, MCP fallback. Direct registration stays API.
 LAW_MCP_URL=https://mcp.gomdori.app/law
 LAW_MCP_ENABLED=true

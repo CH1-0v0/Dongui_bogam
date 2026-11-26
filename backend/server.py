@@ -119,14 +119,28 @@ def request_bytes(url, payload=None, headers=None, timeout=15):
 
 def law_request(endpoint, **params):
     client = MCP_CONTEXT.get()
-    if client is not None:
+    try:
+        root = api_law_request(endpoint, **params)
+        if client is not None:
+            with client.lock:
+                if endpoint == 'lawSearch.do':
+                    for row in root.findall('.//law'):
+                        if compact(text(row,'법령명한글')) == compact(params.get('query','')) and re.fullmatch(r'\d{8}',text(row,'시행일자')):
+                            client.rows[text(row,'법령일련번호')] = (text(row,'법령명한글'),text(row,'시행일자'))
+            if endpoint == 'lawService.do' and params.get('JO'):
+                code = str(params['JO'])
+                extract_article(root, str(int(code[:4]))+('의'+str(int(code[4:])) if int(code[4:]) else ''))
+        return root
+    except ApiError as error:
+        if client is None:raise
         try:
             root = client.law(endpoint, params)
             root.set('retrievalProvider', 'mcp')
             return root
         except Exception:
-            pass  # MCP error text may echo credentials; use only the official fallback.
+            raise error from None
 
+def api_law_request(endpoint, **params):
     oc = os.environ.get('LAW_API_OC', '')
     if not oc:
         raise ApiError('법령 검색을 위해 서버에 LAW_API_OC를 설정해 주세요.', 503)
