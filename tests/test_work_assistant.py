@@ -116,3 +116,25 @@ class ProposedGroundTests(unittest.TestCase):
         self.assertEqual(result['grounds'],[])
         self.assertEqual(result['proposedGrounds'][0]['cite'],'합성법 제10조')
         self.assertTrue(result['proposedGrounds'][0]['applicationPending'])
+
+class ResidentGroundLinkTests(unittest.TestCase):
+    def test_confirmed_resident_permission_joins_same_work_general_basis(self):
+        from backend.work_assistant import link_resident_grounds, resident_summary
+        grounds=[{'law':'합성지급법','cite':'합성지급법 제10조','basisCode':'statutory','itemNames':['성명']},{'law':'합성지급법 시행령','cite':'합성지급법 시행령 제20조','basisCode':'residentLaw','itemNames':['주민등록번호']},{'law':'다른법','cite':'다른법 제1조','basisCode':'statutory','itemNames':['성명']}]
+        proposed=[{'law':'합성지급법','cite':'합성지급법 제10조','basisCode':'statutory','itemNames':['주민등록번호']}]
+        link_resident_grounds(grounds,proposed)
+        self.assertEqual(grounds[0]['itemNames'],['성명','주민등록번호'])
+        self.assertEqual(grounds[2]['itemNames'],['성명'])
+        self.assertEqual(proposed,[])
+        summary=resident_summary({'status':'confirmed','cite':'합성지급법 시행령 제20조'},grounds)
+        self.assertTrue(summary.startswith('주민등록번호는 처리할 수 있습니다'))
+        self.assertIn('합성지급법 제10조',summary)
+
+    def test_unconfirmed_resident_permission_does_not_link(self):
+        from backend.work_assistant import link_resident_grounds
+        grounds=[{'law':'합성지급법','cite':'합성지급법 제10조','basisCode':'statutory','itemNames':['성명']}]
+        link_resident_grounds(grounds)
+        self.assertEqual(grounds[0]['itemNames'],['성명'])
+
+if __name__=='__main__':
+    unittest.main()

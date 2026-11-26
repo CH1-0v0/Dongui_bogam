@@ -9,6 +9,7 @@ function workStale(plan){return !plan?.checkedAt||Date.now()-plan.checkedAt>3000
 function workText(value){return safe(value).replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');}
 function workQuestionTitle(text){return /주민등록번호|민감정보|처리.*근거/.test(text)?'주민등록번호·민감정보 처리 근거':/보유|보존|기간/.test(text)?'보유 및 이용기간':/기관|제공받/.test(text)?'기관 확인':/항목|개인정보|계좌|은행|예금주/.test(text)?'개인정보 항목':'추가 확인';}
 function workPlanItems(p){return [...new Map([...(p?.items||[]),...(p?.retainedItems||[]).map(i=>({...i,pending:true}))].map(i=>[i.name,i])).values()];}
+function workChoiceOptions(q){const text=String(q||'').trim(),pair=text.match(/O\s*[:：]\s*(.+?)\s*\/\s*X\s*[:：]\s*(.+?)(?:\s+직접 입력|$)/);if(pair)return [pair[1].trim(),pair[2].trim()];const either=text.match(/^(.+?)(?:인가요|입니까|일까요|인지요)[?？]?\s*,?\s*(?:아니면|또는|혹은)\s+(.+?)(?:인가요|입니까|일까요|인지요)[?？]?$/);if(!either)return null;const topic=either[1].match(/^(.*?[은는이가])\s+(.+)$/);return [(topic?topic[2]:either[1]).trim(),either[2].trim()];}
 function workBinaryKind(q,title){const p=workSession?.plan;if(title==='보유 및 이용기간')return p?.period?'period':'';if(title==='개인정보 항목')return workPlanItems(p).length?'items':'';return !/어느|어떤|무엇|누구|얼마|언제|알려|입력/.test(q)&&/인가요|맞나요|있나요|하나요|할까요/.test(q)?'generic':'';}
 function workMessage(message,interactive=false){
  const body=message.content.split(/\n+/).filter(Boolean).map(line=>`<p>${workText(line)}</p>`).join('');const groups=new Map();
@@ -18,7 +19,7 @@ function workMessage(message,interactive=false){
  const questions=[...groups].map(([title,rows])=>{let q=rows.size>1?(title==='보유 및 이용기간'?'보유·이용기간은 초안대로 적용할까요?':title==='개인정보 항목'?'초안의 개인정보 항목을 변경할까요?':[...rows].sort((a,b)=>b.length-a.length)[0]):[...rows][0];const kind=interactive?workBinaryKind(q,title):'';const selected=workSession?.choices?.[kind==='generic'?q:kind]?.choice;
  if(interactive&&title==='보유 및 이용기간'&&!workSession.plan?.period)q='보유 및 이용기간을 입력해 주세요.';
  if(interactive&&title==='개인정보 항목'&&!workPlanItems(workSession.plan).length)q='수집할 개인정보 항목을 입력해 주세요.';
- const labels=kind==='period'?['O · 초안 기간 유지','X · 기간 변경']:kind==='items'?['O · 항목 변경','X · 현재 항목 유지']:['O · 예','X · 아니요'];
+ const options=kind==='generic'?workChoiceOptions(q):null;const labels=kind==='period'?['O · 초안 기간 유지','X · 기간 변경']:kind==='items'?['O · 항목 변경','X · 현재 항목 유지']:options?['O · '+options[0],'X · '+options[1]]:['O · 예, 맞습니다','X · 아니요, 아닙니다'];
  return `<li><strong>${title}</strong><p>${workText(q)}</p>${title==='개인정보 항목'?workItemsSummary(message.items||workPlanItems(workSession?.plan)):''}${kind?`<div class="work-choice-buttons" role="group" aria-label="${safe(title)} O/X 답변">${['O','X'].map((choice,i)=>`<button type="button" data-work-choice="${choice}" data-work-choice-kind="${kind}" data-work-question="${safe(q)}" aria-pressed="${selected===choice}">${labels[i]}</button>`).join('')}</div>`:''}</li>`;}).join('');return `${body}${questions?`<ol class="work-questions">${questions}</ol>${interactive?'<p class="muted">각 질문의 답을 선택한 뒤 아래에서 한 번에 보내세요.</p>':''}`:''}`;
 }
 function workGroundsSummary(plan,stale=false){
@@ -109,6 +110,6 @@ async function submitWorkReply(text=''){
  s.log.push({role:'user',content:combined});s.messages.push({role:'user',content:combined});const last=[...s.log].reverse().find(m=>m.role==='assistant');const questions=(last?.questions||[]).filter(q=>!kinds.has(workBinaryKind(q,workQuestionTitle(q))));s.plan.questions=questions;s.log.push({role:'assistant',content:'선택한 내용을 그대로 유지했습니다.',questions,items:workPlanItems(s.plan).map(i=>({...i}))});s.messages.push({role:'assistant',content:'항목·기간의 유지 답변을 반영했습니다.'});s.choices={};s.inputText='';s.error='';renderAssistant();
 }
 document.addEventListener('click',e=>{const button=e.target.closest('[data-work-choice]');if(!button||!workSession||workSession.busy)return;const s=workSession,choice=button.dataset.workChoice,kind=button.dataset.workChoiceKind,p=s.plan,q=button.dataset.workQuestion;const keep=kind==='period'&&choice==='O'||kind==='items'&&choice==='X';
- const text=kind==='period'?(keep?`보유 및 이용기간: ${p.period}. 현재 기간을 그대로 사용합니다.`:'보유 및 이용기간을 변경합니다.'):kind==='items'?(keep?`개인정보 항목: ${workPlanItems(p).map(i=>i.name).join(', ')}. 현재 항목을 그대로 사용합니다.`:'개인정보 항목을 변경합니다.'):`질문: ${q}\n답변: ${choice==='O'?'O (예)':'X (아니요)'}`;
+ const text=kind==='period'?(keep?`보유 및 이용기간: ${p.period}. 현재 기간을 그대로 사용합니다.`:'보유 및 이용기간을 변경합니다.'):kind==='items'?(keep?`개인정보 항목: ${workPlanItems(p).map(i=>i.name).join(', ')}. 현재 항목을 그대로 사용합니다.`:'개인정보 항목을 변경합니다.'):(()=>{const options=workChoiceOptions(q);return `질문: ${q}\n답변: ${options?(choice==='O'?options[0]:options[1]):choice==='O'?'O (예, 맞습니다)':'X (아니요, 아닙니다)'}`;})();
  s.choices||={};const key=kind==='generic'?q:kind;s.choices[key]={choice,kind,keep,text};s.error='';renderAssistant();if(!keep){const input=document.querySelector('[data-work-reply] textarea');input?.focus();}
 });

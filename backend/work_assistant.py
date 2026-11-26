@@ -55,6 +55,32 @@ def applicable_ground_summary(grounds):
     general=list(dict.fromkeys(g['cite'] for g in grounds if g['basisCode'] not in ['residentLaw','sensitiveLaw','uniqueLaw'] and g.get('itemNames')))
     return ' 일반 수집·이용에 적용 예정인 근거: '+', '.join(general)+'.' if general else ' 일반 수집·이용에 적용할 근거는 현재 조회 결과에서 아직 확인하지 못했습니다.'
 
+SUPPLEMENT_CODES=['residentLaw','sensitiveLaw','uniqueLaw']
+def law_family(law):
+    return re.sub(r'(?:시행령|시행규칙)$','',norm(law))
+def link_resident_grounds(grounds,proposed_grounds=None):
+    """A confirmed RNN permission plus a confirmed general basis of the same work covers the RNN item."""
+    proposed_grounds=proposed_grounds if proposed_grounds is not None else []
+    resident=[g for g in grounds if g.get('basisCode')=='residentLaw' and '주민등록번호' in g.get('itemNames',[])]
+    if not resident:return grounds
+    general=[g for g in grounds if g.get('basisCode') not in SUPPLEMENT_CODES and g.get('itemNames')]
+    if any('주민등록번호' in g['itemNames'] for g in general):return grounds
+    families={law_family(g.get('law')) for g in resident}
+    same=[g for g in general if law_family(g.get('law')) in families]
+    targets=same or general
+    for g in targets:g['itemNames']=g['itemNames']+['주민등록번호']
+    linked={g.get('cite') for g in targets}
+    for g in proposed_grounds:
+        if g.get('cite') in linked and g.get('basisCode') not in SUPPLEMENT_CODES:g['itemNames']=[n for n in g['itemNames'] if n!='주민등록번호']
+    proposed_grounds[:]=[g for g in proposed_grounds if g.get('itemNames')]
+    return grounds
+def resident_summary(check,grounds):
+    general=list(dict.fromkeys(g.get('cite') for g in grounds if g.get('basisCode') not in SUPPLEMENT_CODES and '주민등록번호' in g.get('itemNames',[])))
+    if check.get('status')=='confirmed':
+        return '주민등록번호는 처리할 수 있습니다. 구체적 허용 근거를 확인했습니다: '+str(check.get('cite',''))+('. 일반 수집·이용 근거: '+', '.join(general)+'. 두 근거를 함께 입력했습니다.' if general else '. 일반 수집·이용 근거는 3단계에서 함께 확인해 주세요.')
+    if check.get('status')=='unavailable':return '주민등록번호 근거가 없다는 판단이 아니라, 원문 조회를 완료하지 못한 상태입니다.'
+    checks=check.get('checks') or []
+    return '주민등록번호의 구체적 허용 근거'+('('+check['cite']+')' if check.get('cite') else '')+'가 현재 업무에 적용되는지 확정하지 못했습니다.'+(' 확인할 사항: '+', '.join(checks[:3])+'.' if checks else '')
 def question_category(q):
     return 'permission' if re.search(r'주민등록번호|주민번호|민감정보|처리.*근거',q) else 'period' if re.search(r'보유|보존|기간|기산점',q) else 'items' if re.search(r'항목|개인정보|계좌|은행|예금주',q) else 'other'
 
@@ -165,7 +191,7 @@ def work_plan(data, api):
     removed = {i.get('name') for i in answer.get('removeItems',[]) if isinstance(i,dict) and norm(clean(i.get('quote'),500)) in norm(user_text) and norm(i.get('name')).replace('주민번호','주민등록번호') in norm(i.get('quote')).replace('주민번호','주민등록번호') and re.search(r'제외|삭제|않|안\s*(?:수집|처리|제공)|불필요',i.get('quote',''))} if isinstance(answer.get('removeItems'),list) else set()
     removed={'주민등록번호' if classification(n)=='rnn' else n for n in removed}
     resident_line=next((t for t in reversed(user_text.split('\n')) if re.search(r'주민(?:등록)?번호',t)), '')
-    requested_resident={'name':'주민등록번호','required':True,'sourceId':'user','quote':resident_line[:1500]} if (re.search(r'주민(?:등록)?번호.{0,40}(?:수집(?:해야|하고|합니다|할|하려|이필요)|처리(?:해야|할예정|할계획|합니다|한다|하고|하려|할것|할거|할게)|사용(?:합니다|한다|하고|하려|할)|필수|필요|추가|포함)',norm(resident_line)) or re.search(r'주민(?:등록)?번호',manual['items'])) and not re.search(r'제외|삭제|불필요|안\s*(?:수집|처리)|(?:수집|처리|사용)(?:하지|할필요가)\s*(?:않|없)',norm(resident_line)) else None
+    requested_resident={'name':'주민등록번호','required':True,'sourceId':'user','quote':resident_line[:1500]} if (re.search(r'주민(?:등록)?번호.{0,40}(?:수집(?:해야|하고|합니다|할|하려|이필요)|처리(?:해야|할예정|할계획|합니다|한다|하고|하려|할것|할거|할게)|사용(?:합니다|한다|하고|하려|할)|필수|필요|추가|포함|가능|되나|될까|되는지|할수있|받아도|받을수)',norm(resident_line)) or re.search(r'주민(?:등록)?번호',manual['items'])) and not re.search(r'제외|삭제|불필요|안\s*(?:수집|처리)|(?:수집|처리|사용)(?:하지|할필요가)\s*(?:않|없)',norm(resident_line)) else None
     proposed = ([requested_resident] if requested_resident else []) + [i for i in previous['items'] if i['name'] not in removed and (i['sourceId']=='user' or supported(i['name'],i))] + [i for i in answer['items'] if isinstance(i,dict) and clean(i.get('name'),100) and supported(clean(i.get('name'),100),i)]
     proposed=[dict(i,name='주민등록번호') if classification(i['name'])=='rnn' else i for i in proposed]
     def item_class(i):
@@ -209,6 +235,7 @@ def work_plan(data, api):
         if pending:proposed_grounds.append(dict(proof,itemNames=pending,applicationPending=True))
         names = [i['name'] for i in review['items'] if i['verdict']=='possible']
         if names:grounds.append(dict(proof,itemNames=names))
+    link_resident_grounds(grounds,proposed_grounds)
     allowed = [i for i in items if i['classification']!='rnn' or (any(g['basisCode'] not in ['residentLaw','sensitiveLaw','uniqueLaw'] and i['name'] in g['itemNames'] for g in grounds) and any(g['basisCode']=='residentLaw' and i['name'] in g['itemNames'] for g in grounds))]
     for g in grounds:
         pending = [n for n in g['itemNames'] if not any(i['name']==n for i in allowed) and any(i['name']==n for i in items)]
@@ -231,4 +258,4 @@ def work_plan(data, api):
     items_settled=bool(manual['items'] or any(i['sourceId']=='user' and i['classification']!='rnn' for i in items))
     asked_resident=bool(requested_resident or re.search(r'근거.*없|정말.*근거',recent_users[-1]['content'] if recent_users else ''))
     import time
-    return {**work_draft(answer,business,user_text),'suggestedItems':necessary_drafts,'proposedGrounds':proposed_grounds,'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+necessary_drafts)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed+necessary_drafts)],'reply':('항목 총 '+str(len({i['name'] for i in allowed+necessary_drafts+retained}))+'개를 정리했습니다. 입력·원문 확인 '+str(len(allowed))+'개, AI 초안 '+str(len(necessary_drafts))+'개, 재확인 '+str(len(retained))+'개입니다.'+applicable_ground_summary(grounds)+(' 주민등록번호 허용 근거를 확인했습니다: '+resident_check.get('cite','') if asked_resident and resident_check['status']=='confirmed' else ' 주민등록번호 근거가 없다는 판단이 아니라, 원문 조회를 완료하지 못한 상태입니다.' if asked_resident and resident_check['status']=='unavailable' else ' 주민등록번호 허용 규정의 현재 업무 적용 여부를 추가로 확인하고 있습니다.' if asked_resident else '')),'questions':[] if asks_ground else consolidate_questions([q for q in questions if not (question_category(q)=='permission' and (not special_requested or known_resident_use)) and not (period_settled and question_category(q)=='period') and not (items_settled and question_category(q)=='items') and not ('기타소득' in user_text and re.search('사업소득|소득.*구분|기타소득',q)) and not ((requested_resident or any(classification(i['name'])=='rnn' for i in previous['items'])) and re.search('주민등록번호|주민번호',q))]),'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}
+    return {**work_draft(answer,business,user_text),'suggestedItems':necessary_drafts,'proposedGrounds':proposed_grounds,'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+necessary_drafts)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed+necessary_drafts)],'reply':((resident_summary(resident_check,grounds)+' ') if asked_resident else '')+'항목 총 '+str(len({i['name'] for i in allowed+necessary_drafts+retained}))+'개를 정리했습니다. 입력·원문 확인 '+str(len(allowed))+'개, AI 초안 '+str(len(necessary_drafts))+'개, 재확인 '+str(len(retained))+'개입니다.'+applicable_ground_summary(grounds),'questions':[] if asks_ground else consolidate_questions([q for q in questions if not (question_category(q)=='permission' and (not special_requested or known_resident_use)) and not (period_settled and question_category(q)=='period') and not (items_settled and question_category(q)=='items') and not ('기타소득' in user_text and re.search('사업소득|소득.*구분|기타소득',q)) and not ((requested_resident or any(classification(i['name'])=='rnn' for i in previous['items'])) and re.search('주민등록번호|주민번호',q))]),'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}
