@@ -56,3 +56,9 @@ test('resident-number permission is checked independently without adding an unre
 test('legacy five-minute conversation checkpoints migrate safely within one day, then expire',async()=>{const {signReview}=await import('../backend/cloudflare/legal.mjs');const a=fake(),first=await workPlan(a,input),fp=JSON.parse(atob(first.evidenceToken.split('.')[0])).fp,legacy=await signReview(a.env.OPENROUTER_API_KEY,fp),saved=Date.now;try{Date.now=()=>saved()+600000;const next=await workPlan(a,{...input,evidenceRefs:first.evidenceRefs,evidenceFacts:first.evidenceFacts,evidenceToken:legacy});assert.equal(next.items[0].name,'성명');Date.now=()=>saved()+90000000;await assert.rejects(workPlan(a,{...input,evidenceRefs:first.evidenceRefs,evidenceFacts:first.evidenceFacts,evidenceToken:first.evidenceToken}),e=>e.status===409);}finally{Date.now=saved;}});
 
 test('unverified-only reference failures do not poison subsequent research',async()=>{const {ApiError}=await import('../backend/cloudflare/legal.mjs');const a=fake({async verify(){throw new ApiError('요청한 조문이 없습니다.',422);}}),first=await workPlan(a,input);assert.equal(first.evidenceRefs.length,0);await workPlan(a,{...input,evidenceRefs:first.evidenceRefs,evidenceFacts:first.evidenceFacts,evidenceToken:first.evidenceToken});assert.equal(a.researchCalls,2);});
+
+test('period applicability review receives all verified sources in addition to its quoted clause',async()=>{
+ let reviewed=false;
+ const a=fake({async ai(_p,d){if(d.sources)return answer;reviewed=true;assert.equal(d.evidence,source);assert.ok(d.verifiedSources.some(s=>s.id==='S0'&&s.text===source));return {verdict:'possible'};}});
+ const result=await workPlan(a,input);assert.equal(result.period,'5년');assert.ok(reviewed);
+});

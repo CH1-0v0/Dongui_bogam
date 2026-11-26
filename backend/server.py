@@ -650,7 +650,7 @@ def ai_candidates(context, discovery_options=None):
             if isinstance(term, str) and 2 <= len(term) <= 30:
                 terms.setdefault(term, 2)
     names = list(dict.fromkeys(normalize_discovery_law(n) for n in names if isinstance(n, str)))
-    names = [n for n in names if n and not compact(n).startswith('개인정보보호법')][:4 if discovery_options.get('assistant') else config['maxLaws']]
+    names = [n for n in names if n and not compact(n).startswith('개인정보보호법')][:config['assistantMaxLaws'] if discovery_options.get('assistant') else config['maxLaws']]
     evidence_pool, rejected = [], []
     for index, name in enumerate(names):
         for attempt in range(2):
@@ -668,7 +668,13 @@ def ai_candidates(context, discovery_options=None):
                     score = sum(weight * ((5 if term in title else 0) + (1 if term in body else 0)) for term, weight in terms.items())
                     if score:
                         articles.append((score, article_label(node), title, body))
-                for _, article, title, body in sorted(articles, key=lambda a: -a[0])[:config['articlesPerLaw']]:
+                ranked = sorted(articles, key=lambda a: -a[0])
+                chosen = []
+                for axis in config['evidenceAxes']:
+                    for entry in [a for a in ranked if re.search(axis, a[2]) or re.search(axis, a[3])][:2]:
+                        if entry not in chosen: chosen.append(entry)
+                chosen.extend(a for a in ranked if a not in chosen)
+                for _, article, title, body in chosen[:config['articlesPerLaw']]:
                     if len(body) > config['maxText']:
                         parts = [body[:2800]]
                         for term in sorted(terms, key=lambda t: -terms[t]):

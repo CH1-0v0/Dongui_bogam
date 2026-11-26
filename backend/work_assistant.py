@@ -120,7 +120,7 @@ def work_plan(data, api):
     period_origin = ('user' if period_claim.get('sourceId') == 'user' else 'law') if period else ''
     if period and period_origin == 'law':
         source = next(s for s in sources if s['id'] == period_claim['sourceId'])
-        review = api.discovery_json(POLICY['periodReview'],{'business':business,'messages':messages,'period':period,'evidence':source['text']},field='plan',max_tokens=1000)
+        review = api.discovery_json(POLICY['periodReview'],{'business':business,'messages':messages,'period':period,'evidence':source['text'],'verifiedSources':[{'id':s['id'],'cite':s['proof'].get('cite'),'text':s['text'][:11000]} for s in sources]},field='plan',max_tokens=1000)
         if review.get('verdict') != 'possible':
             period, period_origin = '', ''
             period_status = review.get('verdict') if review.get('verdict') in ['needs_information','not_supported'] else 'review_incomplete'

@@ -33,7 +33,7 @@ async function askWork(text='',fresh=false){
  finally{if(workSession===s){s.busy=false;renderAssistant();}}
 }
 function startWork(business){
- if((hasDraftChanges()||workSession)&&!confirm('현재 작성 중인 내용을 AI 대화로 새로 작성하시겠습니까?'))return;
+ if((hasDraftChanges()||workSession)&&!confirm('현재 작성 중인 내용을 AI 대화로 새로 작성하시겠습니까? 기존 챗봇 대화와 이 탭에 24시간 보관되는 저장본도 삭제됩니다.'))return;
  workSession={key:'collect',outside:false,phase:'interview',business:'',messages:[],log:[{role:'assistant',content:'먼저 수집·이용 업무를 확인하겠습니다. 공식 조문에서 확인한 항목과 기간을 정리하고, 부족한 내용은 질문드릴게요.'}],manual:{},groups:{},plan:null,busy:false,error:''};step=-1;render();window.scrollTo(0,0);askWork(business,true);
 }
 async function continueWork(){

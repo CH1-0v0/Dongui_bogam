@@ -988,7 +988,7 @@ quickForm.addEventListener('submit',e=>{
  if(!template)return;
  const names=[...new Set(quickPreview.querySelector('[data-quick-items]').value.split(/[,\n]/).map(standardItemName).filter(Boolean))];
  if(names.length>60){alert('개인정보 항목은 60개 이하로 입력해 주세요.');return;}
- if((hasDraftChanges()||workSession)&&!confirm('현재 작성 중인 내용을 선택한 양식으로 바꾸시겠습니까?'))return;
+ if((hasDraftChanges()||workSession)&&!confirm('현재 작성 중인 내용을 선택한 양식으로 바꾸시겠습니까? 기존 챗봇 대화와 이 탭에 24시간 보관되는 저장본도 삭제됩니다.'))return;
  workSession=null;clearWorkSession();
  state = newDraft();
  lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};
@@ -1232,7 +1232,7 @@ document.addEventListener('click',e=>{
 
  if('retryClassification' in d)checkSensitivity(true);
  if('guide' in d)document.querySelector('#guide').showModal();
- if('start' in d){if(b.id==='workNav'){go(1);return;}if((hasDraftChanges()||workSession)&&!confirm('현재 작성 중인 내용을 삭제하고 처음부터 새 동의서를 만드시겠습니까?'))return;startBlankConsent();return;}
+ if('start' in d){if(b.id==='workNav'){go(1);return;}if((hasDraftChanges()||workSession)&&!confirm('현재 작성 중인 내용을 삭제하고 처음부터 새 동의서를 만드시겠습니까? 기존 챗봇 대화와 이 탭에 24시간 보관되는 저장본도 삭제됩니다.'))return;startBlankConsent();return;}
  if(d.itemSuggestion){
   const input=b.closest('.item-row').querySelector('[data-name]');
   commitItemName(input,d.itemSuggestion).focus({preventScroll:true});

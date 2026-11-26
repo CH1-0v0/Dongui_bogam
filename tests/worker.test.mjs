@@ -227,3 +227,12 @@ test('GPT-6 Luna routing omits unsupported temperature while keeping privacy and
  const a=new LegalApi({...env,OPENROUTER_MODEL:'openai/gpt-6-luna'},async(_url,options)=>{const p=JSON.parse(options.body);assert.equal(p.temperature,undefined);assert.equal(p.reasoning.effort,'low');assert.equal(p.provider.data_collection,'deny');assert.equal(p.provider.require_parameters,true);assert.equal(p.response_format.type,'json_object');return Response.json({choices:[{message:{content:'{"ok":true}'}}]});});
  assert.deepEqual(await a.ai('합성 검증',{}),{ok:true});assert.equal(searchPayload('openai/gpt-6-luna',{}).reasoning.effort,'low');
 });
+
+test('discovery reserves item, identifier and retention articles despite crowded duty matches',()=>{
+ const scope=discoveryScope({items:[{...item('rnn'),purpose:'강사료 원천징수 지급명세서'}]},['보존','기재사항']);
+ const articles=Array.from({length:15},(_,i)=>({value:String(i+1),title:'기타소득 원천징수 지급명세서',text:'원천징수 지급명세서'}));
+ articles.push({value:'101',title:'장부 보존',text:'증거서류를 5년간 보존한다.'},{value:'102',title:'기재사항',text:'성명을 적어야 한다.'},{value:'103',title:'고유식별정보 처리',text:'주민등록번호를 처리한다.'});
+ const pool=rankEvidence(articles,scope.terms,'합성법','123',0);
+ assert.equal(pool.length,discoveryConfig.articlesPerLaw);
+ for(const id of ['101','102','103'])assert.ok(pool.some(a=>a.article===id));
+});
