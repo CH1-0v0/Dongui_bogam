@@ -207,7 +207,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   await page.locator('[data-scope-all]').check();assert.equal(await page.locator('[data-scope]:not(:checked)').count(),0);
   await page.locator('[data-scope-all]').uncheck();assert.equal(await page.locator('[data-scope]:checked').count(),0);
   await page.locator('[data-cancel-ground]').click();await page.locator('[data-next]').click();assert.equal(await page.locator('.doc-notice-row').count(),1);assert.match(await page.locator('.doc-notice-row').innerText(),/성명/);assert.doesNotMatch(await page.locator('.doc-notice-row').innerText(),/휴대전화번호/);
-  await page.locator('[data-title]').click();await page.locator('[data-intro]').click();await page.locator('[data-child][value="no"]').check();
+  await page.locator('[data-child][value="no"]').check();
   for(const el of await page.locator('[data-path^="refusals."]').all())await el.fill('테스트용 미제공 안내');
   await page.waitForFunction(()=>{const f=document.querySelector('.a4-document-frame');return f&&!f.hidden&&f.querySelectorAll('.a4-paper').length===Number(f.dataset.pages);});
   const widthBefore=await page.locator('.a4-paper:not([hidden])').evaluate(n=>n.getBoundingClientRect().width);

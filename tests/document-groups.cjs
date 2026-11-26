@@ -34,7 +34,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3008';
   assert.equal(await page.locator('.doc-category').count(),2);
   await page.locator('[data-toggle-document-edit]').click();
   const shared=notices().locator('[data-merge-keys] [data-edit$=".purpose"]');await shared.fill('수정한 공통 처리 목적');await page.locator('[data-toggle-document-edit]').click();assert.equal(await page.locator('[contenteditable]').count(),0);
-  await page.locator('[data-intro]').click();await page.locator('[data-child][value=no]').check();
+  await page.locator('[data-child][value=no]').check();
   for(const field of await page.locator('[data-path^="refusals."]').all())await field.fill('시험용 거부 시 안내');
   await page.locator('[data-finish]').last().click();
   assert.equal(await table().count(),1);assert.equal(await table().locator('[data-edit]').count(),0);

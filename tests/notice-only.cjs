@@ -14,7 +14,7 @@ const rules=require('../frontend/law-basis.js').rules,base=process.env.TEST_BASE
   for(const n of [0,1])await p.locator('[data-scope]').nth(n).check();await p.locator('[data-adopt-ground]').click();await p.locator('[data-adopt-ground]').waitFor({state:'detached'});await p.locator('[data-next]').click();
   const check=async()=>{assert.equal(await p.locator('.doc-notice-heading').count(),mixed?1:0);assert.equal(await p.locator('.notice-section').count(),mixed?1:0);assert.equal(await p.locator('.doc-category').count(),mixed?1:0);assert.equal(await p.locator('.doc-notice table').count(),1);assert.match(await p.locator('.doc-notice').innerText(),/성명.*휴대전화번호/s);};
   await check();await p.locator('[data-toggle-document-edit]').click();await check();await p.locator('[data-toggle-document-edit]').click();
-  await p.locator('[data-intro]').click();
+
   if(mixed){await p.locator('[data-child][value=no]').check();for(const field of await p.locator('[data-path^="refusals."]').all())await field.fill('합성 거부 안내');}
   await p.locator('[data-finish]').last().click();await check();
   const name=mixed?'notice-mixed':'notice-only';await p.screenshot({path:'.test-output/'+name+'.png',fullPage:true});

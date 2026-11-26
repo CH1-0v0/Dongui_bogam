@@ -49,3 +49,14 @@ class DraftTests(unittest.TestCase):
         result=work_draft({'draft':{'items':[{'name':'성명'},{'name':'주민등록번호'},{'name':'계좌번호'}],'period':{'value':'5년','reason':'기관 기준 확인 필요'}}})
         self.assertEqual([i['name'] for i in result['suggestedItems']],['성명','계좌번호'])
         self.assertEqual(result['suggestedPeriod'],'5년')
+
+class ClinicalTests(unittest.TestCase):
+    def test_clinical_draft_review_and_name_question(self):
+        text='[합성] 건강에 관한 정보 및 주민등록번호를 처리할 수 있다.'
+        data={'business':'환자 진료와 진료기록부 작성','messages':[]}
+        def ai(_prompt,material,**kwargs):
+            return dict(ANSWER,items=[],period={'value':''},draft={'items':[{'name':'진단명'}]},questions=['기관명을 알려주세요.']) if 'sources' in material else {'verdict':'possible'}
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server,'ai_candidates',return_value={'candidates':[REF]}),patch.object(server,'verify_with_basis',side_effect=lambda ref:dict(ref,kind='대통령령',cite='합성법 제10조',articleExcerpt=text,excerpt=text)),patch.object(server,'discovery_json',side_effect=ai),patch.object(server,'ai_application_review',side_effect=lambda proof,items:{'items':[dict(i,verdict='possible') for i in items]}):
+            result=work_plan(data,server)
+        self.assertTrue(any(g['basisCode']=='sensitiveLaw' and '진단명' in g['itemNames'] for g in result['grounds']))
+        self.assertFalse(any('기관명' in q for q in result['questions']))

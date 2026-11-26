@@ -93,14 +93,15 @@ def work_plan(data, api):
         except api.ApiError as error:
             failures.append({'law':ref['law'],'reason':'unavailable' if error.status >= 500 else 'not_verified'})
     for source in list(sources):
-        proof=source['proof']
-        if len(refs)>=8 or proof.get('kind') not in ['법률','대통령령'] or '주민등록번호' not in source['text'] or any(r['law']==proof.get('law') and r['article']==proof.get('article') and r['basisCode']=='residentLaw' for r in refs):continue
-        ref={k:clean(proof.get(k),100) for k in REF_KEYS};ref.update(basisCode='residentLaw',type=kind)
-        index=len(refs);refs.append(ref)
-        try:
-            actual=api.verify_with_basis(ref)
-            sources.append({'id':'S'+str(index),'proof':actual,'text':actual.get('articleExcerpt') or actual['excerpt']})
-        except api.ApiError as error:failures.append({'law':ref['law'],'reason':'unavailable' if error.status>=500 else 'not_verified'})
+        for basis_code, pattern in [('residentLaw',r'주민등록번호'),('sensitiveLaw',r'민감정보|건강에\s*관한\s*정보')]:
+            proof=source['proof']
+            if len(refs)>=8 or proof.get('kind') not in ['법률','대통령령'] or not re.search(pattern,source['text']) or any(r['law']==proof.get('law') and r['article']==proof.get('article') and r['basisCode']==basis_code for r in refs):continue
+            ref={k:clean(proof.get(k),100) for k in REF_KEYS};ref.update(basisCode=basis_code,type=kind)
+            index=len(refs);refs.append(ref)
+            try:
+                actual=api.verify_with_basis(ref)
+                sources.append({'id':'S'+str(index),'proof':actual,'text':actual.get('articleExcerpt') or actual['excerpt']})
+            except api.ApiError as error:failures.append({'law':ref['law'],'reason':'unavailable' if error.status>=500 else 'not_verified'})
     if not sources and not previous['items'] and not previous['period']:refs=[]
     def checkpoint(facts):
         import time
@@ -137,13 +138,15 @@ def work_plan(data, api):
             period, period_origin = '', ''
             period_status = review.get('verdict') if review.get('verdict') in ['needs_information','not_supported'] else 'review_incomplete'
         else:period_status = 'verified'
+    medical_drafts = [dict(i,classification=item_class(i)) for i in work_draft(answer)['suggestedItems'] if not any(a['name']==i['name'] for a in items)] if re.search('진료',business) else []
+    review_items = items + medical_drafts
     grounds = []
     resident_check = {'status':'unavailable' if failures else 'not_found','checks':['주민등록번호는 일반 처리 근거와 별도 허용 근거를 함께 확인해야 합니다.']}
     for source in sources:
         proof = source['proof']
         if not api.has_permission_text(proof):continue
         supplement = {'residentLaw':'rnn','sensitiveLaw':'sensitive','uniqueLaw':'unique'}.get(proof['basisCode'])
-        review_rows=items+[{'name':'주민등록번호','classification':'rnn'}] if proof['basisCode']=='residentLaw' and not any(i['classification']=='rnn' for i in items) else items
+        review_rows=review_items+[{'name':'주민등록번호','classification':'rnn'}] if proof['basisCode']=='residentLaw' and not any(i['classification']=='rnn' for i in review_items) else review_items
         scope = [dict(i,id='assistant-'+str(n),purpose=review_purpose,recipient=clean(answer.get('recipient')) or manual['recipient'],type=kind,context=kind) for n,i in enumerate(review_rows) if not supplement or i['classification']==supplement]
         if not scope:continue
         review = api.ai_application_review(proof,scope)
@@ -159,7 +162,6 @@ def work_plan(data, api):
     if not allowed and not previous['items']:questions.append('수집하거나 제공할 개인정보 항목을 알려주세요. 직접 입력은 선택사항입니다.')
     if not period and not previous['period']:questions.append('보유 및 이용기간을 알려주세요. 직접 입력은 선택사항입니다.')
     agency, recipient = clean(answer.get('agency'),100), clean(answer.get('recipient'),100)
-    if not agency and not manual['agency']:questions.append('개인정보를 처리하는 기관명을 알려주세요.')
     if flow == 'provide' and not recipient and not manual['recipient']:questions.append('제공받는 기관을 알려주세요.')
     retained = [i for i in previous['items'] if i['name'] not in removed and not any(a['name']==i['name'] for a in allowed)]
     retained_period = previous['period']['value'] if not period and previous['period'] else ''
@@ -167,4 +169,4 @@ def work_plan(data, api):
     facts['items'].extend(i for i in retained if not any(a['name']==i['name'] for a in facts['items']))
     if retained or retained_period:questions.insert(0,'이전에 확인한 내용은 보관하고 있습니다. 현재 원문·허용 요건을 다시 확인해 주세요.')
     import time
-    return {**work_draft(answer),'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed)],'reply':('공식 조문과 입력 내용을 대조해 항목 '+str(len(allowed))+'개를 정리했습니다. 문서로 이동하기 전에 아래 내용을 확인해 주세요.' if sources else '공식 원문 조회를 완료하지 못했습니다. 필요한 항목과 기간을 추가로 알려주시거나 나중에 확인할 수 있습니다.' if failures else '적용할 개별 법령 근거를 확인하지 못했습니다. 추가 항목과 보유기간의 직접 입력은 선택사항입니다.'),'questions':list(dict.fromkeys(questions))[:5],'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}
+    return {**work_draft(answer),**({'suggestedItems':medical_drafts} if re.search('진료',business) else {}),'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+medical_drafts)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed+medical_drafts)],'reply':('공식 조문과 입력 내용을 대조해 항목 '+str(len(allowed))+'개를 정리했습니다. 문서로 이동하기 전에 아래 내용을 확인해 주세요.' if sources else '공식 원문 조회를 완료하지 못했습니다. 필요한 항목과 기간을 추가로 알려주시거나 나중에 확인할 수 있습니다.' if failures else '적용할 개별 법령 근거를 확인하지 못했습니다. 추가 항목과 보유기간의 직접 입력은 선택사항입니다.'),'questions':[q for q in dict.fromkeys(questions) if not re.search(r'기관명|기관의?\s*(?:이름|명칭)|어느 기관',q)][:5],'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}
