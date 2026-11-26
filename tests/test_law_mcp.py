@@ -25,4 +25,4 @@ class McpTests(unittest.TestCase):
     def test_toc(self):
         client=LawMcp();client.rows['123']=('합성법','20260101');client.terms={'기록':2}
         with patch.object(client,'tool',side_effect=['법령명: 합성법\n시행일: 20260101\n목차 (총 21개 조문)\n제10조 기록\n제11조 기타\n',BODY]) as tool:
-            root=client.law('lawService.do',{'MST':'123'});self.assertIn('성명',root.findtext('.//항내용'));self.assertEqual(tool.call_count,2)
+            root=client.law('lawService.do',{'MST':'123'});self.assertIn('성명',root.findtext('.//항내용'));self.assertEqual(tool.call_count,2);self.assertEqual(tool.call_args.args[1]['efYd'],'20260101')

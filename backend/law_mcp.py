@@ -100,7 +100,7 @@ class LawMcp:
                 row=root[0];self.rows[row.findtext('법령일련번호')]=(name,row.findtext('시행일자'))
             elif endpoint=='lawService.do' and str(params.get('MST')) in self.rows:
                 name,date=self.rows[str(params['MST'])];code=params.get('JO','');jo=str(int(code[:4]))+('의'+str(int(code[4:])) if int(code[4:]) else '') if code else ''
-                args={'mst':str(params['MST'])}
+                args={'mst':str(params['MST']),'efYd':date}
                 if jo:args['jo']='제'+jo.replace('의','조의')+('' if '의' in jo else '조')
                 body=self.tool('get_law_text',args)
                 if not jo and '목차 (총 ' in body:

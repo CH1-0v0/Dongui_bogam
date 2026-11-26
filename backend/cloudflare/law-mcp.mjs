@@ -59,7 +59,7 @@ export class LawMcp {
  }
  async law(endpoint,params,today){const key=JSON.stringify([endpoint,params]);if(this.memo.has(key))return this.memo.get(key);
   let raw;if(endpoint==='lawSearch.do'){const name=params.query;raw=searchXml(await this.tool('search_law',{query:name,display:20}),name,today);const mst=raw.match(/<법령일련번호>(\d+)</)?.[1],date=raw.match(/<시행일자>(\d+)</)?.[1];this.rows.set(mst,{name,date});}
-  else if(endpoint==='lawService.do'&&this.rows.has(String(params.MST))){const row=this.rows.get(String(params.MST)),code=params.JO,jo=code?String(Number(code.slice(0,4)))+(Number(code.slice(4))?'의'+Number(code.slice(4)):''):'';let body=await this.tool('get_law_text',{mst:String(params.MST),...(jo?{jo:'제'+jo.replace('의','조의')+(jo.includes('의')?'':'조')}:{})});
+  else if(endpoint==='lawService.do'&&this.rows.has(String(params.MST))){const row=this.rows.get(String(params.MST)),code=params.JO,jo=code?String(Number(code.slice(0,4)))+(Number(code.slice(4))?'의'+Number(code.slice(4)):''):'';let body=await this.tool('get_law_text',{mst:String(params.MST),efYd:row.date,...(jo?{jo:'제'+jo.replace('의','조의')+(jo.includes('의')?'':'조')}:{})});
    if(!jo&&body.includes('목차 (총 ')){
     const titles=[...body.matchAll(/^제(\d+)조(?:의(\d+))?(?: ([^\n]*))?$/gm)].map(m=>({number:m[1]+(m[2]?'의'+m[2]:''),title:m[3]||''}));
     const ranked=titles.map(t=>({...t,score:(this.terms||[]).reduce((n,x)=>n+(t.title.includes(x.text)?x.weight:0),0)})).filter(t=>t.score>0).sort((a,b)=>b.score-a.score),chosen=[];
