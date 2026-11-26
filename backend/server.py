@@ -667,7 +667,9 @@ def ai_candidates(context, discovery_options=None):
         for term in (extra_terms if isinstance(extra_terms, list) else [])[:12]:
             if isinstance(term, str) and 2 <= len(term) <= 30:
                 terms.setdefault(term, 2)
-    if MCP_CONTEXT.get() is not None: MCP_CONTEXT.get().terms = terms
+    if MCP_CONTEXT.get() is not None:
+        MCP_CONTEXT.get().terms = terms
+        MCP_CONTEXT.get().max_articles = 2 if discovery_options.get('assistant') else 4
     names = list(dict.fromkeys(normalize_discovery_law(n) for n in names if isinstance(n, str)))
     names = [n for n in names if n and not compact(n).startswith('개인정보보호법')][:config['assistantMaxLaws'] if discovery_options.get('assistant') else config['maxLaws']]
     evidence_pool, rejected = [], []

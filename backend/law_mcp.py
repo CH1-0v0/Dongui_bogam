@@ -48,7 +48,7 @@ def law_xml(raw,name,date,jo=''):
 
 class LawMcp:
     def __init__(self):
-        self.terms={};self.session='';self.ident=0;self.ready=False;self.rows={};self.memo={};self.lock=threading.RLock()
+        self.max_articles=4;self.terms={};self.session='';self.ident=0;self.ready=False;self.rows={};self.memo={};self.lock=threading.RLock()
     def rpc(self,method,params,notification=False):
         if getattr(self,'unavailable',False):raise ValueError('MCP unavailable for this request')
         try:return self.request_rpc(method,params,notification)
@@ -109,9 +109,9 @@ class LawMcp:
                     ranked=[t for t in ranked if t[0]>0];chosen=[]
                     for axis in ['식별정보|주민등록번호|민감정보','보존|보유|보관','기재사항|기록사항']:
                         hit=next((t for t in ranked if re.search(axis,t[2])),None)
-                        if hit and hit not in chosen:chosen.append(hit)
+                        if hit and hit not in chosen and len(chosen)<self.max_articles:chosen.append(hit)
                     for t in ranked:
-                        if len(chosen)<4 and t not in chosen:chosen.append(t)
+                        if len(chosen)<self.max_articles and t not in chosen:chosen.append(t)
                     if not chosen:raise ValueError('No relevant articles in TOC')
                     root=ET.Element('법령');ET.SubElement(ET.SubElement(root,'기본정보'),'법령명_한글').text=name;articles=ET.SubElement(root,'조문')
                     for _,number,_ in chosen:

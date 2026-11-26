@@ -57,18 +57,21 @@ export class LawMcp {
  async tool(name,args){if(!this.ready)this.ready=(async()=>{await this.rpc('initialize',{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'dongui-bogam',version:'1'}});await this.rpc('notifications/initialized',{},true);})();await this.ready;
   const result=await this.rpc('tools/call',{name,arguments:args});if(result.isError||!Array.isArray(result.content)||result.content.some(c=>c.type!=='text'))throw Error('MCP tool failed');return result.content.map(c=>c.text).join('\n');
  }
- async law(endpoint,params,today){const key=JSON.stringify([endpoint,params]);if(this.memo.has(key))return this.memo.get(key);
+ async law(endpoint,params,today){const key=JSON.stringify([endpoint,Object.entries(params).sort(([a],[b])=>a.localeCompare(b))]);if(this.memo.has(key))return this.memo.get(key);
+ const pending=this.lookup(endpoint,params,today);this.memo.set(key,pending);return pending;
+ }
+ async lookup(endpoint,params,today){
   let raw;if(endpoint==='lawSearch.do'){const name=params.query;raw=searchXml(await this.tool('search_law',{query:name,display:20}),name,today);const mst=raw.match(/<법령일련번호>(\d+)</)?.[1],date=raw.match(/<시행일자>(\d+)</)?.[1];this.rows.set(mst,{name,date});}
   else if(endpoint==='lawService.do'&&this.rows.has(String(params.MST))){const row=this.rows.get(String(params.MST)),code=params.JO,jo=code?String(Number(code.slice(0,4)))+(Number(code.slice(4))?'의'+Number(code.slice(4)):''):'';let body=await this.tool('get_law_text',{mst:String(params.MST),efYd:row.date,...(jo?{jo:'제'+jo.replace('의','조의')+(jo.includes('의')?'':'조')}:{})});
    if(!jo&&body.includes('목차 (총 ')){
     const titles=[...body.matchAll(/^제(\d+)조(?:의(\d+))?(?: ([^\n]*))?$/gm)].map(m=>({number:m[1]+(m[2]?'의'+m[2]:''),title:m[3]||''}));
     const ranked=titles.map(t=>({...t,score:(this.terms||[]).reduce((n,x)=>n+(t.title.includes(x.text)?x.weight:0),0)})).filter(t=>t.score>0).sort((a,b)=>b.score-a.score),chosen=[];
-    for(const axis of [/식별정보|주민등록번호|민감정보/,/보존|보유|보관/,/기재사항|기록사항/]){const t=ranked.find(t=>axis.test(t.title));if(t&&!chosen.includes(t))chosen.push(t);}
-    for(const t of ranked)if(chosen.length<4&&!chosen.includes(t))chosen.push(t);
+    for(const axis of [/식별정보|주민등록번호|민감정보/,/보존|보유|보관/,/기재사항|기록사항/]){const t=ranked.find(t=>axis.test(t.title));if(t&&!chosen.includes(t)&&chosen.length<(this.maxArticles||4))chosen.push(t);}
+    for(const t of ranked)if(chosen.length<(this.maxArticles||4)&&!chosen.includes(t))chosen.push(t);
     if(!chosen.length)throw Error('No relevant articles in TOC');
     const documents=[];for(const t of chosen){const code=t.number.split('의');documents.push(await this.law(endpoint,{MST:params.MST,JO:code[0].padStart(4,'0')+(code[1]||'0').padStart(2,'0')},today));}
     raw='<법령><기본정보>'+tag('법령명_한글',row.name)+'</기본정보><조문>'+documents.map(d=>d.match(/<조문>([\s\S]*)<\/조문>/)[1]).join('')+'</조문></법령>';
    }else raw=lawXml(body,row.name,row.date,jo);}
-  else throw Error('Unsupported MCP lookup');this.memo.set(key,raw);return raw;
+  else throw Error('Unsupported MCP lookup');return raw;
  }
 }

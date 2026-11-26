@@ -119,8 +119,9 @@ export function reviewEvidenceFor(actual){
 }
 export class LegalApi {
  constructor(env,fetcher=fetch,ctx,cacheOrigin='https://dongui-bogam.dongui-bogam.workers.dev'){this.env=env;this.fetcher=fetcher;this.ctx=ctx;this.cacheOrigin=cacheOrigin;this.memo=new Map();this.calls=0;this.cacheOperations=0;this.forceFresh=false;}
+ reserveRequest(){if(this.calls+this.cacheOperations>=48){const error=new ApiError('이번 요청의 서버 조회 한도에 도달했습니다. 확인된 내용은 유지하고 나머지 근거를 다시 확인해 주세요.',429);error.requestBudget=true;throw error;}this.calls++;}
  async upstream(url,options={},timeout=30000){
-  if(++this.calls>40||this.calls+this.cacheOperations>48)fail('조회 범위가 넓습니다. 항목이나 검색 범위를 줄여 주세요.',429);
+  this.reserveRequest();
   const service=new URL(url).hostname==='openrouter.ai'?'AI 서비스':'국가법령정보센터';
   // Workers' native fetch requires an unbound call. It supports only manual/follow.
   // Never follow upstream redirects carrying OC or Authorization credentials.
@@ -134,7 +135,7 @@ export class LegalApi {
   try{return await readLimited(response);}catch(error){if(error instanceof ApiError)throw error;const failure=new ApiError(service+' 응답을 받는 중 연결이 끊겼습니다. 잠시 후 다시 시도하세요.',502);if(service==='AI 서비스')failure.requestKind='stream';throw failure;}
  }
  async law(endpoint,params={}){
-  if(this.preferMcp&&this.env.LAW_MCP_ENABLED==='true'){this.mcp??=new LawMcp(this.env,(url,options)=>{if(++this.calls>40)throw new ApiError('조회 한도 초과',429);const send=this.fetcher;return send(url,options);});this.mcp.terms=this.mcpTerms;try{const root=parseXml(await this.mcp.law(endpoint,params,today()));root.retrievalProvider='mcp';return root;}catch{/* Incomplete or unavailable MCP results use the original official API. */}}
+  if(this.preferMcp&&this.env.LAW_MCP_ENABLED==='true'){this.mcp??=new LawMcp(this.env,(url,options)=>{this.reserveRequest();const send=this.fetcher;return send(url,options);});this.mcp.terms=this.mcpTerms;this.mcp.maxArticles=this.mcpArticleLimit||4;try{const root=parseXml(await this.mcp.law(endpoint,params,today()));root.retrievalProvider='mcp';return root;}catch{/* Incomplete or unavailable MCP results use the original official API. */}}
   const oc=this.env.LAW_API_OC;if(!oc)fail('법령 검색을 위해 서버에 LAW_API_OC를 설정해 주세요.',503);
   const query=new URLSearchParams({OC:oc,target:'law',type:'JSON',...params});query.sort();
   // Hash credentials and parameters before using any persistent cache key. The day
@@ -147,7 +148,7 @@ export class LegalApi {
   const remember=(raw,root,expires)=>{while(lawCache.size>=16||([...lawCache.values()].reduce((sum,v)=>sum+v.bytes,0)+raw.length*2>16_000_000&&lawCache.size))lawCache.delete(lawCache.keys().next().value);if(raw.length*2<=16_000_000)lawCache.set(key,{root,bytes:raw.length*2,expires});};
   const pending=(async()=>{
    const edge=globalThis.caches?.default;
-   const canUseEdge=()=>edge&&this.cacheOperations<24&&this.calls+this.cacheOperations<46;
+   const canUseEdge=()=>!this.preferMcp&&edge&&this.cacheOperations<24&&this.calls+this.cacheOperations<46;
    if(!this.forceFresh&&canUseEdge()){this.cacheOperations++;try{const cached=await edge.match(cacheRequest);if(cached&&Number(cached.headers.get('X-Law-Expires'))>Date.now()){const raw=await readLimited(cached);const root=parseLaw(raw);if(!officialLawPayload(root))throw Error('invalid cached law');remember(raw,root,Number(cached.headers.get('X-Law-Expires')));return root;}}catch{}}
    const raw=await this.upstream('https://www.law.go.kr/DRF/'+endpoint+'?'+query);const root=parseLaw(raw);
    // Cache only recognized successful public-law payloads, never errors, user
@@ -231,9 +232,10 @@ export class LegalApi {
  async discover(context,research,options={}){
   let scope=discoveryScope(context,options.assistant?['보존','보유','기재사항','기록']:[]),lawPlan={};
   if(!scope.laws.length||options.assistant){for(let attempt=0;attempt<2;attempt++){lawPlan=await this.ai(discoveryConfig.lawPrompt+(options.assistant?' 해당 업무의 개인정보 기재사항과 법정 기록 보존기간을 규정한 법률·시행령·시행규칙도 포함하라.':''),{...context,research},1800);if((Array.isArray(lawPlan.laws)&&lawPlan.laws.every(n=>typeof n==='string'))||(Array.isArray(lawPlan.candidates)&&lawPlan.candidates.every(obj)))break;if(attempt)fail('AI 응답에 올바른 법령 후보 목록이 없습니다. 다시 검색하세요.',502);}const names=Array.isArray(lawPlan.laws)?lawPlan.laws:Array.isArray(lawPlan.candidates)?lawPlan.candidates.map(c=>c.law):[];scope={...discoveryScope(context,[...(Array.isArray(lawPlan.terms)?lawPlan.terms:[]),...(options.assistant?['보존','보유','기재사항','기록']:[])]),laws:options.assistant?[...scope.laws,...names]:names};}
-  this.mcpTerms=scope.terms;
+  this.mcpTerms=scope.terms;this.mcpArticleLimit=options.assistant?2:4;
   const names=candidateLawNames(scope.laws,options.assistant?discoveryConfig.assistantMaxLaws:discoveryConfig.maxLaws),pool=[],rejected=[];
   for(const [index,name] of names.entries()){
+   if(options.assistant&&this.calls+this.cacheOperations>=24){rejected.push(...names.slice(index).map(law=>({law,message:'최종 검토에 필요한 조회 여유를 확보하기 위해 일부 원문은 추가 확인 대상으로 남겼습니다.',reason:'request_budget'})));break;}
    for(let attempt=0;attempt<2;attempt++){try{const {row,mst}=await this.resolve(name);const root=await this.law('lawService.do',{MST:mst});const official=content(find(root,'법령명_한글')).trim();if(official&&compact(official)!==compact(text(row,'법령명한글')))fail('검색한 법령명과 원문이 다릅니다.',502);const articles=descendants(root,'조문단위').filter(n=>text(n,'조문여부')==='조문'&&!deletedNode(n)).map(n=>({value:articleLabel(n),title:text(n,'조문제목'),text:excerpt(n)}));pool.push(...rankEvidence(articles,scope.terms,text(row,'법령명한글'),mst,index));break;}catch(e){if(!(e instanceof ApiError))throw e;if(attempt===0&&(e.status===504||[500,502,503,504,520,522,524].includes(e.upstreamStatus))){this.memo.clear();continue;}rejected.push({law:normalizeLawName(name),message:e.message,reason:e.status===504?'timeout':e.status>=500||e.status===429?'service_unavailable':'not_verified'});break;}}
   }
   let selected;

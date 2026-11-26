@@ -62,3 +62,7 @@ test('period applicability review receives all verified sources in addition to i
  const a=fake({async ai(_p,d){if(d.sources)return answer;reviewed=true;assert.equal(d.evidence,source);assert.ok(d.verifiedSources.some(s=>s.id==='S0'&&s.text===source));return {verdict:'possible'};}});
  const result=await workPlan(a,input);assert.equal(result.period,'5년');assert.ok(reviewed);
 });
+test('verification preserves completed sources and finishes extraction when optional lookups consume budget',async()=>{
+ let checked=0;const a=fake({calls:0,cacheOperations:0,async discover(){return {candidates:[{law:'합성법',article:'10',basisCode:'statutory',type:'collect'},{law:'합성법',article:'11',basisCode:'statutory',type:'collect'}]};},async verify(ref){checked++;this.calls=34;return {...ref,cite:'합성법 제10조',articleExcerpt:source,excerpt:source};}});
+ const result=await workPlan(a,input);assert.equal(checked,1);assert.equal(result.items[0].name,'성명');assert.ok(result.failures.some(f=>f.reason==='request_budget'));assert.ok(result.questions.some(q=>q.includes('서버 조회 한도')));
+});
