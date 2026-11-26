@@ -55,7 +55,7 @@ def consolidate_questions(questions):
             groups['choice:'+q]=[q];continue
         if re.search(r'(?:법적근거|법령|조문|처리.*근거).*(?:있나요|알려|제시|제공)',q):continue
         if re.search(r'기관명|기관의?\s*(?:이름|명칭)|어느 기관',q):continue
-        category='permission' if re.search(r'주민등록번호|민감정보|처리.*근거',q) else 'period' if re.search(r'보유|보존|기간|기산점',q) else 'agency' if re.search(r'기관|제공받',q) else 'items' if re.search(r'항목|개인정보|계좌|은행|예금주',q) else 'other'
+        category='optional' if q.startswith('선택 항목') else 'permission' if re.search(r'주민등록번호|민감정보|처리.*근거',q) else 'period' if re.search(r'보유|보존|기간|기산점',q) else 'agency' if re.search(r'기관|제공받',q) else 'items' if re.search(r'항목|개인정보|계좌|은행|예금주',q) else 'other'
         groups.setdefault(category,[])
         if q not in groups[category]:groups[category].append(q)
     return [DEFAULTS['questionPeriod'] if k=='period' else DEFAULTS['questionItems'] if k=='items' else DEFAULTS['questionPermission'] if k=='permission' else max(rows,key=len) if k=='agency' or k.startswith('choice:') else ' '.join(rows) for k,rows in groups.items()][:5]
@@ -160,8 +160,19 @@ def discovery_mode(text, context):
     full=re.search(config['fullSearchSignals'],str(text or ''))
     if profile:return 'profile'
     return 'consent' if re.search(config['consentSignals'],str(text or '')) and not full else 'full'
+def optional_choice(user_text, field):
+    """The user's answer for optional items' own purpose/period; '' means the same as required items."""
+    label='보유 및 이용기간' if field=='period' else '이용 목적'
+    line=next((t for t in reversed(str(user_text or '').split('\n')) if t.startswith('선택 항목 '+label)),'')
+    if not line:return None
+    if '필수 항목과 같은' in line:return ''
+    m=re.match(r'^선택 항목 '+label+r'[:：]\s*(.+?)\.?\s*이 (?:기간|목적)으로 (?:변경|적용)합니다',line)
+    return m.group(1).strip()[:300] if m else None
+def optional_question(field, draft):
+    label,noun=('보유 및 이용기간','기간') if field=='period' else ('이용 목적','목적')
+    return f"선택 항목의 {label}은 '{draft}'(으)로 할까요? O: 이 {noun} 적용 / X: 다른 {noun} 입력" if draft else f"선택 항목에도 필수 항목과 같은 {label}을 적용할까요? O: 같은 {noun} 적용 / X: 다른 {noun} 입력"
 def question_category(q):
-    return 'permission' if re.search(r'주민등록번호|주민번호|민감정보|처리.*근거',q) else 'period' if re.search(r'보유|보존|기간|기산점',q) else 'items' if re.search(r'항목|개인정보|계좌|은행|예금주',q) else 'other'
+    return 'optional' if q.startswith('선택 항목') else 'permission' if re.search(r'주민등록번호|주민번호|민감정보|처리.*근거',q) else 'period' if re.search(r'보유|보존|기간|기산점',q) else 'items' if re.search(r'항목|개인정보|계좌|은행|예금주',q) else 'other'
 
 def ref_fingerprint(business, kind, refs, facts, flow):
     return hashlib.sha256(json.dumps([business, kind, refs, facts, flow], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -352,6 +363,18 @@ def work_plan(data, api):
     period_settled=bool(period and period_origin in ['law','user'])
     items_settled=bool(manual['items'] or any(i['sourceId']=='user' and i['classification']!='rnn' for i in items))
     asked_resident=bool(requested_resident or re.search(r'근거.*없|정말.*근거',recent_users[-1]['content'] if recent_users else ''))
+    has_optional=any(i.get('required') is False for i in allowed+necessary_drafts+retained)
+    optional_draft=(answer.get('draft') or {}).get('optional') if isinstance((answer.get('draft') or {}).get('optional'),dict) else {}
+    optional={}
+    for field in ['purpose','period']:
+        chosen=optional_choice(user_text,field)
+        if chosen is not None:optional[field]={'value':chosen,'origin':'user'};continue
+        main=(period or retained_period or (law_period_draft or work_draft(answer,business,user_text))['suggestedPeriod']) if field=='period' else (clean(answer.get('purpose')) or business)
+        draft=clean(optional_draft.get(field),300) if has_optional else ''
+        differs=bool(draft) and norm(draft)!=norm(main)
+        optional[field]={'value':draft if differs else '','origin':'draft' if differs else ''}
+    optional_questions=[optional_question(f,optional[f]['value']) for f in ['purpose','period'] if optional[f]['origin']!='user'] if has_optional else []
     final_questions=finish_questions((resident_choice_questions(resident_check,bool(requested_resident or special_requested))+([] if asks_ground else consolidate_questions([q for q in questions if not (question_category(q)=='permission' and (not special_requested or known_resident_use)) and not (period_settled and question_category(q)=='period') and not (items_settled and question_category(q)=='items') and not ('기타소득' in user_text and re.search('사업소득|소득.*구분|기타소득',q)) and not ((requested_resident or any(classification(i['name'])=='rnn' for i in previous['items'])) and re.search('주민등록번호|주민번호',q))])))[:5],messages,resident_check['status']=='confirmed',not allowed and not necessary_drafts and not retained,not period and not retained_period and not (law_period_draft or work_draft(answer,business,user_text))['suggestedPeriod'])
+    final_questions=(final_questions+optional_questions)[:5]
     import time
-    return {**work_draft(answer,business,user_text),**(law_period_draft or {}),'suggestedItems':necessary_drafts,'proposedGrounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+necessary_drafts+retained)]) for g in proposed_grounds if any(any(i['name']==n for i in allowed+necessary_drafts+retained) for n in g['itemNames'])],'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+necessary_drafts)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed+necessary_drafts)],'reply':((resident_summary(resident_check,grounds)+' ') if asked_resident else '')+'개인정보 항목 '+str(len({i['name'] for i in allowed+necessary_drafts+retained}))+'개와 보유기간을 오른쪽에 정리했습니다.'+('' if requested_resident and resident_check['status']=='confirmed' else ' 이벤트·홍보처럼 동의를 받아 처리하는 업무로 보고 법령 검색은 생략했습니다. 법령 근거가 필요하면 3단계에서 추가할 수 있습니다.' if search_mode=='consent' and not grounds else applicable_ground_summary(grounds))+('' if final_questions else QUESTIONS_DONE_NOTE),'questions':final_questions,'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}
+    return {**work_draft(answer,business,user_text),**(law_period_draft or {}),'optionalPurpose':optional['purpose']['value'],'optionalPeriod':optional['period']['value'],'optionalOrigin':{'purpose':optional['purpose']['origin'],'period':optional['period']['origin']},'suggestedItems':necessary_drafts,'proposedGrounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+necessary_drafts+retained)]) for g in proposed_grounds if any(any(i['name']==n for i in allowed+necessary_drafts+retained) for n in g['itemNames'])],'agency':agency if norm(agency) in norm(user_text) else '', 'purpose':clean(answer.get('purpose')) or business,'shortPurpose':clean(answer.get('shortPurpose'),40),'recipient':recipient if norm(recipient) in norm(user_text) else '', 'items':allowed,'removedItems':list(removed),'verifiedSources':list({s['proof'].get('cite'):{'law':s['proof'].get('law'),'article':s['proof'].get('article'),'cite':s['proof'].get('cite'),'excerpt':s['proof'].get('excerpt','')[:3000]} for s in sources}.values()),'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in retained],'retainedPeriod':retained_period,'incomplete':bool(retained or retained_period),'residentCheck':resident_check,'checkedAt':int(time.time()*1000),'period':period,'periodOrigin':period_origin,'periodStatus':period_status,'grounds':[dict(g,itemNames=[n for n in g['itemNames'] if any(i['name']==n for i in allowed+necessary_drafts)]) for g in grounds if any(i['name'] in g['itemNames'] for i in allowed+necessary_drafts)],'reply':((resident_summary(resident_check,grounds)+' ') if asked_resident else '')+'개인정보 항목 '+str(len({i['name'] for i in allowed+necessary_drafts+retained}))+'개와 보유기간을 오른쪽에 정리했습니다.'+('' if requested_resident and resident_check['status']=='confirmed' else ' 이벤트·홍보처럼 동의를 받아 처리하는 업무로 보고 법령 검색은 생략했습니다. 법령 근거가 필요하면 3단계에서 추가할 수 있습니다.' if search_mode=='consent' and not grounds else applicable_ground_summary(grounds))+('' if final_questions else QUESTIONS_DONE_NOTE),'questions':final_questions,'failures':failures,**checkpoint(facts),'legalChecked':bool(sources)}
