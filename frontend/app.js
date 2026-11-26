@@ -303,6 +303,8 @@ function groundPurpose(list){
  const purposes=[...new Set(list.map(({g})=>g.purpose.trim()).filter(Boolean))],recipients=[...new Set(list.map(({g})=>g.recipient?.trim()).filter(Boolean))];
  return `<p class="ground-purpose muted">${purposes.map(safe).join(' / ')}${recipients.length?' · 제공받는 자: '+recipients.map(safe).join(', '):''}</p>`;
 }
+// Cancel only the chosen basis. Supplements of a bundle go with it only when no other general basis remains in that bundle.
+function groundsAfterRemoval(grounds,id){const removed=grounds.find(b=>b.id===id);if(!removed)return grounds;let rest=grounds.filter(b=>b.id!==id);if(removed.bundleId&&!removed.bundleSupplement&&!rest.some(b=>b.bundleId===removed.bundleId&&!b.bundleSupplement))rest=rest.filter(b=>b.bundleId!==removed.bundleId);return rest;}
 function apiErrorMessage(error){
  if(error.name==='TimeoutError'||error.name==='AbortError')return '응답이 늦어 요청을 중단했습니다. 항목을 줄여 다시 검색하거나 법령 검색·근거 추가를 사용하세요.';
  if(error instanceof TypeError)return '서버와 연결이 끊겼습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요. 대화와 확인한 내용은 유지됩니다.';
@@ -1294,7 +1296,7 @@ document.addEventListener('click',e=>{
  if(d.editGround){freshLawPicker();editorOpen=true;const saved=state.grounds.find(b=>b.id===d.editGround);state.groundDraft={...saved,ids:[...saved.ids],editId:saved.id,candidateKey:null};message='';render();document.querySelector('[data-ground-type]').focus();}
  if('cancelGround' in d){state.groundDraft=null;message='';render();document.querySelector('[data-add-ground]').focus();}
  if('adoptGround' in d)applyGround();
- if(d.removeGround){const removed=state.grounds.find(b=>b.id===d.removeGround);state.grounds=state.grounds.filter(b=>removed?.bundleId?b.bundleId!==removed.bundleId:b.id!==d.removeGround);if(state.groundDraft?.editId===d.removeGround)state.groundDraft=null;syncGrounds();state.edits={};message='채택을 취소했습니다.';render();}
+ if(d.removeGround){const removed=state.grounds.find(b=>b.id===d.removeGround);state.grounds=groundsAfterRemoval(state.grounds,d.removeGround);if(state.groundDraft?.editId===d.removeGround)state.groundDraft=null;syncGrounds();state.edits={};message='채택을 취소했습니다.';render();}
  if('toggleDocumentEdit' in d){documentEditing=!documentEditing;render();}
  if('finish' in d&&step===4&&validateDraft()){
   finalDocument=reviewDocument();
