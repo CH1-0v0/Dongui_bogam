@@ -137,6 +137,7 @@ export class LegalApi {
  async law(endpoint,params={}){
   try{const root=await this.apiLaw(endpoint,params);
    if(endpoint==='lawSearch.do'){this.apiLawRows??=new Map();for(const row of descendants(root,'law'))if(compact(text(row,'법령명한글'))===compact(params.query)&&this.eligible(row,'law'))this.apiLawRows.set(text(row,'법령일련번호'),{name:text(row,'법령명한글'),date:text(row,'시행일자')});}
+   if(this.allowMcp&&endpoint==='lawService.do'&&!params.JO){this.fullLawBodies??=new Map();this.fullLawBodies.set(String(params.MST),root);}
    if(this.allowMcp&&endpoint==='lawService.do'&&params.JO){const code=String(params.JO),article=String(Number(code.slice(0,4)))+(Number(code.slice(4))?'의'+Number(code.slice(4)):'');extract(root,article);}
    return root;
   }catch(error){
@@ -144,7 +145,7 @@ export class LegalApi {
    this.mcp??=new LawMcp(this.env,(url,options)=>{this.reserveRequest();const send=this.fetcher;return send(url,options);});
    this.mcp.terms=this.mcpTerms;this.mcp.maxArticles=this.mcpArticleLimit||4;
    for(const [mst,row] of this.apiLawRows||[])this.mcp.rows.set(mst,row);
-   try{const root=parseXml(await this.mcp.law(endpoint,params,today()));root.retrievalProvider='mcp';return root;}catch{throw error;}
+   try{const root=parseXml(await this.mcp.law(endpoint,params,today()));root.retrievalProvider='mcp';if(!params.JO&&endpoint==='lawService.do'){this.fullLawBodies??=new Map();this.fullLawBodies.set(String(params.MST),root);}return root;}catch{throw error;}
   }
  }
  async apiLaw(endpoint,params={}){
@@ -176,7 +177,7 @@ export class LegalApi {
   this.memo.set(key,pending);return await pending;
  }
  async resolve(name){const root=await this.law('lawSearch.do',{query:name,search:'1',display:'20',nw:'1'});const matches=descendants(root,'law').filter(r=>compact(text(r,'법령명한글'))===compact(name)&&isLawKind(text(r,'법령구분명'))&&digits(text(r,'시행일자')).length===8&&digits(text(r,'시행일자'))<=today()).sort((a,b)=>digits(text(b,'시행일자')).localeCompare(digits(text(a,'시행일자'))));if(!matches.length)fail('해당 이름의 현행 법령을 확인하지 못했습니다. 정식 법령명을 확인하세요.');const row=matches[0],mst=text(row,'법령일련번호');if(!/^\d+$/.test(mst))fail('법령 API 응답에 유효한 법령 식별자가 없습니다.',502);return {row,mst};}
- async citation(candidate){const name=String(candidate.law??'').trim().slice(0,100);if(!name)fail('법령명을 입력하세요.',400);const article=number(candidate.article),paragraph=candidate.paragraph?number(candidate.paragraph,'항'):'',clause=candidate.clause?number(candidate.clause,'호'):'';const {row,mst}=await this.resolve(name);if(candidate.mst&&String(candidate.mst)!==mst)fail('법령 버전이 변경되었습니다. 법령을 다시 검색해 선택하세요.');const [major,sub='0']=article.split('의');const root=await this.law('lawService.do',{MST:mst,JO:major.padStart(4,'0')+sub.padStart(2,'0')});const official=content(find(root,'법령명_한글')).trim();if(official&&compact(official)!==compact(name))fail('조회된 법령 본문과 검색 결과의 법령명이 다릅니다.',502);
+ async citation(candidate){const name=String(candidate.law??'').trim().slice(0,100);if(!name)fail('법령명을 입력하세요.',400);const article=number(candidate.article),paragraph=candidate.paragraph?number(candidate.paragraph,'항'):'',clause=candidate.clause?number(candidate.clause,'호'):'';const {row,mst}=await this.resolve(name);if(candidate.mst&&String(candidate.mst)!==mst)fail('법령 버전이 변경되었습니다. 법령을 다시 검색해 선택하세요.');const [major,sub='0']=article.split('의');let root=this.fullLawBodies?.get(String(mst));if(root){try{extract(root,article);}catch{root=null;}}root??=await this.law('lawService.do',{MST:mst,JO:major.padStart(4,'0')+sub.padStart(2,'0')});const official=content(find(root,'법령명_한글')).trim();if(official&&compact(official)!==compact(name))fail('조회된 법령 본문과 검색 결과의 법령명이 다릅니다.',502);
  const title='제'+article.replace('의','조의')+(article.includes('의')?'':'조');return {law:text(row,'법령명한글'),article,paragraph,clause,cite:text(row,'법령명한글')+' '+title+(paragraph?' 제'+paragraph+'항':'')+(clause?' 제'+clause.replace('의','호의')+(clause.includes('의')?'':'호'):''),excerpt:extract(root,article,paragraph,clause),articleExcerpt:extract(root,article),paragraphExcerpt:paragraph?extract(root,article,paragraph):'',paragraphSegments:paragraph?segments(articleNode(root,article,paragraph)):[],verified:true,retrievalProvider:root.retrievalProvider||'api',mst,kind:text(row,'법령구분명'),effectiveDate:text(row,'시행일자'),verifiedAt:new Date().toISOString(),sourceUrl:'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq='+mst};
  }
  async basis(candidate){const code=candidate.basisCode,rule=rules[code];if(!rule||rule.effect==='consent')fail('동의 외의 개인정보 보호법 근거를 먼저 선택하세요.',400);const [pipa,support,paragraph]=await Promise.all([this.citation({law:'개인정보 보호법',article:rule.article,paragraph:rule.paragraph,clause:rule.clause}),rule.support?this.citation({law:'개인정보 보호법',...rule.support}):null,this.citation({law:'개인정보 보호법',article:rule.article,paragraph:rule.paragraph,clause:''})]);return {...pipa,pipa,pipaParagraph:paragraph,basisCode:code,type:candidate.type||'required',pipaVerified:true,support,supportVerified:!rule.support||Boolean(support)};}

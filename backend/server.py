@@ -123,6 +123,7 @@ def law_request(endpoint, **params):
         root = api_law_request(endpoint, **params)
         if client is not None:
             with client.lock:
+                if endpoint == 'lawService.do' and not params.get('JO'):client.full_bodies[str(params.get('MST'))]=root
                 if endpoint == 'lawSearch.do':
                     for row in root.findall('.//law'):
                         if compact(text(row,'법령명한글')) == compact(params.get('query','')) and re.fullmatch(r'\d{8}',text(row,'시행일자')):
@@ -136,6 +137,7 @@ def law_request(endpoint, **params):
         try:
             root = client.law(endpoint, params)
             root.set('retrievalProvider', 'mcp')
+            if endpoint == 'lawService.do' and not params.get('JO'):client.full_bodies[str(params.get('MST'))]=root
             return root
         except Exception:
             raise error from None
@@ -475,7 +477,12 @@ def verify_citation(candidate):
     if candidate.get('mst') and str(candidate['mst']) != mst:
         raise ApiError('법령 버전이 변경되었습니다. 법령을 다시 검색해 선택하세요.', 422)
     major, _, sub = article.partition('의')
-    root = law_request('lawService.do', MST=mst, **({'JO': major.zfill(4)+(sub or '0').zfill(2)} if MCP_CONTEXT.get() is not None else {}))
+    client = MCP_CONTEXT.get()
+    root = client.full_bodies.get(str(mst)) if client is not None else None
+    if root is not None:
+        try:extract_article(root,article)
+        except ApiError:root=None
+    if root is None:root = law_request('lawService.do', MST=mst, **({'JO': major.zfill(4)+(sub or '0').zfill(2)} if client is not None else {}))
     excerpt = extract_article(root, article, paragraph, clause)
     # Confirm the body itself belongs to the searched current law version.
     official_name = root.findtext('.//기본정보/법령명_한글')

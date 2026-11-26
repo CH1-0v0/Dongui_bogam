@@ -48,7 +48,7 @@ def law_xml(raw,name,date,jo=''):
 
 class LawMcp:
     def __init__(self):
-        self.max_articles=4;self.terms={};self.session='';self.ident=0;self.ready=False;self.rows={};self.memo={};self.lock=threading.RLock()
+        self.full_bodies={};self.max_articles=4;self.terms={};self.session='';self.ident=0;self.ready=False;self.rows={};self.memo={};self.lock=threading.RLock()
     def rpc(self,method,params,notification=False):
         if getattr(self,'unavailable',False):raise ValueError('MCP unavailable for this request')
         try:return self.request_rpc(method,params,notification)
