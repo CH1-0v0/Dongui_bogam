@@ -137,6 +137,12 @@ def kept_period_choice(user_text):
     m=re.search(r'보유\s*및\s*이용기간[:：]\s*(.+?)\.?\s*현재 기간을 그대로 사용합니다',line)
     value=clean(m.group(1),300) if m else ''
     return {'value':value,'sourceId':'user','quote':line[:1500]} if re.search(r'[0-9가-힣A-Za-z]',value) else None
+def retention_source_for(value, source_id, sources):
+    """A period value the AI could not quote exactly, but which appears in a verified retention provision."""
+    v=norm(value)
+    if not v or len(v)>40:return None
+    has=lambda s:v in norm(s['text']) and re.search(r'보존|보유|보관',s['text'])
+    return next((s for s in sources if s['id']==source_id and has(s)),None) or next((s for s in sources if has(s)),None)
 def law_period_suggestion(value, cite, reason):
     """A period quoted from the law whose application is not yet confirmed becomes an editable draft."""
     text=(cite+'에서 찾은 보유기간입니다. ' if cite else '법령 원문에서 찾은 보유기간입니다. ')+(clean(reason,300)+' ' if clean(reason,300) else '')+'적용 대상 서류와 기산점을 확인해 수정해 주세요.'
@@ -269,6 +275,10 @@ def work_plan(data, api):
     if period:period_status = 'verified_quote'
     period_origin = ('user' if period_claim.get('sourceId') == 'user' else 'law') if period else ''
     law_period_draft = None
+    if not period and period_status == 'quote_not_verified' and period_claim.get('sourceId') != 'user':
+        value = clean(period_claim.get('value'),300)
+        source = retention_source_for(value, period_claim.get('sourceId'), sources)
+        if source:law_period_draft = law_period_suggestion(value, source['proof'].get('cite'), '')
     if period and period_origin == 'law':
         source = next(s for s in sources if s['id'] == period_claim['sourceId'])
         review = api.discovery_json(POLICY['periodReview'],{'business':business,'messages':messages,'period':period,'evidence':source['text'],'verifiedSources':[{'id':s['id'],'cite':s['proof'].get('cite'),'text':s['text'][:11000]} for s in sources]},field='plan',max_tokens=1000)

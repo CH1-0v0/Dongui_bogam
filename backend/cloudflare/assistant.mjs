@@ -50,6 +50,8 @@ export function linkResidentGrounds(grounds,proposedGrounds=[]){
 }
 // Unconfirmed resident permission: each fact still to check becomes its own O/X question.
 // A period quoted from the law whose application to this work is not yet confirmed: offer it as an editable draft.
+// A period value the AI could not quote exactly, but which appears in a verified retention provision.
+export function retentionSourceFor(value,sourceId,sources){const v=norm(value);if(!v||v.length>40)return null;const has=s=>norm(s.text).includes(v)&&/보존|보유|보관/.test(s.text);return sources.find(s=>s.id===sourceId&&has(s))||sources.find(has)||null;}
 export function lawPeriodSuggestion(value,cite,reason){return {suggestedPeriod:value,suggestionReason:clean((cite?cite+'에서 찾은 보유기간입니다. ':'법령 원문에서 찾은 보유기간입니다. ')+(clean(reason,300)?clean(reason,300)+' ':'')+'적용 대상 서류와 기산점을 확인해 수정해 주세요.',500)};}
 // The user's explicit "keep this period" choice is a user-entered value and must survive later turns.
 export function keptPeriodChoice(userText){const line=String(userText||'').split('\n').reverse().find(t=>/보유\s*및\s*이용기간[:：].+현재 기간을 그대로 사용합니다/.test(t));const value=clean(line?.match(/보유\s*및\s*이용기간[:：]\s*(.+?)\.?\s*현재 기간을 그대로 사용합니다/)?.[1],300);return /[0-9가-힣A-Za-z]/.test(value)?{value,sourceId:'user',quote:line.slice(0,1500)}:null;}
@@ -127,6 +129,7 @@ export async function workPlan(api,data){
  if(period)periodStatus='verified_quote';
  let periodOrigin=period?(periodClaim.sourceId==='user'?'user':'law'):'';
  let lawPeriodDraft=null;
+ if(!period&&periodStatus==='quote_not_verified'&&periodClaim.sourceId!=='user'){const value=clean(periodClaim.value,300),source=retentionSourceFor(value,periodClaim.sourceId,sources);if(source)lawPeriodDraft=lawPeriodSuggestion(value,source.proof.cite,'');}
  if(period&&periodOrigin==='law'){const source=sources.find(s=>s.id===periodClaim.sourceId);const review=await api.ai(policy.periodReview,{business,messages,period,evidence:source?.text,verifiedSources:material.sources},1000);if(review.verdict!=='possible'){if(review.verdict!=='not_supported')lawPeriodDraft=lawPeriodSuggestion(period,source?.proof?.cite,review.reason);period='';periodOrigin='';periodStatus=['needs_information','not_supported'].includes(review.verdict)?review.verdict:'review_incomplete';}else periodStatus='verified';}
  const kept=keptPeriodChoice(userText);
  if(!period&&kept){period=kept.value;periodOrigin='user';periodStatus='user_confirmed';periodClaim=kept;lawPeriodDraft=null;}
