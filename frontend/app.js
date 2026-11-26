@@ -714,23 +714,28 @@ function previewMarkup(html,editing=false){
  return `<p class="a4-preview-status muted" role="status">${editing?'색과 점선으로 표시한 부분을 직접 수정할 수 있습니다. 저장하면 A4 쪽 미리보기가 갱신됩니다.':'A4 미리보기를 준비하고 있습니다…'}</p>${previewControls(editing,true)}<div class="a4-document-frame" role="region" aria-label="A4 문서 쪽 미리보기" data-zoom="1" hidden></div>${previewControls(editing)}<div id="preview-docs" class="document-source">${html}</div>`;
 }
 
-let a4PreviewVersion=0,a4PreviewTimer,pdfViewer,a4PreviewCache;
+let a4PreviewVersion=0,a4PreviewTimer,pdfViewer,a4PreviewCache,a4PreviewPage=1;
 const warmPdfPreview=()=>{import('./pdf-export.js').then(m=>m.preparePdf()).catch(()=>{});pdfViewer??=import('./export-assets/pdfjs.min.js').catch(error=>{pdfViewer=null;throw error;});pdfViewer.catch(()=>{});};
 function scheduleA4Preview(){
  clearTimeout(a4PreviewTimer);const version=++a4PreviewVersion;
  const frame=document.querySelector('.a4-document-frame'),status=document.querySelector('.a4-preview-status');
  if(!frame||step===4&&documentEditing)return;
+ // Keep the previous pages on screen while the new PDF is built, then swap all pages at once (no blank flash).
+ const showPages=pages=>{frame.replaceChildren(...pages);frame.hidden=false;frame.dataset.pages=pages.length;status.textContent='A4 · 총 '+pages.length+'쪽';document.querySelector('#preview-docs').hidden=true;showA4Page(a4PreviewPage);};
+ if(!frame.querySelector('.a4-paper')&&a4PreviewCache?.pages?.length)showPages(a4PreviewCache.pages);
+ // Typing: wait for a short pause before rebuilding the PDF.
+ const delay=frame.querySelector('.a4-paper')?600:0;
  a4PreviewTimer=setTimeout(async()=>{
   let documentPdf,loadingTask;
   try{
    const body=exportBody(),key=body.innerHTML;
-   if(a4PreviewCache?.key===key){frame.replaceChildren(...a4PreviewCache.pages);frame.hidden=false;frame.dataset.pages=a4PreviewCache.pages.length;status.textContent='A4 · 총 '+a4PreviewCache.pages.length+'쪽';document.querySelector('#preview-docs').hidden=true;showA4Page(1);return;}
+   if(a4PreviewCache?.key===key){showPages(a4PreviewCache.pages);return;}
    const blob=await (await import('./pdf-export.js')).createPdf(body,documentTableGrid);
    const viewer=await (pdfViewer??=import('./export-assets/pdfjs.min.js').catch(error=>{pdfViewer=null;throw error;}));
    if(version!==a4PreviewVersion||!frame.isConnected)return;
    viewer.GlobalWorkerOptions.workerSrc=new URL('/export-assets/pdfjs-worker.min.js',location.origin).href;
    loadingTask=viewer.getDocument({data:new Uint8Array(await blob.arrayBuffer()),isEvalSupported:false,useWasm:false});documentPdf=await loadingTask.promise;
-   const pages=[];frame.replaceChildren();
+   const pages=[];
    for(let n=1;n<=documentPdf.numPages;n++){
     if(version!==a4PreviewVersion||!frame.isConnected)return;
     const page=await documentPdf.getPage(n),viewport=page.getViewport({scale:1.5}),paper=document.createElement('section');
@@ -738,15 +743,13 @@ function scheduleA4Preview(){
     const label=document.createElement('p');label.className='a4-page-label';label.textContent=n+' / '+documentPdf.numPages+'쪽';paper.append(label);
     const canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);canvas.setAttribute('aria-hidden','true');paper.append(canvas);
     await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
-    const accessible=document.createElement('div');accessible.className='a4-page-text';accessible.textContent=(await page.getTextContent()).items.map(i=>i.str).join(' ');paper.append(accessible);pages.push(paper);frame.append(paper);
-    if(n===1){frame.hidden=false;document.querySelector('#preview-docs').hidden=true;frame.dataset.pages=documentPdf.numPages;status.textContent='A4 · 총 '+documentPdf.numPages+'쪽';fitA4Page();}
+    const accessible=document.createElement('div');accessible.className='a4-page-text';accessible.textContent=(await page.getTextContent()).items.map(i=>i.str).join(' ');paper.append(accessible);pages.push(paper);
    }
    if(version!==a4PreviewVersion||!frame.isConnected)return;
-   a4PreviewCache={key,pages};frame.hidden=false;frame.dataset.pages=documentPdf.numPages;
-   status.textContent='A4 · 총 '+documentPdf.numPages+'쪽';showA4Page(1);
+   a4PreviewCache={key,pages};showPages(pages);
   }catch{if(version===a4PreviewVersion&&frame.isConnected){status.textContent='A4 미리보기를 만들지 못했습니다. 문서 내용을 확인한 뒤 다시 시도해 주세요.';document.querySelector('#preview-docs').hidden=false;frame.hidden=true;}}
   finally{await loadingTask?.destroy().catch(()=>{});}
- },0);
+ },delay);
 }
 
 function fitA4Page(){
@@ -759,7 +762,7 @@ function fitA4Page(){
 function showA4Page(page){
  const frame=document.querySelector('.a4-document-frame');if(!frame)return;
  const pages=[...frame.querySelectorAll('.a4-paper')];page=Math.max(1,Math.min(pages.length,page));if(!pages.length)return;
- pages.forEach((paper,n)=>paper.hidden=n+1!==page);frame.dataset.currentPage=page;
+ pages.forEach((paper,n)=>paper.hidden=n+1!==page);frame.dataset.currentPage=page;a4PreviewPage=page;
  document.querySelectorAll('.a4-page-counter').forEach(n=>n.textContent=page+' / '+pages.length+'쪽');
  document.querySelectorAll('[data-preview-move="-1"]').forEach(n=>n.disabled=page===1);document.querySelectorAll('[data-preview-move="1"]').forEach(n=>n.disabled=page===pages.length);
  fitA4Page();
@@ -822,11 +825,11 @@ function reviewDocument(){
   return {title:documentCategory(s),checks};
  });
  const items=[
-  [consent.length?'필수 고지 항목 기재':'고지사항 기재',!missingCell&&refusalCount===consent.length&&audit.every(section=>section.checks.every(([,ok])=>ok))?'확인':'보완 필요',
+  [consent.length?'필수 고지 항목 기재':'고지사항 기재',!missingCell&&refusalCount===consent.length&&audit.every(section=>section.checks.every(([,ok])=>ok))?'적정':'보완 필요',
    '목적, 항목, 보유·이용 기간, 해당 시 제공받는 자, 거부권·불이익 기재 여부를 확인합니다.'],
-  ['동의란 구분',!consent.length?'해당 없음':choiceCount===consent.length?'확인':'보완 필요',
+  ['동의란 구분',!consent.length?'해당 없음':choiceCount===consent.length?'적정':'보완 필요',
    '동의가 필요한 각 구분에 동의·미동의 표시가 있는지 확인합니다.'],
-  ['법정대리인 동의란',state.child?(body.querySelector('.guardian-relationship')?'확인':'보완 필요'):'해당 없음',
+  ['법정대리인 동의란',state.child?(body.querySelector('.guardian-relationship')?'적정':'보완 필요'):'해당 없음',
    '아동 대상인 경우 법정대리인 서명란과 관계 기입란을 확인합니다.'],
   ['법적 근거와 동의 범위의 적정성','담당자 확인 필요',
    notices.length?'채택한 근거가 고지 항목에 실제로 적용되는지 확인해 주세요.':'동의가 필요한 처리 범위와 동의 방법이 적절한지 확인해 주세요.'],
@@ -842,18 +845,18 @@ function reviewDocument(){
 }
 function finalPage(){
  const {items,html,audit=[]}=finalDocument;
- const pill=status=>`<span class="pill ${['확인','해당 없음','반영'].includes(status)?'':'pending'}">${status}</span>`;
+ const pill=status=>`<span class="pill ${['적정','확인','해당 없음','반영'].includes(status)?'':'pending'}">${status}</span>`;
  const row=([title,status,description])=>`<li><div><strong>${safe(title)}</strong> ${status==='담당자 확인 필요'?'':pill(status)}</div><p>${safe(description)}</p></li>`;
  const auditBody=choices=>audit.length?audit.map(section=>`<section><h3>${safe(section.title)}</h3><ul>${section.checks.filter(([label])=>/독립된 동의|동의란의/.test(label)===choices).map(([label,ok])=>`<li><label><input type="checkbox" disabled ${ok?'checked':''}>${safe(label)} <span>${ok?'확인':'보완 필요'}</span></label></li>`).join('')}</ul></section>`).join(''):'<p class="not-applicable">동의 항목이 없는 고지서입니다. 동의란 점검은 해당사항 없습니다.</p>';
  const collectionRisk=Object.keys(groupNames).some(key=>collectionRiskFindings(entries().filter(e=>e.key===key)).length);
- const pending=[...items.filter(([,status])=>!['확인','해당 없음','반영'].includes(status)),['과다 수집 가능성',collectionRisk?'담당자 확인 필요':'확인',collectionRisk?'수집 목적에 비해 과다 수집 가능성이 있습니다. 항목의 필요성은 담당자가 최종 판단해 주세요.':'간단한 점검에서 과다 수집 가능성이 적습니다. 목적에 필요한 항목인지 담당자가 최종 확인해 주세요.']];
+ const pending=[...items.filter(([,status])=>!['적정','확인','해당 없음','반영'].includes(status)),['과다 수집 가능성',collectionRisk?'담당자 확인 필요':'확인',collectionRisk?'수집 목적에 비해 과다 수집 가능성이 있습니다. 항목의 필요성은 담당자가 최종 판단해 주세요.':'간단한 점검에서 과다 수집 가능성이 적습니다. 목적에 필요한 항목인지 담당자가 최종 확인해 주세요.']];
  return `<div class="title final-title"><div><h1 tabindex="-1">최종본</h1><p>최종본을 확인하고 저장하거나 인쇄하세요.</p></div><button data-new-consent>새 동의서 만들기</button></div>
  <div class="final-layout"><section class="panel final-review" aria-labelledby="final-review-title"><h2 id="final-review-title">최종 점검 결과</h2>
  <p class="muted">자동 점검은 기재 여부를 확인합니다. 법적 근거와 동의 범위의 적정성은 담당자가 확인해 주세요.</p>
  <details class="human-review" open><summary><strong>담당자가 확인할 사항</strong></summary><ul>${pending.map(([title,status,description],index)=>`<li><label class="human-check"><input type="checkbox" aria-label="${safe(title)} 담당자 확인"><strong>${safe(title)}</strong></label><p>${safe(description)}</p></li>`).join('')}</ul></details>
  <details class="review-checks" data-audit-kind="fields"><summary><span class="review-check-title"><strong>${items[0][0]}</strong><span class="review-toggle" aria-hidden="true"></span>${pill(items[0][1])}</span><span class="review-check-description">${items[0][2]}</span></summary><div class="consent-audit">${auditBody(false)}</div></details>
  <details class="review-checks" data-audit-kind="choices"><summary><span class="review-check-title"><strong>동의란 구분</strong><span class="review-toggle" aria-hidden="true"></span>${pill(items[1][1])}</span><span class="review-check-description">${items[1][2]}</span></summary><div class="choice-audit">${auditBody(true)}</div></details>
- <ul>${items.slice(2).filter(([,status])=>['확인','반영'].includes(status)).map(row).join('')}</ul><a href="${reference}" target="_blank" rel="noopener">개인정보 보호법 원문</a><ul class="not-applicable-review">${items.slice(2).filter(([,status])=>status==='해당 없음').map(row).join('')}</ul></section>
+ <ul>${items.slice(2).filter(([,status])=>['적정','확인','반영'].includes(status)).map(row).join('')}</ul><a href="${reference}" target="_blank" rel="noopener">개인정보 보호법 원문</a><ul class="not-applicable-review">${items.slice(2).filter(([,status])=>status==='해당 없음').map(row).join('')}</ul></section>
  <section class="panel preview-panel final-preview"><div class="panelhead"><h2>A4 최종본</h2></div><div class="actions export"><button data-go="4">← 문서 수정</button><button data-pdf>PDF 저장</button><button data-hwpx>한글(HWPX) 저장</button><button class="primary" data-print>즉시 인쇄</button></div><p class="notice" id="output-status" role="status"></p>${previewMarkup(html)}</section></div>`;
 }
 
