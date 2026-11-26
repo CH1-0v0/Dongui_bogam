@@ -136,5 +136,16 @@ class ResidentGroundLinkTests(unittest.TestCase):
         link_resident_grounds(grounds)
         self.assertEqual(grounds[0]['itemNames'],['성명'])
 
+
+class LawPeriodDraftTests(unittest.TestCase):
+    def test_unconfirmed_law_period_becomes_draft(self):
+        result=WorkAssistantTests.run_plan(WorkAssistantTests(),period_verdict='needs_information')
+        self.assertEqual(result['period'],'')
+        self.assertEqual(result['suggestedPeriod'],'5년')
+        self.assertIn('에서 찾은 보유기간',result['suggestionReason'])
+    def test_unsupported_law_period_is_not_offered(self):
+        result=WorkAssistantTests.run_plan(WorkAssistantTests(),period_verdict='not_supported')
+        self.assertEqual(result['suggestedPeriod'],'')
+
 if __name__=='__main__':
     unittest.main()
