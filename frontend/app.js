@@ -1009,7 +1009,8 @@ quickForm.addEventListener('submit',e=>{
  state.groups.collect.purpose=quickPreview.querySelector('[data-quick-purpose]').value.trim();
  state.groups.collect.period=quickPreview.querySelector('[data-quick-period]').value.trim();
  state.quickNote=template.note||'';
- names.forEach(name=>add('collect',name));
+ // A template may mark all of its items required (e.g. lecture/advisory fee payment).
+ names.forEach(name=>add('collect',name,template.required===true));
  tab='collect';reached=0;
  quickDialog.close();
  go(1);
