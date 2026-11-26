@@ -26,7 +26,8 @@ function workGroundsSummary(plan,stale=false){
  const supplementary={residentLaw:'주민등록번호 처리',sensitiveLaw:'민감정보 처리',uniqueLaw:'고유식별정보 처리'};
  const entered=[...(plan.grounds||[]).map(g=>({...g,pending:false})),...(plan.proposedGrounds||[]).map(g=>({...g,pending:true}))];
  const rows=new Map();for(const g of entered){const key=g.cite||cite(g);const row=rows.get(key)||{cite:key,role:supplementary[g.basisCode]||'수집·이용',pending:true};row.pending=row.pending&&g.pending;rows.set(key,row);}
- const list=[...rows.values()].sort((a,b)=>(a.role!=='수집·이용')-(b.role!=='수집·이용'));
+ const byRole=new Map();for(const g of [...rows.values()].sort((a,b)=>(a.role!=='수집·이용')-(b.role!=='수집·이용'))){const key=g.role+'|'+(g.pending||stale);if(!byRole.has(key))byRole.set(key,{...g,cites:[]});byRole.get(key).cites.push(g.cite);}
+ const list=[...byRole.values()].map(g=>({...g,cite:LawBasis.compactCites(g.cites)}));
  const items=[...new Map([...(plan.items||[]),...(plan.retainedItems||[])].map(i=>[i.name,i])).values()];
  const covered=new Set(entered.flatMap(g=>g.itemNames||[]));const missing=items.filter(i=>!covered.has(i.name));
  return `<div class="work-law-plan"><h4>법적 근거</h4>${list.length?`<ul>${list.map(g=>`<li><strong>${safe(g.cite)}</strong> <span class="muted">· ${safe(g.role)}${g.pending||stale?' · 확인 필요':''}</span></li>`).join('')}</ul>`:'<p class="notice">현재 조회 결과에서 적용할 근거를 찾지 못했습니다.</p>'}${missing.length?`<details class="work-missing-grounds"><summary>근거 확인이 필요한 항목 ${missing.length}개</summary><p>${missing.map(i=>safe(i.name)).join(', ')}</p></details>`:''}</div>`;

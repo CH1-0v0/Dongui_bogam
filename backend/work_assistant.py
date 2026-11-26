@@ -69,9 +69,20 @@ def irrelevant_income_source(proof,user_messages):
     if re.search('가산세|과태료|벌칙',title):return True
     return proof.get('law')=='소득세법' and len(declared)==1 and any(k!=declared[0] and k in title for k in types) and declared[0] not in title
 
+def compact_cites(cites):
+    """Write the law name once per law: "의료법 제14조, 제16조"; 의료법 and 의료법 시행령 stay separate."""
+    groups={}
+    for raw in cites:
+        text=str(raw or '').strip()
+        if not text:continue
+        m=re.match(r'^(.+?)\s+(제\d.*)$',text)
+        law,rest=(m.group(1),m.group(2)) if m else (text,'')
+        parts=groups.setdefault(law,[])
+        if rest not in parts:parts.append(rest)
+    return ', '.join(law+' '+', '.join(p for p in parts if p) if any(parts) else law for law,parts in groups.items())
 def applicable_ground_summary(grounds):
     general=list(dict.fromkeys(g['cite'] for g in grounds if g['basisCode'] not in ['residentLaw','sensitiveLaw','uniqueLaw'] and g.get('itemNames')))
-    return ' 일반 수집·이용에 적용 예정인 근거: '+', '.join(general)+'.' if general else ' 일반 수집·이용에 적용할 근거는 현재 조회 결과에서 아직 확인하지 못했습니다.'
+    return ' 일반 수집·이용에 적용 예정인 근거: '+compact_cites(general)+'.' if general else ' 일반 수집·이용에 적용할 근거는 현재 조회 결과에서 아직 확인하지 못했습니다.'
 
 SUPPLEMENT_CODES=['residentLaw','sensitiveLaw','uniqueLaw']
 def law_family(law):
@@ -95,7 +106,7 @@ def link_resident_grounds(grounds,proposed_grounds=None):
 def resident_summary(check,grounds):
     general=list(dict.fromkeys(g.get('cite') for g in grounds if g.get('basisCode') not in SUPPLEMENT_CODES and '주민등록번호' in g.get('itemNames',[])))
     if check.get('status')=='confirmed':
-        return '주민등록번호는 처리할 수 있습니다. 구체적 허용 근거를 확인했습니다: '+str(check.get('cite',''))+('. 일반 수집·이용 근거: '+', '.join(general)+'. 두 근거를 함께 입력했습니다.' if general else '. 일반 수집·이용 근거는 3단계에서 함께 확인해 주세요.')
+        return '주민등록번호는 처리할 수 있습니다. 구체적 허용 근거를 확인했습니다: '+str(check.get('cite',''))+('. 일반 수집·이용 근거: '+compact_cites(general)+'. 두 근거를 함께 입력했습니다.' if general else '. 일반 수집·이용 근거는 3단계에서 함께 확인해 주세요.')
     if check.get('status')=='unavailable':return '주민등록번호 근거가 없다는 판단이 아니라, 원문 조회를 완료하지 못한 상태입니다.'
     checks=check.get('checks') or []
     return '주민등록번호의 구체적 허용 근거'+('('+check['cite']+')' if check.get('cite') else '')+'가 현재 업무에 적용되는지 확정하지 못했습니다.'+(' 아래 O/X 질문에 답해 주시면 다시 확인합니다.' if checks else '')

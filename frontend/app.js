@@ -680,7 +680,7 @@ function noticeTable(sections,editable){
  const first=sections[0],provider=sections.some(s=>s.key==='provide'),mixed=new Set(sections.map(s=>s.key+Boolean(s.g.outside))).size>1,grouped=new Map();
  for(const s of sections)for(const i of s.items){
   const values=Object.fromEntries(['purpose','period','recipient'].map(k=>[k,state.edits[i.id+'.'+k]??s.g[k]??'']));
-  const basis=[...new Set((i.bases||[]).filter(b=>LawBasis.rules[b.basisCode]?.effect!=='consent').map(b=>b.cite))].sort().join(' / ');
+  const basis=LawBasis.compactCites([...new Set((i.bases||[]).filter(b=>LawBasis.rules[b.basisCode]?.effect!=='consent').map(b=>b.cite))].sort());
   const context=s.key==='provide'&&s.g.outside?'목적 외 제공':groupNames[s.key];
   const key=JSON.stringify([values,basis,context]);
   if(!grouped.has(key))grouped.set(key,{values,basis,context,items:[]});grouped.get(key).items.push(i);

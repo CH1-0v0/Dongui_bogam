@@ -24,9 +24,11 @@ export function irrelevantIncomeSource(proof,userMessages){
  if(/가산세|과태료|벌칙/.test(title))return true;
  return proof.law==='소득세법'&&declared.length===1&&types.some(k=>k!==declared[0]&&title.includes(k))&&!title.includes(declared[0]);
 }
+// Write the law name once per law: "의료법 제14조, 제16조"; 의료법 and 의료법 시행령 stay separate.
+export function compactCites(cites){const groups=new Map();for(const raw of cites){const text=String(raw||'').trim();if(!text)continue;const m=text.match(/^(.+?)\s+(제\d.*)$/),law=m?m[1]:text,rest=m?m[2]:'';if(!groups.has(law))groups.set(law,[]);if(!groups.get(law).includes(rest))groups.get(law).push(rest);}return [...groups].map(([law,parts])=>parts.filter(Boolean).length?law+' '+parts.filter(Boolean).join(', '):law).join(', ');}
 export function applicableGroundSummary(grounds){
  const general=[...new Set(grounds.filter(g=>!['residentLaw','sensitiveLaw','uniqueLaw'].includes(g.basisCode)&&g.itemNames?.length).map(g=>g.cite))];
- return general.length?' 일반 수집·이용에 적용 예정인 근거: '+general.join(', ')+'.':' 일반 수집·이용에 적용할 근거는 현재 조회 결과에서 아직 확인하지 못했습니다.';
+ return general.length?' 일반 수집·이용에 적용 예정인 근거: '+compactCites(general)+'.':' 일반 수집·이용에 적용할 근거는 현재 조회 결과에서 아직 확인하지 못했습니다.';
 }
 const supplementCodes=['residentLaw','sensitiveLaw','uniqueLaw'];
 const lawFamily=law=>norm(law).replace(/(?:시행령|시행규칙)$/,'');
@@ -54,7 +56,7 @@ export function keptPeriodChoice(userText){const line=String(userText||'').split
 export function residentChoiceQuestions(check,relevant){return relevant&&check?.status==='needs_information'?[...new Set((check.checks||[]).map(checkToChoiceQuestion).filter(Boolean))].slice(0,3):[];}
 export function residentSummary(check,grounds){
  const general=[...new Set(grounds.filter(g=>!supplementCodes.includes(g.basisCode)&&g.itemNames?.includes('주민등록번호')).map(g=>g.cite))];
- if(check.status==='confirmed')return '주민등록번호는 처리할 수 있습니다. 구체적 허용 근거를 확인했습니다: '+check.cite+(general.length?'. 일반 수집·이용 근거: '+general.join(', ')+'. 두 근거를 함께 입력했습니다.':'. 일반 수집·이용 근거는 3단계에서 함께 확인해 주세요.');
+ if(check.status==='confirmed')return '주민등록번호는 처리할 수 있습니다. 구체적 허용 근거를 확인했습니다: '+check.cite+(general.length?'. 일반 수집·이용 근거: '+compactCites(general)+'. 두 근거를 함께 입력했습니다.':'. 일반 수집·이용 근거는 3단계에서 함께 확인해 주세요.');
  if(check.status==='unavailable')return '주민등록번호 근거가 없다는 판단이 아니라, 원문 조회를 완료하지 못한 상태입니다.';
  return '주민등록번호의 구체적 허용 근거'+(check.cite?'('+check.cite+')':'')+'가 현재 업무에 적용되는지 확정하지 못했습니다.'+(check.checks?.length?' 아래 O/X 질문에 답해 주시면 다시 확인합니다.':'');
 }
