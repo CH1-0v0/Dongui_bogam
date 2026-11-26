@@ -7,7 +7,7 @@ export function discoveryScope(context,extraTerms=[]){
  for(const p of profiles)for(const term of p.terms)terms.set(term,4);
  for(const i of context.items){if(i.classification==='rnn')for(const term of ['주민등록번호','고유식별정보'])terms.set(term,3);if(i.classification==='sensitive')for(const term of ['민감정보','건강정보'])terms.set(term,3);for(const term of (i.purpose+' '+i.name).split(/[^가-힣A-Za-z0-9]+/))if(term.length>=2&&term.length<=30&&!['위한','관한','따른','정보','개인정보','확인','처리','수집','이용'].includes(term)&&!terms.has(term))terms.set(term,1);}
  for(const term of extraTerms.slice(0,12))if(typeof term==='string'&&term.length>=2&&term.length<=30&&!terms.has(term))terms.set(term,2);
- return {identifierLaws:profiles.flatMap(p=>p.identifierLaws||[]),laws:profiles.flatMap(p=>p.laws),terms:[...terms].map(([text,weight])=>({text,weight}))};
+ return {identifierLaws:profiles.flatMap(p=>p.identifierLaws||[]),facts:profiles.map(p=>p.facts).filter(Boolean),laws:profiles.flatMap(p=>p.laws),terms:[...terms].map(([text,weight])=>({text,weight}))};
 }
 // How much searching a chat turn needs: 'consent' (event-like, no specific law), 'profile' (known laws), or 'full'.
 export function discoveryMode(text,context){const t=String(text||'');if(new RegExp(config.fullSearchSignals).test(t)&&!discoveryScope(context).laws.length)return 'full';if(discoveryScope(context).laws.length)return 'profile';return new RegExp(config.consentSignals).test(t)&&!new RegExp(config.fullSearchSignals).test(t)?'consent':'full';}

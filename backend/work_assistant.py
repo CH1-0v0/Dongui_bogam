@@ -187,6 +187,9 @@ def work_plan(data, api):
     asks_ground=bool(re.search(r'근거|법령|수집.*가능',latest_user) and re.search(r'[?？]|나요|가요|까요|습니까|정말|궁금|확인해|알려',latest_user))
     search_purpose='\n'.join([business[:170]]+[m['content'][:150] for m in recent_users[-2:]])[:500]
     context = {'additionalAnswers':[m['content'] for m in recent_users[-4:]],'items':[{'name':name,'purpose':search_purpose,'recipient':manual['recipient'],'type':kind,'context':kind,'classification':classification(name)} for name in ['성명','주민등록번호','건강정보']]}
+    discovery_config_facts=json.loads((Path(__file__).parent/'cloudflare/evidence-discovery.json').read_text())
+    business_facts=[p['facts'] for p in discovery_config_facts['profiles'] if p.get('facts') and re.search(p['signals'],search_purpose)]
+    if business_facts:review_purpose=('업무 전제: '+' '.join(business_facts)+'\n'+review_purpose)[:1500]
     discovery_failures = []
     previous = {'items':[], 'period':None}
     def quote_window(quote,value,limit=250):
@@ -261,7 +264,7 @@ def work_plan(data, api):
         return {'evidenceRefs':refs,'evidenceFacts':facts,'evidenceToken':api.create_review_token((api.os.environ.get('OPENROUTER_API_KEY','')+':work-state-v2').encode(),ref_fingerprint(business,kind,refs,facts,flow),ttl=86400),'evidenceExpiresAt':int(time.time()*1000)+86400000}
     if not sources and failures and (previous['items'] or previous['period']):
         return dict({'agency':manual['agency'],'purpose':business,'shortPurpose':'','recipient':manual['recipient'],'items':[],'period':'','periodOrigin':'','grounds':[],'verifiedSources':[],'retainedItems':[dict(i,classification=classification(i['name']),origin='user' if i['sourceId']=='user' else 'law') for i in previous['items']],'retainedPeriod':previous['period']['value'] if previous['period'] else '', 'incomplete':True,'reply':'공식 원문을 재확인하지 못했습니다. 이전에 확인한 항목과 기간은 지우지 않고 보관했습니다.','questions':['잠시 후 근거를 다시 확인해 주세요. 항목을 다시 입력하실 필요는 없습니다.'],'failures':failures,'residentCheck':{'status':'unavailable','checks':['공식 원문 재확인 필요']},'checkedAt':0,'legalChecked':False},**checkpoint(previous))
-    answer = api.discovery_json(POLICY['prompt'], {'business':business,'type':kind,'flow':flow,'messages':messages,'manual':manual,'research':research_material,'previousFacts':previous,'sources':[{'id':s['id'],'cite':s['proof'].get('cite'),'text':s['text'][:11000]} for s in sources]}, field='plan', max_tokens=4500)
+    answer = api.discovery_json(POLICY['prompt'], {'business':business,'type':kind,'flow':flow,'messages':messages,'manual':manual,'businessFacts':business_facts,'research':research_material,'previousFacts':previous,'sources':[{'id':s['id'],'cite':s['proof'].get('cite'),'text':s['text'][:11000]} for s in sources]}, field='plan', max_tokens=4500)
     if not isinstance(answer.get('items'), list) or len(answer['items']) > 30 or not isinstance(answer.get('period'),dict):
         raise api.ApiError('업무 정리 응답을 읽지 못했습니다. 다시 시도하세요.',502)
     def supported(value, claim):

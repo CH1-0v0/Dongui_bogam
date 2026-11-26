@@ -78,11 +78,14 @@ export function assistantInput(data){
 export async function workPlan(api,data){
  const input=assistantInput(data),{business,type,flow,messages,manual,userText}=input;
  if(!api.env.OPENROUTER_API_KEY||!api.env.LAW_API_OC)throw new ApiError('AI 및 공식 법령 연결 설정을 확인해 주세요.',503);
- const reviewPurpose=[flow==='provide'?(type==='outside'?'처리: 목적 외 제공':'처리: 제3자 제공'):flow==='extra'?'처리: 목적 외 이용':'처리: 수집·이용',business.slice(0,500),...messages.filter(m=>m.role==='user').slice(-3).map(m=>m.content.slice(0,250)),manual.agency?'처리 기관: '+manual.agency:''].join('\n').slice(0,1500);
+ let reviewPurpose=[flow==='provide'?(type==='outside'?'처리: 목적 외 제공':'처리: 제3자 제공'):flow==='extra'?'처리: 목적 외 이용':'처리: 수집·이용',business.slice(0,500),...messages.filter(m=>m.role==='user').slice(-3).map(m=>m.content.slice(0,250)),manual.agency?'처리 기관: '+manual.agency:''].join('\n').slice(0,1500);
  const recentUsers=messages.filter(m=>m.role==='user');
  const asksGround=/근거|법령|수집.*가능/.test(recentUsers.at(-1)?.content||'')&&/[?？]|나요|가요|까요|습니까|정말|궁금|확인해|알려/.test(recentUsers.at(-1)?.content||'');
  const searchPurpose=[business.slice(0,170),...recentUsers.slice(-2).map(m=>m.content.slice(0,150))].join('\n').slice(0,500);
  const context={additionalAnswers:recentUsers.slice(-4).map(m=>m.content),items:['성명','주민등록번호','건강정보'].map(name=>({name,purpose:searchPurpose,recipient:manual.recipient||'',type,context:type,classification:classification(name)}))};
+ // Standard legal premises of a known work type (e.g. withholding duty for lecture fees), given to drafting and review.
+ const businessFacts=discoveryScope(context).facts||[];
+ if(businessFacts.length)reviewPurpose=['업무 전제: '+businessFacts.join(' '),reviewPurpose].join('\n').slice(0,1500);
  let researchMaterial=null;let refs=[],discoveryFailures=[],previous={items:[],period:null};
  const quoteWindow=(quote,value,limit=250)=>{const text=norm(clean(quote,1500)),at=text.indexOf(norm(value))>=0?text.indexOf(norm(value)):(classification(value)==='rnn'?text.indexOf('주민번호'):-1);return text.slice(Math.max(0,at-40),Math.max(0,at-40)+limit);};
  const factItem=i=>({name:clean(i?.name,100),required:i?.required===true,sourceId:clean(i?.sourceId,20),quote:quoteWindow(i?.quote,i?.name)});
@@ -120,7 +123,7 @@ export async function workPlan(api,data){
  if(!sources.length&&!previous.items.length&&!previous.period)refs=[];
  const checkpoint=async facts=>({evidenceRefs:refs,evidenceFacts:facts,evidenceToken:await signReview(api.env.OPENROUTER_API_KEY+':work-state-v2',await digest({business,type,flow,refs,facts}),86400000),evidenceExpiresAt:Date.now()+86400000});
  if(!sources.length&&failures.length&&(previous.items.length||previous.period))return {agency:manual.agency||'',purpose:business,shortPurpose:'',recipient:manual.recipient||'',items:[],period:'',periodOrigin:'',grounds:[],verifiedSources:[],retainedItems:previous.items.map(i=>({...i,classification:classification(i.name),origin:i.sourceId==='user'?'user':'law'})),retainedPeriod:previous.period?.value||'',incomplete:true,reply:'공식 원문을 재확인하지 못했습니다. 이전에 확인한 항목과 기간은 지우지 않고 보관했습니다.',questions:['잠시 후 근거를 다시 확인해 주세요. 항목을 다시 입력하실 필요는 없습니다.'],failures,residentCheck:{status:'unavailable',checks:['공식 원문 재확인 필요']},...await checkpoint(previous),checkedAt:0,legalChecked:false};
- const material={business,type,flow,messages,manual,research:researchMaterial,previousFacts:previous,sources:sources.map(s=>({id:s.id,cite:s.proof.cite,text:s.text.slice(0,11000)}))};
+ const material={business,type,flow,messages,manual,businessFacts,research:researchMaterial,previousFacts:previous,sources:sources.map(s=>({id:s.id,cite:s.proof.cite,text:s.text.slice(0,11000)}))};
  const answer=await api.ai(policy.prompt,material,4500);mark('draft');
  if(!Array.isArray(answer.items)||answer.items.length>30||!answer.period||typeof answer.period!=='object'||Array.isArray(answer.period))throw new ApiError('업무 정리 응답을 읽지 못했습니다. 다시 시도하세요.',502);
  const supported=(value,claim)=>{const quote=clean(claim?.quote,1500),source=sources.find(s=>s.id===claim?.sourceId);return quote&&norm(quote).replaceAll('주민번호','주민등록번호').includes(norm(value).replaceAll('주민번호','주민등록번호'))&&(claim.sourceId==='user'?norm(userText).includes(norm(quote)):source&&norm(source.text).includes(norm(quote)));};
