@@ -540,3 +540,5 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .work-item-details summary,.work-proposal summary{cursor:pointer;font-weight:700;padding:10px 0}.work-proposal[open]{display:grid;gap:12px}.output-setting{border:1px solid var(--line);border-radius:16px;padding:24px}.output-setting h2{margin:0 0 12px}.output-settings>.auto-draft-fields{padding:20px;border:1px solid var(--line);border-radius:16px;background:white}
 
 .work-next .actions [data-work-finish]{margin-left:auto}
+
+.work-choice-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.work-choice-buttons button{min-height:38px}.work-law-plan{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.work-law-plan h4{margin:14px 0 7px;font-size:14px}.work-law-plan li{margin-bottom:10px;overflow-wrap:anywhere}.work-law-plan details{margin-top:4px}.work-law-plan summary{cursor:pointer}.work-law-plan .notice{font-size:13px}

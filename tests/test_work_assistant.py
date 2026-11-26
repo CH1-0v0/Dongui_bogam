@@ -100,3 +100,11 @@ class IncomeScopeTests(unittest.TestCase):
         from backend.work_assistant import irrelevant_income_source
         self.assertTrue(irrelevant_income_source({'law':'소득세법','articleExcerpt':'제144조(사업소득에 대한 원천징수)'},['기타소득으로 합니다.']))
         self.assertFalse(irrelevant_income_source({'law':'소득세법','articleExcerpt':'제145조(기타소득에 대한 원천징수)'},['기타소득으로 합니다.']))
+
+class GroundRolesTests(unittest.TestCase):
+    def test_general_ground_summary(self):
+        from backend.work_assistant import applicable_ground_summary
+        result=applicable_ground_summary([{'basisCode':'statutory','cite':'합성업무법 제10조','itemNames':['성명']},{'basisCode':'residentLaw','cite':'합성허용령 제20조','itemNames':['주민등록번호']}])
+        self.assertIn('합성업무법',result)
+        self.assertNotIn('합성허용령',result)
+        self.assertIn('아직 확인하지 못했습니다',applicable_ground_summary([]))
