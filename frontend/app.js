@@ -305,7 +305,7 @@ function groundPurpose(list){
 }
 function apiErrorMessage(error){
  if(error.name==='TimeoutError'||error.name==='AbortError')return '응답이 늦어 요청을 중단했습니다. 항목을 줄여 다시 검색하거나 법령 검색·근거 추가를 사용하세요.';
- if(error instanceof TypeError)return '로컬 API 서버와 연결이 끊겼습니다. server.py 터미널과 같은 주소의 /api/status를 확인한 뒤 새로고침하세요.';
+ if(error instanceof TypeError)return '서버와 연결이 끊겼습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요. 대화와 확인한 내용은 유지됩니다.';
  return (error.message||'요청을 처리하지 못했습니다.').replaceAll('OpenRouter','AI 서비스').replaceAll('OPENROUTER_API_KEY','AI 연결 설정');
 }
 async function readApiStatus(force=false){
@@ -326,7 +326,7 @@ async function lawRequest(path,data){
  for(let attempt=0;attempt<2;attempt++){
   const status=await readApiStatus(attempt>0);let response;
   try{response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':status.csrfToken},body,signal:AbortSignal.timeout((path.endsWith('/search')||path==='/api/work/plan')?660000:path.endsWith('/review')?120000:path.endsWith('/classify')?120000:90000)});}catch(error){throw new Error(apiErrorMessage(error));}
-  let result;try{result=await response.json();}catch{throw new Error('응답을 읽지 못했습니다. server.py 터미널의 API 로그를 확인하세요.');}
+  let result;try{result=await response.json();}catch{throw new Error(response.status>=500||response.status===0?`서버가 처리 시간·자원 한도에 걸려 응답을 완성하지 못했습니다(HTTP ${response.status}). 대화와 확인한 내용은 유지됩니다. 잠시 후 다시 시도해 주세요.`:`응답을 읽지 못했습니다(HTTP ${response.status}). 잠시 후 다시 시도해 주세요.`);}
   // Only replay a CSRF rejection, which occurs before any API work or billing.
   if(attempt===0&&response.status===403&&String(result.error||'').includes('새로고침'))continue;
   if(!response.ok){const error=new Error(result.error||'요청에 실패했습니다.');error.status=response.status;throw error;}return result;

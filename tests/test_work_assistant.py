@@ -87,7 +87,7 @@ class FollowupSearchTests(unittest.TestCase):
         def ai(_p,m,**kw):return dict(ANSWER,items=[],period={'value':''}) if 'sources' in m else {'verdict':'possible'}
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server,'ai_candidates',side_effect=discover),patch.object(server,'verify_with_basis',side_effect=verify),patch.object(server,'discovery_json',side_effect=ai),patch.object(server,'ai_application_review',side_effect=lambda proof,items:{'items':[dict(i,verdict='possible') for i in items]}):
             first=work_plan(data,server)
-            self.assertIn('항목 총 4개',first['reply'])
+            self.assertIn('개인정보 항목 4개',first['reply'])
             next_data={**data,'messages':[{'role':'user','content':'기타소득으로 하며 주민번호를 수집해야 합니다.'}],**{k:first[k] for k in ['evidenceRefs','evidenceFacts','evidenceToken']}}
             second=work_plan(next_data,server)
         self.assertEqual(len(contexts),2)

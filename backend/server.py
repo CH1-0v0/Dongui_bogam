@@ -1001,6 +1001,10 @@ def review_evidence_for(actual):
     return {**cite(actual), 'pipa': cite(actual.get('pipa')), 'support': cite(actual.get('support')),
             'additionalGrounds': [review_evidence_for(c) for c in actual.get('additionalGrounds', [])]}
 
+def confirmed_grounds_for(actual):
+    rows = actual.get('confirmedGrounds') if isinstance(actual, dict) else None
+    return [{'cite': str(g.get('cite') or '')[:200], 'excerpt': str(g.get('excerpt') or '')[:1500], 'itemNames': [str(n)[:100] for n in (g.get('itemNames') or [])][:30]} for g in (rows if isinstance(rows, list) else [])[:4] if isinstance(g, dict)]
+
 def ai_application_review(actual, items):
     key = os.environ.get('OPENROUTER_API_KEY')
     if not key:
@@ -1012,7 +1016,7 @@ def ai_application_review(actual, items):
     payload = {'model': os.environ.get('OPENROUTER_MODEL', MODEL), 'temperature': 0.1, 'max_tokens': 4000,
                'response_format': {'type': 'json_object'}, 'provider': {'data_collection': 'deny', 'sort': 'latency'},
                'reasoning': {'effort': 'low', 'exclude': True},
-               'messages': [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': json.dumps({'officialEvidence': evidence, 'items': items}, ensure_ascii=False)}]}
+               'messages': [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': json.dumps(dict({'officialEvidence': evidence, 'items': items}, **({'confirmedGrounds': confirmed} if (confirmed := confirmed_grounds_for(actual)) else {})), ensure_ascii=False)}]}
     if re.match(r'^openai/gpt-[56](?:[.-]|$)', payload['model']):
         payload.pop('temperature', None)
     elif 'gpt-oss' not in payload['model']:

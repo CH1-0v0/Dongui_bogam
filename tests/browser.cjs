@@ -267,7 +267,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
 
   await stage3();await page.route('**/api/law/search',r=>r.fulfill({json:{candidates:Array.from({length:7},(_,n)=>({...candidate('contract'),article:String(n+1)})),rejected:[],note:'합성 초과 후보'}}));await page.locator('[data-ai-law]').click();await page.waitForFunction(()=>!document.querySelector('[data-ai-law]').disabled);assert.equal(await page.locator('[data-candidate]').count(),7);
   console.log('PASS frontend preserves all returned proposals without a five-candidate cap');
-  await stage3();await page.route('**/api/status',r=>r.abort('connectionrefused'));await page.evaluate(()=>{const now=Date.now;Date.now=()=>now()+31000;});await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();assert.match(await page.getByRole('alert').innerText(),/로컬 API 서버와 연결/);
+  await stage3();await page.route('**/api/status',r=>r.abort('connectionrefused'));await page.evaluate(()=>{const now=Date.now;Date.now=()=>now()+31000;});await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();assert.match(await page.getByRole('alert').innerText(),/서버와 연결이 끊겼습니다/);
   assert.deepEqual(errors,[]);console.log('Browser acceptance checks passed, including optional AI review and stable loading layout');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});
