@@ -647,13 +647,18 @@ const defaultIntro = () => {
 const sectionTitle = s => documentCategory(s);
 const refusalSections = () => sections().filter(s=>s.basis==='consent'||s.classification==='rnn');
 const refusalText = (s,preview) => {
- const text=state.refusals[s.k]?.trim()||defaultRefusal(s);
+ const saved=state.refusals[s.k]?.trim(),custom=s.required==='선택'&&saved&&!isDefaultRefusal(s,saved),text=custom?saved.replace(/^(?:동의하지\s*않는\s*경우|동의를\s*거부할\s*경우)\s*,?\s*/,''):saved&&!isDefaultRefusal(s,saved)?saved:defaultRefusal(s);
  if(text)return `<span class="doc-refusal-text">${safe(text)}</span>`;
  return preview?'<em class="doc-refusal-missing">아직 입력하지 않았습니다</em>':'';
 };
 const note = text => `<p class="doc-note"><span class="doc-note-marker" aria-hidden="true">※</span> <span>${text}</span></p>`;
-const defaultRefusal=s=>s.required==='선택'?'동의를 거부해도 불이익이 없습니다.':'서비스를 받을 수 없습니다.';
-const refusalPrefix = s => s.required==='선택'?(state.refusals[s.k]?.trim()&&state.refusals[s.k].trim()!==defaultRefusal(s)?'동의를 거부할 경우 ':''):`${s.required==='공통'?'':'['+(s.required||'선택')+'] '}동의를 거부할 수 있습니다. 그러나 동의를 거부할 경우 `;
+const defaultRefusal=s=>s.required==='선택'?'동의하지 않아도 불이익이 없습니다.':'서비스를 받을 수 없습니다.';
+// Earlier drafts stored the previous optional-consent default; treat it as the default too.
+const legacyOptionalRefusal='동의를 거부해도 불이익이 없습니다.';
+const isDefaultRefusal=(s,text)=>text===defaultRefusal(s)||s.required==='선택'&&text===legacyOptionalRefusal;
+// Optional consent always states the right to refuse: default "…거부할 수 있습니다. 동의하지 않아도 불이익이 없습니다.",
+// edited "…거부할 수 있습니다. 동의하지 않는 경우 (입력 내용)".
+const refusalPrefix = s => s.required==='선택'?(state.refusals[s.k]?.trim()&&!isDefaultRefusal(s,state.refusals[s.k].trim())?'동의를 거부할 수 있습니다. 동의하지 않는 경우 ':'동의를 거부할 수 있습니다. '):`${s.required==='공통'?'':'['+(s.required||'선택')+'] '}동의를 거부할 수 있습니다. 그러나 동의를 거부할 경우 `;
 const marketingContact = '<p class="doc-marketing"><strong>제공하신 연락처로 마케팅 안내나 홍보 연락을 받을 수 있습니다.</strong></p>';
 const editableText = (label,key,value,editable) => `<span class="doc-text" ${editable?`contenteditable="plaintext-only" role="textbox" aria-label="${safe(label)}" data-edit="${key}"`:''}>${safe(state.edits[key]??value)}</span>`;
 const noticeBasisText=item=>[...new Set((item.bases||[]).filter(b=>LawBasis.rules[b.basisCode]?.effect!=='consent').map(b=>[...new Set([LawBasis.rules[b.basisCode]?.pipa,b.cite].filter(Boolean))].join(' · ')))].join(' / ');
@@ -765,7 +770,7 @@ function ensureOutputDefaults(){
  const previous=state.outputDefaults||{};
  const next={title:suggestedTitle(),intro:defaultIntro()};
  for(const key of ['title','intro'])if(!state[key]?.trim()||state[key]===previous[key])state[key]=next[key];
- for(const row of refusalSections())if(state.refusals[row.k]===undefined)state.refusals[row.k]=defaultRefusal(row);
+ for(const row of refusalSections())if(state.refusals[row.k]===undefined||state.refusals[row.k]===legacyOptionalRefusal&&row.required==='선택')state.refusals[row.k]=defaultRefusal(row);
  state.outputDefaults=next;
 }
 function output(){
