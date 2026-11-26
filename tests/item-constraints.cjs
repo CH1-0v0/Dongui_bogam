@@ -4,7 +4,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3042';
 (async()=>{const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});try{
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/api/privacy/classify',r=>r.fulfill({json:{items:r.request().postDataJSON().items.map(i=>({...i,verdict:'uncertain',reason:'합성 분류'}))}}));
- await page.goto(base);await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');await page.locator('.quick-create-form [type=submit]').click();await page.locator('[data-path=agency]').fill('합성 시험 기관');
+ await page.goto(base);await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');await page.locator('.quick-create-form [type=submit]').click();await require('./educational-fixture.cjs')(page);await page.locator('[data-path=agency]').fill('합성 시험 기관');
  const add=async name=>{await page.locator('[data-add=collect]').click();await page.locator('[data-item-preset]').last().selectOption(name);};
  const row=name=>page.locator('.item-row').filter({has:page.locator('[data-item-menu]').filter({hasText:new RegExp('^'+name+' ')})});
  const baseline=await page.locator('#risk').innerText();

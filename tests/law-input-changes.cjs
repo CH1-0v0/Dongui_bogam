@@ -6,7 +6,7 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3042';
  await page.route('**/api/status',r=>r.fulfill({json:{app:'dongui',apiVersion:8,aiConfigured:true,lawConfigured:true,csrfToken:'synthetic'}}));
  await page.route('**/api/privacy/classify',r=>r.fulfill({json:{items:r.request().postDataJSON().items.map(i=>({...i,verdict:'uncertain'}))}}));
  await page.route('**/api/law/search',r=>r.fulfill({json:{candidates:[{law:'합성 검증법',article:'10',cite:'합성 검증법 제10조',type:'collect',basisCode:'statutory',verified:true,excerpt:'[합성] 법령 본문입니다. '.repeat(40),sourceUrl:'https://www.law.go.kr/synthetic'}],rejected:[],summary:'합성 검색 완료'}}));
- const start=async()=>{await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');await page.locator('.quick-create-form [type=submit]').click();await page.locator('[data-path=agency]').fill('합성 시험 기관');await page.locator('[data-path="groups.collect.purpose"]').fill('합성 행사 운영');};
+ const start=async()=>{await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');await page.locator('.quick-create-form [type=submit]').click();await require('./educational-fixture.cjs')(page);await page.locator('[data-path=agency]').fill('합성 시험 기관');await page.locator('[data-path="groups.collect.purpose"]').fill('합성 행사 운영');};
  const enterLaws=async()=>{await page.locator('[data-next]').click();await page.locator('[data-class-group=collect]').waitFor();await page.locator('[data-next]').click();await page.locator('[data-ai-law]').waitFor();};
  const notice=()=>page.locator('.search-summary');
  await page.goto(base);await start();await enterLaws();assert.equal(await notice().count(),0,'first entry must not claim inputs changed');

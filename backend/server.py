@@ -920,13 +920,13 @@ def review_fingerprint(actual, items):
     return hashlib.sha256(json.dumps(source, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
-def create_review_token(secret, fingerprint):
-    body = base64.urlsafe_b64encode(json.dumps({'fp': fingerprint, 'exp': int(time.time()) + 300}, separators=(',', ':')).encode()).decode().rstrip('=')
+def create_review_token(secret, fingerprint, ttl=300):
+    body = base64.urlsafe_b64encode(json.dumps({'fp': fingerprint, 'exp': int(time.time()) + ttl}, separators=(',', ':')).encode()).decode().rstrip('=')
     signature = hmac.new(secret, body.encode(), hashlib.sha256).hexdigest()
     return body + '.' + signature
 
 
-def verify_review_token(secret, token, fingerprint):
+def verify_review_token(secret, token, fingerprint, grace=0):
     if not isinstance(token, str) or len(token) > 1000:
         raise ApiError('적용 전에 AI 검토를 진행하세요.', 409)
     try:
@@ -935,7 +935,7 @@ def verify_review_token(secret, token, fingerprint):
         if not hmac.compare_digest(signature, expected):
             raise ValueError()
         claims = json.loads(base64.urlsafe_b64decode(body + '=' * (-len(body) % 4)))
-        if claims['fp'] != fingerprint or claims['exp'] < time.time():
+        if claims['fp'] != fingerprint or claims['exp'] < time.time() - grace:
             raise ValueError()
     except (ValueError, TypeError, KeyError):
         raise ApiError('검토 후 항목·근거가 바뀌었거나 검토 유효 시간이 지났습니다. AI 검토를 다시 진행하세요.', 409) from None

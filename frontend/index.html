@@ -26,12 +26,13 @@
   <label class="field"><span>동의서 양식</span>
    <select name="template" required autofocus><option value="">양식을 선택하세요</option></select>
   </label>
-  <dl id="quick-preview" hidden>
-   <dt>수집·이용 목적</dt><dd data-quick-purpose></dd>
-   <dt>미리 채울 개인정보 항목</dt><dd data-quick-items></dd>
-   <dt>보유 및 이용 기간</dt><dd data-quick-period></dd>
-   <dt>작성 전 확인</dt><dd data-quick-note></dd>
-  </dl>
+  <div id="quick-preview" hidden>
+   <label class="field"><span>문서 제목</span><input data-quick-title maxlength="200"></label>
+   <label class="field"><span>수집·이용 목적</span><textarea data-quick-purpose maxlength="500"></textarea></label>
+   <label class="field"><span>미리 채울 개인정보 항목 (쉼표로 구분)</span><textarea data-quick-items maxlength="1000"></textarea></label>
+   <label class="field"><span>보유 및 이용 기간</span><input data-quick-period maxlength="500"></label>
+   <div class="field"><span>작성 전 확인 (안내사항)</span><p class="muted" data-quick-note></p></div>
+  </div>
   <p class="muted">미리 채운 기간은 예시입니다. 기관명과 업무에 맞는 보유기간, 항목의 필수 여부를 확인하세요.</p>
   <button class="primary" type="submit" disabled>이 양식으로 시작</button>
  </form>

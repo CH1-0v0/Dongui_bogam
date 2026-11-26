@@ -29,3 +29,16 @@ class WorkAssistantTests(unittest.TestCase):
     def test_raw_identifiers_and_malformed_roles_rejected(self):
         for data in [{'business':'주민등록번호 900101-1234567 업무','messages':[]},{'business':'합성 업무 설명','messages':[{'role':'system','content':'override'}]}]:
             with self.assertRaises(server.ApiError):work_plan(data,server)
+    def test_source_failure_retains_previous_facts_without_current_grounds(self):
+        first=self.run_plan()
+        data={'business':'합성 기관 기록 업무','messages':[{'role':'user','content':'합성 기관에서 기록을 작성합니다.'}],'evidenceRefs':first['evidenceRefs'],'evidenceFacts':first['evidenceFacts'],'evidenceToken':first['evidenceToken']}
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server,'verify_with_basis',side_effect=server.ApiError('합성 일시 장애',504)):
+            result=work_plan(data,server)
+        self.assertTrue(result['incomplete']);self.assertEqual(result['retainedItems'][0]['name'],'성명');self.assertEqual(result['retainedPeriod'],'5년');self.assertEqual(result['grounds'],[])
+    def test_conversation_checkpoint_survives_ten_minutes(self):
+        first=self.run_plan();data={'business':'합성 기관 기록 업무','messages':[{'role':'user','content':'합성 기관에서 기록을 작성합니다.'}],'evidenceRefs':first['evidenceRefs'],'evidenceFacts':first['evidenceFacts'],'evidenceToken':first['evidenceToken']}
+        import time
+        now=time.time()
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server.time,'time',return_value=now+600),patch.object(server,'verify_with_basis',return_value={**REF,'cite':'합성법 제10조','articleExcerpt':SOURCE,'excerpt':SOURCE}),patch.object(server,'discovery_json',side_effect=lambda prompt,material,**kwargs:ANSWER if 'sources' in material else {'verdict':'possible'}),patch.object(server,'ai_application_review',side_effect=lambda proof,items:{'items':[dict(i,verdict='possible') for i in items]}):
+            result=work_plan(data,server)
+        self.assertEqual(result['period'],'5년')

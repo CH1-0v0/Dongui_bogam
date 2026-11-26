@@ -866,7 +866,7 @@ function render(){
  if(step===-1){app.innerHTML=assistantHTML();return;}
  if(!step){app.innerHTML=home();return;}
  if(step===5){app.innerHTML=finalPage();scheduleA4Preview();return;}
- const body=[basics,classify,grounds,output][step-1]();
+ const body=(step===1&&state.quickNote?`<div class="info"><p>${safe(state.quickNote)}</p></div>`:'')+[basics,classify,grounds,output][step-1]();
  const all=entries();
  const issues=all.filter(({i})=>needsItemReview(i));
  const missing=all.filter(({g})=>!g.purpose.trim()||!g.period.trim()).length;
@@ -974,25 +974,30 @@ function updateQuickPreview(){
  quickPreview.hidden = !template;
  quickApply.disabled = !template;
  if(template){
-  quickPreview.querySelector('[data-quick-purpose]').textContent = template.purpose;
-  quickPreview.querySelector('[data-quick-items]').textContent = template.items.join(', ');
-  quickPreview.querySelector('[data-quick-period]').textContent = template.period ?? '기관 기준 확인 후 직접 입력';
+  quickPreview.querySelector('[data-quick-title]').value = template.title;
+  quickPreview.querySelector('[data-quick-purpose]').value = template.purpose;
+  quickPreview.querySelector('[data-quick-items]').value = template.items.join(', ');
+  quickPreview.querySelector('[data-quick-period]').value = template.period ?? '';
   quickPreview.querySelector('[data-quick-note]').textContent = template.note;
  }
 }
-quickForm.addEventListener('change',updateQuickPreview);
+quickForm.elements.template.addEventListener('change',updateQuickPreview);
 quickForm.addEventListener('submit',e=>{
  e.preventDefault();
  const template = quickTemplates[quickForm.elements.template.value];
  if(!template)return;
- if(hasDraftChanges()&&!confirm('현재 작성 중인 내용을 선택한 양식으로 바꾸시겠습니까?'))return;
+ const names=[...new Set(quickPreview.querySelector('[data-quick-items]').value.split(/[,\n]/).map(standardItemName).filter(Boolean))];
+ if(names.length>60){alert('개인정보 항목은 60개 이하로 입력해 주세요.');return;}
+ if((hasDraftChanges()||workSession)&&!confirm('현재 작성 중인 내용을 선택한 양식으로 바꾸시겠습니까?'))return;
+ workSession=null;clearWorkSession();
  state = newDraft();
  lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};
  freshLawPicker();editorOpen=false;message='';
- state.title = template.title;
- state.groups.collect.purpose = template.purpose;
- state.groups.collect.period = template.period ?? '';
- template.items.forEach(name=>add('collect',name));
+ state.title=quickPreview.querySelector('[data-quick-title]').value.trim();
+ state.groups.collect.purpose=quickPreview.querySelector('[data-quick-purpose]').value.trim();
+ state.groups.collect.period=quickPreview.querySelector('[data-quick-period]').value.trim();
+ state.quickNote=template.note||'';
+ names.forEach(name=>add('collect',name));
  tab='collect';reached=0;
  quickDialog.close();
  go(1);
@@ -1169,7 +1174,7 @@ function validateBasics(){
  return false;
 }
 function startBlankConsent(){
- clearTimeout(sensitivityTimer);state=newDraft();
+ clearTimeout(sensitivityTimer);workSession=null;clearWorkSession();state=newDraft();
  lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};
  freshLawPicker();editorOpen=false;documentEditing=false;a4PreviewCache=null;finalDocument=null;basicsChecked=false;message='';tab='collect';reached=0;go(1);
 }
@@ -1227,7 +1232,7 @@ document.addEventListener('click',e=>{
 
  if('retryClassification' in d)checkSensitivity(true);
  if('guide' in d)document.querySelector('#guide').showModal();
- if('start' in d){if(b.id==='workNav'){go(1);return;}if(hasDraftChanges()&&!confirm('현재 작성 중인 내용을 삭제하고 처음부터 새 동의서를 만드시겠습니까?'))return;startBlankConsent();return;}
+ if('start' in d){if(b.id==='workNav'){go(1);return;}if((hasDraftChanges()||workSession)&&!confirm('현재 작성 중인 내용을 삭제하고 처음부터 새 동의서를 만드시겠습니까?'))return;startBlankConsent();return;}
  if(d.itemSuggestion){
   const input=b.closest('.item-row').querySelector('[data-name]');
   commitItemName(input,d.itemSuggestion).focus({preventScroll:true});
@@ -1348,6 +1353,7 @@ function watchLocalPreview(){
   }
  },2000);
 }
+restoreWorkSession();
 render();
 watchLocalPreview();
 
