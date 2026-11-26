@@ -108,3 +108,11 @@ class GroundRolesTests(unittest.TestCase):
         self.assertIn('합성업무법',result)
         self.assertNotIn('합성허용령',result)
         self.assertIn('아직 확인하지 못했습니다',applicable_ground_summary([]))
+
+class ProposedGroundTests(unittest.TestCase):
+    def test_uncertain_source_is_retained_without_approved_application(self):
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server,'ai_candidates',return_value={'candidates':[REF]}),patch.object(server,'verify_with_basis',return_value={**REF,'cite':'합성법 제10조','articleExcerpt':SOURCE,'excerpt':SOURCE}),patch.object(server,'discovery_json',side_effect=lambda prompt,data,**kw:ANSWER if 'sources' in data else {'verdict':'possible'}),patch.object(server,'ai_application_review',side_effect=lambda proof,items:{'items':[dict(i,verdict='needs_information') for i in items]}):
+            result=work_plan({'business':'합성 기관 기록 업무','messages':[]},server)
+        self.assertEqual(result['grounds'],[])
+        self.assertEqual(result['proposedGrounds'][0]['cite'],'합성법 제10조')
+        self.assertTrue(result['proposedGrounds'][0]['applicationPending'])

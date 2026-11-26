@@ -542,3 +542,4 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .work-next .actions [data-work-finish]{margin-left:auto}
 
 .work-choice-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.work-choice-buttons button{min-height:38px}.work-law-plan{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.work-law-plan h4{margin:14px 0 7px;font-size:14px}.work-law-plan li{margin-bottom:10px;overflow-wrap:anywhere}.work-law-plan details{margin-top:4px}.work-law-plan summary{cursor:pointer}.work-law-plan .notice{font-size:13px}
+.work-choice-buttons button[aria-pressed="true"]{background:#e8efff;border-color:#2458d3;color:#173d94;box-shadow:inset 0 0 0 1px #2458d3}.work-questions .work-item-details{margin:.5rem 0}.work-law-items{font-size:.9rem;color:#455573;margin:.35rem 0;overflow-wrap:anywhere}
