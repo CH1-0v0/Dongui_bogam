@@ -588,7 +588,7 @@ main {max-width:var(--site-measure); padding:var(--site-space) var(--site-space)
 header {background:var(--site-bg);border-color:var(--line)}
 .head {max-width:var(--site-measure); min-height:72px; padding:8px var(--site-space); gap:16px}
 .head .brand {padding:0; font-size:20px; letter-spacing:-.055em; white-space:nowrap; gap:8px}
-.brandicon {border-radius:7px; width:32px; height:32px; background:var(--site-primary); font-size:19px}
+.brandicon {width:32px;height:32px;background:none;border-radius:0}
 .brand-ai {color:var(--muted);font-size:13px;letter-spacing:0}
 .head nav {gap:4px}
 .head nav button {padding-inline:12px;white-space:nowrap;color:var(--muted);font-size:14px}
