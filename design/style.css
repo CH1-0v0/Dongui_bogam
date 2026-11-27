@@ -114,6 +114,7 @@
 
 #quick-create { width: min(520px, calc(100% - 32px)); }
 .quick-create-form select { width: 100%; }
+.quick-create-form > .actions { display: flex; justify-content: flex-end; }
 #quick-preview { margin: 12px 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
 #quick-preview dt { font-weight: 700; }
 #quick-preview dd { margin: 4px 0 12px; }
@@ -622,7 +623,6 @@ footer {display:block;max-width:none;padding:0;background:var(--site-dark);color
 .home-description {margin:20px 0 24px;max-width:33ch;font-size:clamp(16px,1.6vw,20px);line-height:1.65;color:var(--muted);word-break:keep-all}
 .home-actions {display:flex;gap:8px;flex-wrap:wrap}
 .home-actions button {min-height:48px;padding:10px 18px;display:inline-flex;align-items:center;gap:16px}
-.home-formats {font-size:13px;color:var(--muted);margin:14px 0 0}
 .work-home.panel {margin:0 0 clamp(40px,7vw,84px);padding:clamp(20px,4vw,42px);background:var(--soft);border:1px solid var(--line);box-shadow:none}
 .work-home h2,.home-process h2 {font-size:clamp(25px,3vw,36px);letter-spacing:-.055em;line-height:1.22;margin:0 0 9px}
 .work-home form .actions button[type="submit"] {margin-inline-start:auto}
@@ -657,7 +657,10 @@ dialog::backdrop {background:color-mix(in srgb,var(--site-dark),transparent 36%)
  .home-process ol {grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 }
 @media(min-width:820px) {
- .home-hero {padding:46px 0 56px}
+ .home-entry {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:clamp(24px,4vw,56px);margin:0 0 clamp(32px,5vw,64px)}
+ .home-entry .home-hero {padding:0}
+ .home-entry .home-intro h1 {font-size:clamp(43px,5.4vw,76px)}
+ .home-entry .work-home.panel {margin:0;padding:clamp(18px,2.5vw,32px)}
  .home-process ol {grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 @media(max-width:570px) {

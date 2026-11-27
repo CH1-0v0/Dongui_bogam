@@ -183,19 +183,20 @@ const field = (label,path,value,placeholder='',area=false,required=false) => {
 const checkbox = (label,attrs,checked,required=false) => `<label class="check"><input type="checkbox" ${attrs} ${checked?'checked':''} ${required?'required':''}>${label}${required?requiredMark:''}</label>`;
 function home(){
  return `
-  <section class="home-hero" aria-labelledby="home-title">
-   <div class="home-intro">
-    <p class="home-kicker">개인정보 동의서 작성 도구</p>
-    <h1 id="home-title">개인정보 동의서,<br>업무에 맞게.</h1>
-    <p class="home-description">수집 항목과 법적 근거를 검토하고, 기관에서 바로 사용할 수 있는 동의서를 만드세요.</p>
-    <div class="actions home-actions">
-     <button class="primary" data-start>동의서 생성 <span aria-hidden="true">→</span></button>
-     <button data-quick-create>빠른 생성 <span aria-hidden="true">↗</span></button>
+  <div class="home-entry">
+   <section class="home-hero" aria-labelledby="home-title">
+    <div class="home-intro">
+     <p class="home-kicker">개인정보 동의서 작성 도구</p>
+     <h1 id="home-title">개인정보 동의서,<br>업무에 맞게.</h1>
+     <p class="home-description">수집 항목과 법적 근거를 검토하고, 기관에서 바로 사용할 수 있는 동의서를 만드세요.</p>
+     <div class="actions home-actions">
+      <button class="primary" data-start>동의서 생성 <span aria-hidden="true">→</span></button>
+      <button data-quick-create>빠른 생성 <span aria-hidden="true">↗</span></button>
+     </div>
     </div>
-    <p class="home-formats">PDF · 한글(HWPX) · 인쇄</p>
-   </div>
-  </section>
-  ${assistantHome()}
+   </section>
+   ${assistantHome()}
+  </div>
   <section class="home-process" aria-labelledby="process-title">
    <h2 id="process-title">동의서 작성 절차</h2>
    <ol>${labels.map((label,n)=>`<li><h3>${label}</h3><p>${descriptions[n]}</p></li>`).join('')}</ol>
@@ -671,7 +672,20 @@ function categoryTable(rows,editable){
   const text=editableText({purpose:'이용 목적',period:'보유 및 이용기간',recipient:'제공받는 자'}[key],keys[0],row.g[key],editable);
   return `<td data-merge-keys="${safe(JSON.stringify(keys))}"${end-index>1?` rowspan="${end-index}"`:''}>${important?importantText(text):text}</td>`;
  };
- return `<article class="doc-category" data-document-category="${safe([first.key,first.classification,first.classification==='general'?first.required:''].join('.'))}"><h3>${editableText('개인정보 구분 제목',first.k+'.heading',first.key==='collect'&&first.classification==='general'?'일반 개인정보':documentCategory(first),editable)}</h3><table class="doc-table"><thead><tr>${first.key==='collect'&&first.classification==='general'||rows.length>1?'<th scope="col">구분</th>':''}${provider?'<th scope="col">제공받는 자</th>':''}<th scope="col">개인정보 항목</th><th scope="col">${provider?'제공받는 자의 이용 목적':'이용 목적'}</th><th scope="col">보유 및 이용기간</th></tr></thead><tbody>${rows.map((row,index)=>{const items=row.classification==='mixed'?row.items.map(i=>{const name=editableText('개인정보 항목',i.id+'.item',i.name,editable);return kind(i)==='general'&&!rnn(i.name)?name:importantText(name);}).join(', '):editableText(documentCategory(row)+' 항목',row.k+'.items',row.items.map(i=>i.name).join(', '),editable);return `<tr class="doc-consent-row" data-consent-row="${row.k}">${first.key==='collect'&&first.classification==='general'||rows.length>1?`<th scope="row">${row.required}</th>`:''}${provider?conditionCell(row,index,'recipient',true):''}<td data-consent-items="${row.k}">${['general','mixed'].includes(row.classification)?items:importantText(items)}</td>${conditionCell(row,index,'purpose',provider)}${conditionCell(row,index,'period',true)}</tr>`;}).join('')}</tbody></table>${rows.map(s=>`<div class="doc-consent" data-consent-section="${s.k}">${note(refusalPrefix(s)+refusalText(s,editable))}${s.key==='marketing'?`<p class="doc-marketing"><strong>${editableText('마케팅 안내',s.k+'.marketing','제공하신 연락처로 마케팅 안내나 홍보 연락을 받을 수 있습니다.',editable)}</strong></p>`:''}<p class="doc-choice">${editableText('동의 질문',s.k+'.question','☞ '+documentCategory(s)+(s.key==='collect'?'의 수집·이용':s.key==='marketing'?' 연락을 받는 것':'')+'에 동의하십니까?',editable)}<strong>□ 동의　 □ 미동의</strong></p></div>`).join('')}</article>`;
+ return `<article class="doc-category" data-document-category="${safe([first.key,first.classification,first.classification==='general'?first.required:''].join('.'))}"><h3><span class="doc-text">${safe(first.key==='collect'&&first.classification==='general'?'일반 개인정보':documentCategory(first))}</span></h3><table class="doc-table"><thead><tr>${first.key==='collect'&&first.classification==='general'||rows.length>1?'<th scope="col">구분</th>':''}${provider?'<th scope="col">제공받는 자</th>':''}<th scope="col">개인정보 항목</th><th scope="col">${provider?'제공받는 자의 이용 목적':'이용 목적'}</th><th scope="col">보유 및 이용기간</th></tr></thead><tbody>${rows.map((row,index)=>{const items=row.classification==='mixed'?row.items.map(i=>{const name=editableText('개인정보 항목',i.id+'.item',i.name,editable);return kind(i)==='general'&&!rnn(i.name)?name:importantText(name);}).join(', '):editableText(documentCategory(row)+' 항목',row.k+'.items',row.items.map(i=>i.name).join(', '),editable);return `<tr class="doc-consent-row" data-consent-row="${row.k}">${first.key==='collect'&&first.classification==='general'||rows.length>1?`<th scope="row">${row.required}</th>`:''}${provider?conditionCell(row,index,'recipient',true):''}<td data-consent-items="${row.k}">${['general','mixed'].includes(row.classification)?items:importantText(items)}</td>${conditionCell(row,index,'purpose',provider)}${conditionCell(row,index,'period',true)}</tr>`;}).join('')}</tbody></table>${rows.map(s=>`<div class="doc-consent" data-consent-section="${s.k}">${note(refusalPrefix(s)+refusalText(s,editable))}${s.key==='marketing'?`<p class="doc-marketing"><strong>${editableText('마케팅 안내',s.k+'.marketing','제공하신 연락처로 마케팅 안내나 홍보 연락을 받을 수 있습니다.',editable)}</strong></p>`:''}<p class="doc-choice"><span class="doc-text">☞ ${safe(documentCategory(s))}${s.key==='collect'?'의 수집·이용':s.key==='marketing'?' 연락을 받는 것':''}에 동의하십니까?</span><strong>□ 동의　 □ 미동의</strong></p></div>`).join('')}</article>`;
+}
+function noticeIntroduction(rows){
+ const citationsByAction=new Map();
+ for(const {key,g,items} of rows){
+  const action=key==='provide'?(g.outside?'목적 외로 제공합니다':'제3자에게 제공합니다'):key==='extra'?'목적 외로 이용합니다':'수집·이용합니다';
+  for(const i of items)for(const basis of i.bases||[]){
+   const rule=LawBasis.rules[basis.basisCode];
+   if(rule?.effect!=='notice'||!LawBasis.valid(basis,lawContext({key,g,i})))continue;
+   if(!citationsByAction.has(action))citationsByAction.set(action,new Set());
+   citationsByAction.get(action).add(rule.pipa);
+  }
+ }
+ return [...citationsByAction].map(([action,citations])=>`<p class="doc-notice-intro">${safe(LawBasis.compactCites([...citations]))}에 따라 동의 없이 개인정보를 ${action}.</p>`).join('');
 }
 function noticeTable(sections,editable){
  const first=sections[0],provider=sections.some(s=>s.key==='provide'),mixed=new Set(sections.map(s=>s.key+Boolean(s.g.outside))).size>1,grouped=new Map();
@@ -695,7 +709,7 @@ function noticeTable(sections,editable){
 }
 const signatureLine = '_'.repeat(24);
 function signatureBlock(editable){
- return `<article class="sign"><p class="signature-date">${editableText('서명 날짜','signature.date','　　　　년　　 월　　 일',editable)}</p><p>${editableText('서명자 표시','signature.person','정보주체:',editable)} <span class="signature-line">${signatureLine}</span> (서명)</p>${state.child?`<p class="guardian-heading"><strong>${editableText('법정대리인 안내','signature.guardianHeading','만 14세 미만 아동의 법정대리인 동의',editable)}</strong></p><p>${editableText('법정대리인 표시','signature.guardian','법정대리인:',editable)} <span class="signature-line">${signatureLine}</span> (서명)</p><p class="guardian-relationship">${editableText('법정대리인 관계 표시','signature.relationship','아동과의 관계:',editable)} <span class="signature-line relationship-line">${'_'.repeat(16)}</span></p>`:''}</article>`;
+ return `<article class="sign"><p class="signature-date"><span class="doc-text">　　　　년　　 월　　 일</span></p><p><span class="doc-text">정보주체:</span> <span class="signature-line">${signatureLine}</span> (서명)</p>${state.child?`<p class="guardian-heading"><strong><span class="doc-text">만 14세 미만 아동의 법정대리인 동의</span></strong></p><p>${editableText('법정대리인 표시','signature.guardian','법정대리인:',editable)} <span class="signature-line">${signatureLine}</span> (서명)</p><p class="guardian-relationship">${editableText('법정대리인 관계 표시','signature.relationship','아동과의 관계:',editable)} <span class="signature-line relationship-line">${'_'.repeat(16)}</span></p>`:''}</article>`;
 }
 function documentHTML(editable=false){
  const rows=sections();if(!rows.length)return '';
@@ -703,7 +717,9 @@ function documentHTML(editable=false){
  for(const row of rows){const consent=row.basis==='consent',groups=consent?consentGroups:noticeGroups;const key=consent?[row.key,row.classification].join('.'):[row.key,Boolean(row.g.outside)].join('.');if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);}
  const title=state.previewFields?.title?state.title:state.title.trim()||suggestedTitle();
  const intro=state.previewFields?.intro?state.intro:state.intro.trim()||defaultIntro();
- return `<section class="doc"><h1>${documentField('문서 제목','title',title,editable)}</h1><p class="doc-intro">${documentField('제목 아래 안내사항','intro',intro,editable)}</p>${[...consentGroups.values()].map(group=>categoryTable(group,editable)).join('')}${noticeGroups.size?(consentGroups.size?`<section class="notice-section"><h3 class="doc-notice-heading">${editableText('고지사항 제목','notice.heading','고지사항',editable)}</h3>${noticeTable([...noticeGroups.values()].flat(),editable)}</section>`:noticeTable([...noticeGroups.values()].flat(),editable)):''}${consentGroups.size?signatureBlock(editable):''}<p class="doc-agency"><strong>${documentField('기관명','agency',state.agency|| (editable?'':'기관명'),editable)} 귀중</strong></p></section>`;
+ const noticeRows=[...noticeGroups.values()].flat();
+ const noticeBody=noticeRows.length?noticeIntroduction(noticeRows)+noticeTable(noticeRows,editable):'';
+ return `<section class="doc"><h1>${documentField('문서 제목','title',title,editable)}</h1><p class="doc-intro">${documentField('제목 아래 안내사항','intro',intro,editable)}</p>${[...consentGroups.values()].map(group=>categoryTable(group,editable)).join('')}${noticeRows.length?(consentGroups.size?`<section class="notice-section"><h3 class="doc-notice-heading"><span class="doc-text">고지사항</span></h3>${noticeBody}</section>`:noticeBody):''}${consentGroups.size?signatureBlock(editable):''}<p class="doc-agency"><strong>${documentField('기관명','agency',state.agency|| (editable?'':'기관명'),editable)} 귀중</strong></p></section>`;
 }
 function previewControls(editing,top=false){
  return `<nav class="a4-page-nav ${top?'a4-nav-top':''}" aria-label="미리보기 ${top?'상단':'하단'} 쪽 이동" ${editing?'hidden':''}><button data-preview-move="-1" disabled>← 이전 쪽</button><output class="a4-page-counter" aria-live="polite">1 / 1쪽</output><button data-preview-move="1" disabled>다음 쪽 →</button>${top?'<span class="preview-zoom"><button data-preview-zoom="-0.1" aria-label="미리보기 축소">−</button><output class="preview-zoom-value">100%</output><button data-preview-zoom="0.1" aria-label="미리보기 확대">＋</button><button data-preview-zoom="fit">가로 맞춤</button></span>':''}</nav>`;
@@ -778,7 +794,7 @@ function output(){
  ensureOutputDefaults();
  const rows=hasConsent()?refusalSections():[];
  const docs=documentHTML(documentEditing);
- return `<div class="output-layout"><div class="stack output-settings"><section class="panel stack output-setting"><h2>기관명</h2>${field('기관명','agency',state.agency,'기관명',false,true)}</section>${state.autoDraft?assistantDraftFields():''}
+ return `<div class="output-layout"><div class="stack output-settings"><section class="panel stack output-setting"><h2 id="agency-heading">기관명${requiredMark}</h2><div class="field"><input data-path="agency" aria-labelledby="agency-heading" value="${safe(state.agency)}" required></div></section>${state.autoDraft?assistantDraftFields():''}
  ${hasConsent()?`<fieldset class="panel child-choice"><legend>만 14세 미만 아동 대상 여부${requiredMark}</legend><p class="muted">아동 대상이면 동의서에 법정대리인 동의·서명란을 추가합니다.</p><div class="actions"><label class="check"><input type="radio" name="child" required data-child value="yes" ${state.child?'checked':''}> 대상</label><label class="check"><input type="radio" name="child" required data-child value="no" ${state.child===false?'checked':''}> 대상 아님</label></div></fieldset>`:''}
  <section class="panel stack"><h2>동의 거부 시 불이익</h2>${rows.length?'<p class="muted">동의를 거부하거나 정보를 제공하지 않았을 때의 영향을 적어 주세요.</p>':''}${rows.length?rows.map(s=>field(sectionTitle(s)+(s.classification==='rnn'?' · 번호 미제공 시 안내':''),'refusals.'+s.k.replaceAll('.',':'),state.refusals[s.k],'해당하는 불이익 또는 안내 내용을 입력하세요.',true,true)).join(''):'<p class="not-applicable">동의를 받아 개인정보를 수집하지 않기 때문에 해당사항 없습니다.</p>'}</section>
 </div>
@@ -1020,24 +1036,31 @@ quickForm.addEventListener('submit',async e=>{
  collect.period=quickPreview.querySelector('[data-quick-period]').value.trim();
  draft.quickNote=template.note||'';
  names.forEach(name=>add('collect',name,template.required===true,draft));
- const residents=collect.items.filter(i=>rnn(i.name));
- if(residents.length){
+ const reviewItems=template.reviewRequired?collect.items.filter(i=>template.items.some(name=>standardItemName(name)===i.name)):[];
+ if(reviewItems.length||collect.items.some(i=>rnn(i.name))){
   quickApply.disabled=true;
   quickForm.elements.template.disabled=true;quickPreview.inert=true;
-  quickApply.textContent='주민등록번호 근거 확인 중…';
+  quickApply.textContent='개인정보 처리 근거 확인 중…';
   try{
-   const plan=await fetchWorkPlan({business:draft.groups.collect.purpose,key:'collect',messages:[],manual:{items:names.join(', '),period:draft.groups.collect.period}},null,true);
+   const plan=await fetchWorkPlan({business:collect.purpose,key:'collect',messages:[],manual:{items:names.join(', '),period:collect.period}},null,true);
    if(!stillCurrent())return;
-   if(plan.residentCheck?.status==='confirmed'){
-    const bundleId=id();
-    const proofs=(plan.grounds||[]).filter(proof=>!proof.applicationPending&&proof.itemNames?.some(rnn)).map(proof=>({
-     ...proof,id:id(),bundleId,ids:residents.map(i=>i.id),conditionsConfirmed:true,authorityConfirmed:true,
-     specific:proof.basisCode==='residentLaw',bundleSupplement:proof.basisCode==='residentLaw'
-    }));
-    if(LawBasis.notice(proofs,'collect','rnn'))draft.grounds=proofs;
+   const bundleId=id();
+   for(const proof of plan.grounds||[]){
+    const rule=LawBasis.rules[proof.basisCode];
+    if(!rule||rule.effect==='consent'||proof.applicationPending||!Array.isArray(proof.itemNames))continue;
+    const specific=proof.basisCode==='residentLaw';
+    const ground={...proof,id:id(),bundleId,conditionsConfirmed:true,authorityConfirmed:true,specific,bundleSupplement:specific};
+    if(!LawBasis.valid(ground,'collect'))continue;
+    const confirmed=new Set(proof.itemNames.map(standardItemName));
+    const ids=collect.items.filter(i=>{
+     const classification=rnn(i.name)?'rnn':kind(i);
+     if(!confirmed.has(i.name)||rule.supplement&&rule.supplement!==classification)return false;
+     return classification!=='rnn'||plan.residentCheck?.status==='confirmed';
+    }).map(i=>i.id);
+    if(ids.length)draft.grounds.push({...ground,ids});
    }
   }catch{
-   // A failed lookup leaves the number unresolved and opens the legal review step.
+   // Leave unconfirmed items for legal review in the draft.
   }finally{
    if(request===quickRequest)resetQuickLookup();
   }
@@ -1047,11 +1070,13 @@ quickForm.addEventListener('submit',async e=>{
  lawSearch={busy:false,candidates:[],error:'',note:'',mode:'live',rejected:[],version:lawSearch.version+1};
  freshLawPicker();editorOpen=false;tab='collect';reached=0;documentEditing=false;a4PreviewCache=null;
  quickDialog.close();
- const next=unresolvedRnn().length?3:4;
+ const residentPending=unresolvedRnn().length>0;
+ const reviewPending=reviewItems.some(i=>!LawBasis.notice(i.bases,'collect',rnn(i.name)?'rnn':kind(i)));
  if(step===1)step=0;
  lawSearch.inputSnapshot=lawInputSnapshot();
- await go(next);
- if(next===3)feedback('주민등록번호 근거 확인이 필요합니다.');
+ await go(residentPending?3:4);
+ if(residentPending)feedback('주민등록번호 처리 근거를 확인하지 못했습니다. 일반 처리 근거와 구체적인 처리 허용 근거를 확인해 주세요.');
+ else if(reviewPending)feedback('근거가 확인된 항목만 고지사항에 반영했습니다. 나머지 항목의 처리 근거는 필요할 때 3단계에서 추가로 확인할 수 있습니다.');
 });
 function showItemNameNotice(previous,current){
  const notice=document.createElement('div');

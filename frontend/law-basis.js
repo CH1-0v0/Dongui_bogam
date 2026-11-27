@@ -195,7 +195,7 @@
  function residentAllowed(bases,ctx){return (bases||[]).some(b=>b.basisCode==='residentLaw'&&b.specific&&valid(b,ctx));}
  // Write the law name once per law: "의료법 제14조, 제16조". 의료법 and 의료법 시행령 stay separate laws.
  function compactCites(cites,separator=', '){const groups=new Map();for(const raw of cites||[]){const text=String(raw||'').trim();if(!text)continue;const m=text.match(/^(.+?)\s+(제\d.*)$/);const law=m?m[1]:text,rest=m?m[2]:'';if(!groups.has(law))groups.set(law,[]);const list=groups.get(law);if(!list.includes(rest))list.push(rest);}return [...groups].map(([law,parts])=>parts.filter(Boolean).length?law+' '+parts.filter(Boolean).join(separator):law).join(separator);}
- const api={rules,isPipa,context,consentCitation,available,notice,residentAllowed,compactCites};
+ const api={rules,isPipa,context,consentCitation,available,valid,notice,residentAllowed,compactCites};
  if(typeof module!=='undefined')module.exports=api;
  else root.LawBasis=api;
 })(globalThis);

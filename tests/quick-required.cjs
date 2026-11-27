@@ -1,4 +1,4 @@
-// Quick creation fills the form and checks a resident-number ground once when needed.
+// Quick creation fills the form and reviews required fee items and checks resident-number permission.
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3055';
@@ -8,20 +8,21 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3055';
  try{
   const page=await browser.newPage();
   const errors=[];
-  let found=false,calls=0;
+  let outcome='not_found',calls=0;
+  const feeItems=['성명','주민등록번호','은행명','계좌번호','예금주명'];
   page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/api/status',route=>route.fulfill({json:{app:'dongui',apiVersion:8,aiConfigured:true,lawConfigured:true,csrfToken:'synthetic'}}));
   await page.route('**/api/work/plan',route=>{
    calls++;
    const data=route.request().postDataJSON();
-   assert.ok(data.manual.items.includes('주민등록번호'));
+   assert.ok(feeItems.every(name=>data.manual.items.split(', ').includes(name)));
    assert.equal(data.manual.period,'5년');
    assert.deepEqual(data.messages,[]);
    const grounds=['statutory','residentLaw'].map(basisCode=>({
     basisCode,type:'collect',law:'합성 검증법',article:'10',cite:'합성 검증법 제10조',
-    itemNames:['주민등록번호','성명'],verified:true,pipaVerified:true,supportVerified:true
+    itemNames:basisCode==='residentLaw'?['주민등록번호']:outcome==='partial'?['주민등록번호','성명']:feeItems,verified:true,pipaVerified:true,supportVerified:true
    }));
-   return route.fulfill({json:{residentCheck:{status:found?'confirmed':'not_found'},grounds:found?grounds:[]}});
+   return route.fulfill({json:{residentCheck:{status:outcome==='not_found'?outcome:'confirmed'},grounds:outcome==='not_found'?[]:grounds}});
   });
   async function use(title,step){
    await page.goto(base);
@@ -45,14 +46,22 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3055';
   const fee=await use('강사료·자문료 지급 동의서',3);
   assert.ok(fee.length>=6&&fee.every(([,required])=>required));
   assert.equal(calls,1);
-  assert.match(await page.locator('#message').textContent(),/주민등록번호 근거 확인이 필요합니다/);
+  await page.getByText(/주민등록번호 처리 근거를 확인하지 못했습니다/).waitFor();
+  assert.ok(await page.locator('[data-next]').isDisabled());
 
-  found=true;
+  outcome='partial';
   await use('강사료·자문료 지급 동의서',4);
   assert.equal(calls,2);
-  assert.deepEqual(await page.evaluate(()=>state.grounds.flatMap(ground=>ground.ids.map(id=>getItem(id).name))),['주민등록번호','주민등록번호']);
-  assert.match(await page.locator('.doc-notice').textContent(),/주민등록번호/);
+  await page.getByText(/근거가 확인된 항목만 고지사항에 반영/).waitFor();
+
+  outcome='confirmed';
+  await use('강사료·자문료 지급 동의서',4);
+  assert.equal(calls,3);
+  const applied=await page.evaluate(()=>state.grounds.map(ground=>ground.ids.map(id=>getItem(id).name)));
+  assert.deepEqual(applied,[feeItems,['주민등록번호']]);
+  const notice=await page.locator('.doc-notice').textContent();
+  for(const name of feeItems)assert.ok(notice.includes(name),name);
   assert.deepEqual(errors,[]);
-  console.log('PASS quick templates fill the period, apply confirmed resident grounds once and open the correct step');
+  console.log('PASS quick templates fill the period, apply verified grounds to all covered fee items and open the correct step');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
