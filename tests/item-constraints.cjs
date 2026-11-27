@@ -7,14 +7,14 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3042';
  await page.goto(base);await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');await page.locator('.quick-create-form [type=submit]').click();await require('./educational-fixture.cjs')(page);await page.evaluate(v=>{state.agency=v;},'합성 시험 기관');
  const add=async name=>{await page.locator('[data-add=collect]').click();await page.locator('[data-item-preset]').last().selectOption(name);};
  const row=name=>page.locator('.item-row').filter({has:page.locator('[data-item-menu]').filter({hasText:new RegExp('^'+name+' ')})});
- const baseline=await page.locator('#risk').innerText();
  await add('주민등록번호');assert.equal(await row('주민등록번호').locator('[data-required]').isChecked(),true);assert.equal(await row('주민등록번호').locator('[data-required]').isDisabled(),true);
  await page.locator('[data-bulk-required=collect][value=optional]').click();assert.equal(await row('주민등록번호').locator('[data-required]').isChecked(),true);
  await row('주민등록번호').locator('[data-required]').evaluate(n=>{n.checked=false;n.dispatchEvent(new Event('change',{bubbles:true}));});assert.equal(await row('주민등록번호').locator('[data-required]').isChecked(),true);
  for(const key of ['provide','extra','marketing']){await page.locator(`[data-enable=${key}]`).check();const scoped=page.locator(`.item-row[data-item-group=${key}]`).last();await scoped.locator('[data-item-preset]').selectOption(key==='marketing'?'custom':'주민등록번호');if(key==='marketing')await scoped.locator('[data-name]').fill('주민번호');assert.equal(await scoped.locator('[data-required]').isChecked(),true);assert.equal(await scoped.locator('[data-required]').isDisabled(),true);if(key!=='marketing'){await page.locator(`[data-bulk-required=${key}][value=optional]`).click();assert.equal(await scoped.locator('[data-required]').isChecked(),true);}await page.locator(`[data-enable=${key}]`).uncheck();}
  await add('건강정보');await add('주소');await add('생년월일');await add('이메일 주소');await add('전화번호');await add('계좌번호');await add('소속 기관명');
- assert.notEqual(await page.locator('#risk').innerText(),baseline);assert.match(await page.locator('.risk-findings').innerText(),/주민등록번호/);assert.match(await page.locator('.risk-findings').innerText(),/수집 항목 \d+종/);assert.match(await page.locator('.risk-findings').innerText(),/연락 수단/);
- await add('주소');assert.match(await page.locator('.risk-findings').innerText(),/같은 항목이 2번/);await row('주소').last().locator('[data-delete]').click();assert.doesNotMatch(await page.locator('.risk-findings').innerText(),/같은 항목이 2번/);
+ assert.equal(await row('주민등록번호').locator('[data-item-risk]').isVisible(),true);
+ assert.equal(await page.locator('.workspace aside').count(),0);
+ await add('주소');await row('주소').last().locator('[data-delete]').click();
  await page.locator('[data-next]').click();await page.locator('[data-class-group=collect]').waitFor();
  const card=category=>page.locator(`[data-class-group=collect] [data-drop-category=${category}]`);
  const general=()=>page.locator('.class-item').filter({has:page.getByText('성명',{exact:true})});

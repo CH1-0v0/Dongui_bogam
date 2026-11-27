@@ -36,8 +36,8 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3000';
   const longError='AI 요청 전달 오류 [지원 코드: D1.'+'A'.repeat(344)+']';
   await page.route('**/api/law/search',r=>r.fulfill({status:502,json:{error:longError}}));
   await page.locator('[data-ai-law]').click();await page.getByRole('alert').waitFor();
-  const overlapGeometry=await page.evaluate(()=>{const card=document.querySelector('.law-search-panel'),side=document.querySelector('.side');return {right:card.getBoundingClientRect().right,side:side.getBoundingClientRect().left,overflow:document.documentElement.scrollWidth>innerWidth};});
-  assert.ok(overlapGeometry.right<=overlapGeometry.side);assert.equal(overlapGeometry.overflow,false);
+  assert.equal(await page.locator('.workspace aside').count(),0);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.setViewportSize({width:1440,height:1100});
   console.log('PASS long AI support codes wrap within the main panel without covering review status or overflowing mobile');
   const outcomes=[

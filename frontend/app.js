@@ -120,7 +120,6 @@ function suggested(i){
  return value==='possible'?'sensitive':'general';
 }
 const kind=i=>rnn(i.name)?'unique':presetKind(i)||i.kind||suggested(i);
-const needsItemReview=i=>isManualItemName(i)&&(signal(i.name)!=='general'||!knownItemName(i.name)||currentSensitivity(i)?.verdict==='high');
 function hint(i){
  const standard=standardItemName(i.name);
  if(standard!==i.name.trim())return '권장 표기 · '+standard;
@@ -139,7 +138,7 @@ function scheduleSensitivity(){
  clearTimeout(sensitivityTimer);sensitivityTimer=setTimeout(()=>{if(step===1)checkSensitivity();},1200);
 }
 function refreshSensitivityHints(){
- if(step===1){for(const {i} of entries()){const node=document.getElementById('hint-'+i.id);if(node){node.innerHTML=itemNameHelp(i);node.closest('.item-row').dataset.personalKind=kind(i);}}refreshRisk();}
+ if(step===1){for(const {i} of entries()){const node=document.getElementById('hint-'+i.id);if(node){node.innerHTML=itemNameHelp(i);node.closest('.item-row').dataset.personalKind=kind(i);}}refreshItemRiskBadges();}
  if(step===2)render();
  const status=document.querySelector('#sensitivity-status');if(status){const failed=entries().filter(({i})=>currentSensitivity(i)?.status==='error').length;status.innerHTML=sensitivityFlight?'민감정보 여부를 확인하고 있습니다…':failed?`민감정보 가능성 미확인 ${failed}개 <button data-retry-classification>다시 확인</button>`:'';}
 }
@@ -891,7 +890,7 @@ function render(){
  if(!step){app.innerHTML=home();return;}
  if(step===5){app.innerHTML=finalPage();scheduleA4Preview();return;}
  const body=(step===1&&state.quickNote?`<div class="info"><p>${safe(state.quickNote)}</p></div>`:'')+[basics,classify,grounds,output][step-1]();
- app.innerHTML=`<div class="trail"><button data-go="0">홈</button> / 문서 작성</div><div class="title"><h1>${labels[step-1]}</h1><p>${descriptions[step-1]}</p></div><nav class="stepper" aria-label="작성 단계">${labels.map((name,n)=>`<button data-go="${n+1}" ${step===n+1?'aria-current="step"':''} ${n+1>reached||(n===3&&unresolvedRnn().length)?'disabled':''}><span class="stepnum">${String(n+1).padStart(2,'0')}</span>${name}</button>`).join('')}</nav><div class="workspace ${step===4?'wide-output':''}"><div class="stack">${body}<div class="notice" id="message" role="status">${safe(step===3&&state.groundDraft?'':message)}</div><div class="bar"><button data-go="${step-1}">← ${step===1?'홈으로':'이전 단계'}</button>${step<4?`<button class="primary" data-next ${step===3&&unresolvedRnn().length?'disabled aria-describedby="rrn-block"':''}>${step===2?'분류 확정 후 다음':step===3?'문서 작성으로':'다음 단계'} →</button>`:''}</div></div>${step===4?'':`<aside class="side">${reviewStatus()}</aside>`}</div>`;
+ app.innerHTML=`<div class="trail"><button data-go="0">홈</button> / 문서 작성</div><div class="title"><h1>${labels[step-1]}</h1><p>${descriptions[step-1]}</p></div><nav class="stepper" aria-label="작성 단계">${labels.map((name,n)=>`<button data-go="${n+1}" ${step===n+1?'aria-current="step"':''} ${n+1>reached||(n===3&&unresolvedRnn().length)?'disabled':''}><span class="stepnum">${String(n+1).padStart(2,'0')}</span>${name}</button>`).join('')}</nav><div class="workspace"><div class="stack">${body}<div class="notice" id="message" role="status">${safe(step===3&&state.groundDraft?'':message)}</div><div class="bar"><button data-go="${step-1}">← ${step===1?'홈으로':'이전 단계'}</button>${step<4?`<button class="primary" data-next ${step===3&&unresolvedRnn().length?'disabled aria-describedby="rrn-block"':''}>${step===2?'분류 확정 후 다음':step===3?'문서 작성으로':'다음 단계'} →</button>`:''}</div></div></div>`;
  const selectAll=document.querySelector('[data-scope-all]');if(selectAll){const checks=[...document.querySelectorAll('[data-scope]')];selectAll.indeterminate=checks.some(c=>c.checked)&&checks.some(c=>!c.checked);}
  if(step===1&&basicsChecked)showBasicsIssues();
  if(step===3)warmPdfPreview();
@@ -932,21 +931,11 @@ function itemCollectionRisk(item){
  return Boolean(contextualRisk({g:group,i:item})||named.filter(i=>itemNameKey(standardItemName(i.name))===name).length>1||
   contact(item)&&named.filter(contact).length>=3||new Set(named.map(i=>itemNameKey(standardItemName(i.name)))).size>=8);
 }
-function riskHTML(issues,missing){
- return `<section class="risk-classification"><strong>분류 확인 항목 ${issues.length}개</strong>${issues.map(({i})=>`<div>${safe(i.name)} → ${safe(hint(i))}</div>`).join('')}</section><section class="risk-purpose"><strong>목적·기간 확인 항목 ${missing}개</strong></section>`;
+function refreshItemRiskBadges(){
+ if(step!==1)return;
+ for(const badge of document.querySelectorAll('[data-item-risk]'))badge.hidden=!itemCollectionRisk(getItem(badge.dataset.itemRisk));
 }
 
-function reviewStatus(){
- const all=entries();return `<div class="review-status-header"><h3>검토 현황</h3><span class="pill">개인정보 항목 <span id="count">${all.length}</span>개</span></div><div id="risk">${riskHTML(all.filter(({i})=>needsItemReview(i)),all.filter(({g})=>!g.purpose.trim()||!g.period.trim()).length)}</div><p class="review-human-warning">최종 개인정보의 상세 분류와 법령 근거는 담당자가 직접 확인해야 합니다.</p><button class="review-guide" data-guide>이용 안내</button>`;
-}
-
-function refreshRisk(){
- const all=entries(), count=document.querySelector('#count');
- if(!count)return;
- count.textContent=all.length;
- if(step===1)for(const badge of document.querySelectorAll('[data-item-risk]'))badge.hidden=!itemCollectionRisk(getItem(badge.dataset.itemRisk));
- document.querySelector('#risk').innerHTML=riskHTML(all.filter(({i})=>needsItemReview(i)),all.filter(({g})=>!g.purpose.trim()||!g.period.trim()).length);
-}
 async function go(n){
  if(n===5&&(step!==4||!finalDocument))return;
  if(n!==5)finalDocument=null;
@@ -1145,7 +1134,7 @@ document.addEventListener('input',e=>{
  }
  if(step===1&&(d.path||d.name)){
   document.querySelectorAll('.stepper button').forEach((b,n)=>b.disabled=n+1>reached);
-  refreshRisk();
+  refreshItemRiskBadges();
  }
  if(step===1&&basicsChecked&&(d.path||d.name))showBasicsIssues();
  if(step===4&&d.path)refreshPreview();
@@ -1154,7 +1143,7 @@ document.addEventListener('focusout',e=>{
  if(!e.target.dataset.name)return;
  if(e.relatedTarget?.matches('[data-item-suggestion]')&&e.target.closest('.item-row').contains(e.relatedTarget))return;
  commitItemName(e.target);
- refreshRisk();
+ refreshItemRiskBadges();
  if(basicsChecked)showBasicsIssues();
 });
 document.addEventListener('change',e=>{
@@ -1322,7 +1311,7 @@ document.addEventListener('click',e=>{
  if(d.itemSuggestion){
   const input=b.closest('.item-row').querySelector('[data-name]');
   commitItemName(input,d.itemSuggestion).focus({preventScroll:true});
-  refreshRisk();
+  refreshItemRiskBadges();
   if(basicsChecked)showBasicsIssues();
  }
  if('quickCreate' in d){
