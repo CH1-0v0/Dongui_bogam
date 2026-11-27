@@ -13,7 +13,11 @@ const rules=require('../frontend/law-basis.js').rules,base=process.env.TEST_BASE
   await p.locator('[data-next]').click();await p.locator('[data-next]').click();await p.locator('[data-add-ground]').click();await p.locator('[data-basis-code]').selectOption('contract');await p.waitForFunction(()=>!document.querySelector('[data-basis-code]').disabled);
   for(const n of [0,1])await p.locator('[data-scope]').nth(n).check();await p.locator('[data-adopt-ground]').click();await p.locator('[data-adopt-ground]').waitFor({state:'detached'});await p.locator('[data-next]').click();
   const check=async()=>{const legal=rule.pipa+'에 따라 동의없이 개인정보를 수집·이용합니다.';assert.deepEqual(await p.locator('.doc-notice-intro').allTextContents(),mixed?[legal]:[]);if(!mixed)assert.equal(await p.locator('.doc-intro').textContent(),legal+' 처리 목적 및 개인정보 항목 등 처리 내용을 확인해주시기 바랍니다.');assert.equal(await p.locator('.doc-notice-heading').count(),mixed?1:0);assert.equal(await p.locator('.notice-section').count(),mixed?1:0);assert.equal(await p.locator('.doc-category').count(),mixed?1:0);assert.equal(await p.locator('.doc-notice table').count(),1);assert.match(await p.locator('.doc-notice').innerText(),/성명.*휴대전화번호/s);};
-  await check();await p.locator('[data-toggle-document-edit]').click();await check();await p.locator('[data-toggle-document-edit]').click();
+  await check();await p.locator('[data-toggle-document-edit]').click();await check();
+  assert.equal(await p.locator('[data-consent-items] [contenteditable], .doc-notice [data-edit$=".item"]').count(),0);
+  assert.equal(await p.locator('.doc-notice td').filter({hasText:/성명.*휴대전화번호/s}).locator('[contenteditable]').count(),0);
+  assert.ok(await p.locator('.doc-notice [data-edit$=".purpose"]').count());
+  await p.locator('[data-toggle-document-edit]').click();
 
   if(mixed){await p.locator('[data-child][value=no]').check();for(const field of await p.locator('[data-path^="refusals."]').all())await field.fill('합성 거부 안내');}
   await p.locator('[data-finish]').last().click();await check();
