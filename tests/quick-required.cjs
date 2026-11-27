@@ -27,14 +27,14 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3055';
    }));
    return route.fulfill({json:{residentCheck:{status:outcome==='not_found'?outcome:'confirmed'},grounds:outcome==='not_found'?[]:grounds}});
   });
-  async function use(title,step){
+  async function use(title,step,addAffiliation=true){
    await page.goto(base);
    const index=await page.evaluate(title=>quickTemplates.findIndex(template=>template.title===title),title);
    assert.ok(index>=0,title);
    await page.locator('[data-quick-create]').click();
    await page.locator('[name=template]').selectOption(String(index));
    const items=page.locator('[data-quick-items]');
-   await items.fill(await items.inputValue()+', 소속');
+   if(addAffiliation)await items.fill(await items.inputValue()+', 소속');
    await page.locator('.quick-create-form [type=submit]').click();
    await page.locator(`.stepper [data-go="${step}"][aria-current="step"]`).waitFor();
    return page.evaluate(()=>state.groups.collect.items.map(item=>[item.name,item.required]));
@@ -55,11 +55,15 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3055';
   outcome='partial';
   await use('강사료·자문료 지급 동의서',4);
   assert.equal(calls,2);
+  const noticeSentence='개인정보 보호법 제15조 제1항 제2호, 제24조의2 제1항 제1호에 따라 동의없이 개인정보를 수집·이용합니다.';
+  assert.deepEqual(await page.locator('.doc-notice-intro').allTextContents(),[noticeSentence]);
   await page.getByText(/근거가 확인된 항목만 고지사항에 반영/).waitFor();
 
   outcome='confirmed';
-  await use('강사료·자문료 지급 동의서',4);
+  await use('강사료·자문료 지급 동의서',4,false);
   assert.equal(calls,3);
+  assert.deepEqual(await page.locator('.doc-intro').allTextContents(),[noticeSentence+' 처리 목적 및 개인정보 항목 등 처리 내용을 확인해주시기 바랍니다.']);
+  assert.equal(await page.locator('.doc-notice-intro').count(),0);
   const applied=await page.evaluate(()=>state.grounds.map(ground=>ground.ids.map(id=>getItem(id).name)));
   assert.deepEqual(applied,[feeItems,['주민등록번호']]);
   const notice=await page.locator('.doc-notice').textContent();

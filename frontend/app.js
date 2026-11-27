@@ -649,9 +649,12 @@ const suggestedTitle = () => {
  const {purpose,action}=consentDetails();
  return withParticle(shortPurpose(state.titlePurpose&&purpose===state.groups.collect.purpose?state.titlePurpose:purpose),'을','를')+' 위한 개인정보 '+action+' 동의서';
 };
-const noticeIntro = '아래 개인정보는 안내된 법적 근거에 따라 처리하며 별도의 동의를 받지 않습니다. 처리 목적, 개인정보 항목, 보유 및 이용기간과 법적 근거를 확인해 주시기 바랍니다.';
+const noticeReviewText = '처리 목적 및 개인정보 항목 등 처리 내용을 확인해주시기 바랍니다.';
 const defaultIntro = () => {
- if(!hasConsent())return noticeIntro;
+ if(!hasConsent()){
+  const text=noticeIntroduction(sections().filter(row=>row.basis==='notice'));
+  return [text,noticeReviewText].filter(Boolean).join(' ');
+ }
  const {purpose,action}=consentDetails();
  const agency=withParticle(state.agency.trim()||'기관명','은','는');
  return `${agency} ${withParticle(purpose,'을','를')} 위하여 아래와 같이 개인정보를 ${action}하고자 합니다. 내용을 자세히 확인하신 후 동의 여부를 결정하여 주시기 바랍니다.`;
@@ -693,12 +696,16 @@ function noticeIntroduction(rows){
   const action=key==='provide'?(g.outside?'목적 외로 제공합니다':'제3자에게 제공합니다'):key==='extra'?'목적 외로 이용합니다':'수집·이용합니다';
   for(const i of items)for(const basis of i.bases||[]){
    const rule=LawBasis.rules[basis.basisCode];
-   if(rule?.effect!=='notice'||!LawBasis.valid(basis,lawContext({key,g,i})))continue;
+   if(!rule?.pipa||!LawBasis.valid(basis,lawContext({key,g,i})))continue;
+   if(rule.effect!=='notice'&&(rule.supplement!==lawClassification(i)||rule.supplement==='rnn'&&!basis.specific))continue;
    if(!citationsByAction.has(action))citationsByAction.set(action,new Set());
    citationsByAction.get(action).add(rule.pipa);
   }
  }
- return [...citationsByAction].map(([action,citations])=>`<p class="doc-notice-intro">${safe(LawBasis.compactCites([...citations]))}에 따라 동의 없이 개인정보를 ${action}.</p>`).join('');
+ return [...citationsByAction].map(([action,citations],index)=>{
+  const verb=index===citationsByAction.size-1?action+'.':action.replace(/합니다$/,'하고');
+  return `${LawBasis.compactCites([...citations])}에 따라 동의없이 개인정보를 ${verb}`;
+ }).join(', ');
 }
 function noticeTable(sections,editable){
  const first=sections[0],provider=sections.some(s=>s.key==='provide'),mixed=new Set(sections.map(s=>s.key+Boolean(s.g.outside))).size>1,grouped=new Map();
@@ -731,8 +738,9 @@ function documentHTML(editable=false){
  const title=state.previewFields?.title?state.title:state.title.trim()||suggestedTitle();
  const intro=state.previewFields?.intro?state.intro:state.intro.trim()||defaultIntro();
  const noticeRows=[...noticeGroups.values()].flat();
- const noticeBody=noticeRows.length?noticeIntroduction(noticeRows)+noticeTable(noticeRows,editable):'';
- return `<section class="doc"><h1>${documentField('문서 제목','title',title,editable)}</h1><p class="doc-intro">${documentField('제목 아래 안내사항','intro',intro,editable)}</p>${[...consentGroups.values()].map(group=>categoryTable(group,editable)).join('')}${noticeRows.length?(consentGroups.size?`<section class="notice-section"><h3 class="doc-notice-heading"><span class="doc-text">고지사항</span></h3>${noticeBody}</section>`:noticeBody):''}${consentGroups.size?signatureBlock(editable):''}<p class="doc-agency"><strong>${documentField('기관명','agency',state.agency|| (editable?'':'기관명'),editable)} 귀중</strong></p></section>`;
+ const noticeBody=noticeRows.length?noticeTable(noticeRows,editable):'';
+ const noticeText=consentGroups.size?noticeIntroduction(noticeRows):'';
+ return `<section class="doc"><h1>${documentField('문서 제목','title',title,editable)}</h1><p class="doc-intro">${documentField('제목 아래 안내사항','intro',intro,editable)}</p>${[...consentGroups.values()].map(group=>categoryTable(group,editable)).join('')}${noticeRows.length?(consentGroups.size?`<section class="notice-section"><h3 class="doc-notice-heading"><span class="doc-text">고지사항</span></h3>${noticeText?`<p class="doc-notice-intro">${safe(noticeText)}</p>`:''}${noticeBody}</section>`:noticeBody):''}${consentGroups.size?signatureBlock(editable):''}<p class="doc-agency"><strong>${documentField('기관명','agency',state.agency|| (editable?'':'기관명'),editable)} 귀중</strong></p></section>`;
 }
 function previewControls(editing,top=false){
  return `<nav class="a4-page-nav ${top?'a4-nav-top':''}" aria-label="미리보기 ${top?'상단':'하단'} 쪽 이동" ${editing?'hidden':''}><button data-preview-move="-1" disabled>← 이전 쪽</button><output class="a4-page-counter" aria-live="polite">1 / 1쪽</output><button data-preview-move="1" disabled>다음 쪽 →</button>${top?'<span class="preview-zoom"><button data-preview-zoom="-0.1" aria-label="미리보기 축소">−</button><output class="preview-zoom-value">100%</output><button data-preview-zoom="0.1" aria-label="미리보기 확대">＋</button><button data-preview-zoom="fit">가로 맞춤</button></span>':''}</nav>`;
