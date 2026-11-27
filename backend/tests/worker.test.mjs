@@ -1,0 +1,256 @@
+import {discoveryConfig,normalizeLawName,discoveryScope,rankEvidence,groundSelections,hasPermissionText} from '../cloudflare/evidence-discovery.mjs';
+import {searchOutcome} from '../cloudflare/search-outcome.mjs';
+import {searchPayload,parseSearchResponse,officialSearchUrl} from '../cloudflare/web-search.mjs';
+import {sealSupportText,redactSupportText} from '../cloudflare/ai-support.mjs';
+import {inspectAiError} from '../cloudflare/ai-diagnostics.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import worker,{failureDiagnostics} from '../cloudflare/worker.mjs';
+import {ApiError,LegalApi,reviewEvidenceFor,leadingNumber,parseXml,articleNode,validateContext,reviewMaterial,fingerprint,signReview,checkReview} from '../cloudflare/legal.mjs';
+import rules from '../basis-rules.json' with {type:'json'};
+const env={OPENROUTER_MODEL:'openai/gpt-oss-120b',LAW_API_OC:'synthetic-oc',OPENROUTER_API_KEY:'synthetic-ai-key',AI_LIMITER:{limit:async()=>({success:true})},API_LIMITER:{limit:async()=>({success:true})},ASSETS:{fetch:async()=>new Response('synthetic public asset')}};
+const base='https://dongui.example';
+const item=(classification='general',id='item-1')=>({id,name:classification==='general'?'성명':classification==='rnn'?'주민등록번호':'검증 항목',purpose:'합성 검증 목적',recipient:'',type:'collect',context:'collect',classification});
+const lawNames={'개인정보 보호법':'101','개인정보 보호법 시행령':'102','법령검증용법':'103'};
+// Entirely synthetic XML: never represents a real legal quotation.
+const article=(number,paragraphs)=>`<조문단위><조문여부>조문</조문여부><조문번호>${number.split('의')[0]}</조문번호><조문가지번호>${number.split('의')[1]||''}</조문가지번호><조문제목>합성 제목</조문제목><조문내용>[합성] 제${number}조</조문내용>${paragraphs.map(p=>`<항><항번호>${p}</항번호><항내용>[합성] ${p}항</항내용>${Array.from({length:10},(_,n)=>`<호><호번호>${n+1}.</호번호><호내용>[합성] ${n+1}호</호내용><목><목번호>가.</목번호><목내용>[합성] 하위 목</목내용></목></호>`).join('')}</항>`).join('')}</조문단위>`;
+const bodies=Object.fromEntries(Object.entries(lawNames).map(([name,id])=>[id,`<법령><기본정보><법령명_한글>${name}</법령명_한글></기본정보><조문>${[...new Set(['10','15','17','18','23','24','24의2',...Object.values(rules).map(r=>r.article)])].map(n=>article(n,['1','2','3','4'])).join('')}</조문></법령>`]));
+let aiReply={};
+const upstream=async(url,options)=>{const u=new URL(url);if(u.hostname==='openrouter.ai'){assert.equal(options.headers.Authorization,'Bearer synthetic-ai-key');if(u.pathname==='/api/v1/responses'){const payload=JSON.parse(options.body);assert.equal(payload.tools[0].type,'openrouter:web_search');return Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:'합성 검색 자료: 법령검증용법 제10조',annotations:[{type:'url_citation',url:'https://www.law.go.kr/synthetic',title:'합성 검색 출처'}]}]}]});}return Response.json({choices:[{message:{content:JSON.stringify(Array.isArray(aiReply.candidates)&&JSON.parse(options.body).messages[1].content.includes('"officialEvidence"')?{items:JSON.parse(JSON.parse(options.body).messages[1].content).items.map(i=>({id:i.id,verdict:"possible",explanation:"합성 검토",checks:[]}))}:aiReply)}}]});}assert.equal(u.hostname,'www.law.go.kr');assert.equal(u.searchParams.get('OC'),'synthetic-oc');if(u.pathname.endsWith('lawSearch.do')){const name=u.searchParams.get('query'),id=lawNames[name];return new Response(`<LawSearch><totalCnt>${id?1:0}</totalCnt>${id?`<law><법령명한글>${name}</법령명한글><법령일련번호>${id}</법령일련번호><시행일자>20200101</시행일자><법령구분명>법률</법령구분명></law>`:''}</LawSearch>`);}return new Response(bodies[u.searchParams.get('MST')]);};
+const api=()=>new LegalApi(env,upstream);
+test('XML hierarchy, clauses, points, invalid entities and deleted articles',()=>{const root=parseXml(bodies['101']);assert.ok(articleNode(root,'15','1','4'));assert.throws(()=>articleNode(root,'15','9'),/항/);assert.throws(()=>parseXml('<!DOCTYPE x [<!ENTITY x "x">]><x>&x;</x>'),/XML/);assert.throws(()=>parseXml('<x>'),/XML/);});
+test('context rejects raw values and cross-context/supplement mismatch',()=>{assert.throws(()=>validateContext({items:[{name:'010-1234-5678'}]}),/원문/);assert.throws(()=>reviewMaterial({basisCode:'uniqueLaw',type:'collect',items:[item()]}),/유형/);assert.throws(()=>reviewMaterial({basisCode:'contract',type:'collect',items:[{...item(),context:'provide'}]}),/유형/);});
+test('canonical non-consent PIPA rules and support match local Python policy',async()=>{for(const [basisCode,r]of Object.entries(rules)){if(r.effect==='consent')continue;const result=await api().basis({basisCode,type:r.contexts[0]});assert.equal(result.pipa.article,r.article);assert.equal(result.pipa.paragraph,r.paragraph);assert.equal(result.pipa.clause,r.clause);assert.ok(result.pipaVerified&&result.supportVerified);assert.match(result.pipaParagraph.excerpt,/\[합성\]/);if(r.support)assert.equal(result.support.article,r.support.article);}});
+test('citation uses exact law, contains entire paragraph with clause labels, validates version',async()=>{const a=api(),result=await a.citation({law:'개인정보 보호법',article:'15',paragraph:'1',clause:'4'});assert.equal(result.cite,'개인정보 보호법 제15조 제1항 제4호');assert.match(result.excerpt,/하위 목/);assert.ok(result.paragraphSegments.some(s=>s.clause==='4'));assert.match(result.paragraphExcerpt,/10호/);await assert.rejects(a.citation({law:'잘못된 법령',article:'1'}),/현행/);await assert.rejects(a.citation({law:'개인정보 보호법',article:'15',mst:'999'}),/버전/);});
+test('catalog counts eligible laws, carries cursors and article titles/children',async()=>{const a=api(),result=await a.catalog({query:'법령검증용법'});assert.equal(result.laws[0].mst,'103');assert.equal(result.hasNext,false);assert.equal((await a.catalog({query:'법령검증용법'},true)).count,1);const doc=await a.articles({law:'법령검증용법',mst:'103'});assert.equal(doc.articles[0].title,'합성 제목');assert.equal(doc.articles[0].paragraphs[0].clauses[0].points[0].value,'가');await assert.rejects(a.catalog({query:'법령',cursor:{target:'law',page:1,offset:20}}),/위치/);});
+test('mixed-class bundle verifies all separate permissions and rejects invalid extras atomically',async()=>{const data={law:'법령검증용법',article:'10',paragraph:'1',basisCode:'statutory',type:'collect',items:[item(),item('sensitive','s'),item('unique','u'),item('rnn','r')],additionalBasisCodes:['sensitiveLaw','uniqueLaw','residentLaw']};const a=api(),result=await a.apply(data);assert.deepEqual(result.additionalGrounds.map(p=>p.basisCode),data.additionalBasisCodes);assert.equal(result.reviewConfirmed,false);await assert.rejects(a.apply({...data,additionalBasisCodes:['contract']}),/별도 처리/);await assert.rejects(a.apply({...data,law:'개인정보 보호법'}),/개별/);await assert.rejects(a.verify({...data,target:'admrul'}),/행정규칙/);});
+test('AI search checks official laws, rejects unknown citations without fabricating results',async()=>{aiReply={candidates:[{law:'법령검증용법',article:'10',basisCode:'statutory',type:'collect',itemNames:['성명']},{law:'존재안함',article:'1',basisCode:'statutory',type:'collect'}]};const result=await api().search({items:[item()]});assert.equal(result.candidates.length,1);assert.equal(result.rejected.length,1);assert.equal(result.candidates[0].itemReviews[0].suggested,true);});
+test('optional AI negative review does not block human application; positive proof survives fresh timestamps',async()=>{const data={basisCode:'contract',type:'collect',items:[item()]};aiReply={summary:'합성',items:[{id:'item-1',verdict:'not_supported'}]};assert.equal((await api().review(data)).review.canApply,false);assert.equal((await api().apply(data)).verified,true);aiReply={summary:'합성',items:[{id:'item-1',verdict:'possible'}]};const reviewed=await api().review(data);await new Promise(r=>setTimeout(r,5));assert.equal((await api().apply({...data,reviewToken:reviewed.review.token})).reviewConfirmed,true);await assert.rejects(api().apply({...data,items:[{...item(),purpose:'변경됨'}],reviewToken:reviewed.review.token}),/바뀌었거나/);});
+test('classification uses official criteria, limits labels and defaults missing results to uncertain',async()=>{aiReply={items:[{id:'s',verdict:'high',included:['건강','금지 유형']}]};const result=await api().classify({items:[item('sensitive','s'),item('general','g')]});assert.deepEqual(result.items[0].included,['건강']);assert.equal(result.items[1].verdict,'uncertain');});
+test('review signatures reject tampering and fingerprint binds additional grounds',async()=>{const token=await signReview('test','fp');await checkReview('test',token,'fp');await assert.rejects(checkReview('test',token+'0','fp'));assert.notEqual(await fingerprint({additionalGrounds:[]},[item()]),await fingerprint({additionalGrounds:[{basisCode:'uniqueLaw',excerpt:'changed'}]},[item()]));});
+test('worker CSRF cookie works across isolates and sensitive paths stay unreachable',async()=>{const response=await worker.fetch(new Request(base+'/api/status'),env),status=await response.json(),cookie=response.headers.get('set-cookie').split(';')[0];assert.ok(status.csrfToken);assert.ok(response.headers.get('set-cookie').includes('HttpOnly'));assert.ok(response.headers.get('set-cookie').includes('Secure'));assert.ok(!JSON.stringify(status).includes('synthetic-oc'));for(const path of ['/.env','/key.env','/.dev.vars','/server.py','/.git/config','/cloudflare/legal.mjs'])assert.equal((await worker.fetch(new Request(base+path),env)).status,404);const req=(extra={})=>new Request(base+'/api/law/apply',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':status.csrfToken,'Content-Type':'application/json',Origin:base,...extra},body:'{}'});assert.equal((await worker.fetch(req({'X-CSRF-Token':'wrong'}),env)).status,403);assert.equal((await worker.fetch(req({Origin:'https://evil.example'}),env)).status,403);assert.equal((await worker.fetch(req(),env)).status,400);assert.equal((await worker.fetch(req(),{...env,API_LIMITER:{limit:async()=>({success:false})}})).status,429);assert.equal((await worker.fetch(new Request(base+'/api/status'),{})).status,200);});
+test('production build includes only public allowlist, with no environment or Python files',()=>{const names=fs.readdirSync('dist',{recursive:true});assert.ok(names.includes('index.html'));assert.ok(names.includes('export-assets/ConsentSans-Regular.ttf'));assert.ok(!names.some(n=>/(^|\/)(?:\.env|\.dev.vars|server.py|node_modules|\.git)/.test(n)));});
+test('DRF JSON adapter verifies the selected article and requests an article-scoped upstream response',async()=>{const a=new LegalApi({...env,LAW_API_OC:'synthetic-json'},async url=>{const u=new URL(url);assert.equal(u.searchParams.get('type'),'JSON');if(u.pathname.endsWith('lawSearch.do'))return Response.json({LawSearch:{totalCnt:'1',law:{법령명한글:'개인정보 보호법',법령일련번호:'991',시행일자:'20200101',법령구분명:'법률'}}});assert.equal(u.searchParams.get('JO'),'001500');return Response.json({법령:{기본정보:{법령명_한글:'개인정보 보호법'},조문:{조문단위:{조문번호:'15',조문가지번호:'',조문여부:'조문',조문제목:'합성',조문내용:'[합성] 15조',항:{항번호:'①',항내용:'[합성] 항 전체',호:[{호번호:'4.',호내용:'[합성] 4호'},{호번호:'5.',호내용:'[합성] 5호'}]}}}}});});const result=await a.citation({law:'개인정보 보호법',article:'15',paragraph:'1',clause:'4'});assert.equal(result.excerpt,'[합성] 4호');assert.match(result.paragraphExcerpt,/5호/);assert.equal(result.paragraphSegments.find(p=>p.clause==='4').text,'[합성] 4호');});
+test('AI retries one transient upstream failure while preserving model, privacy and required JSON parameters',async()=>{let calls=0;const a=new LegalApi(env,async(_url,options)=>{calls++;const p=JSON.parse(options.body);assert.equal(p.model,'openai/gpt-oss-120b');assert.equal(p.provider.data_collection,'deny');assert.equal(p.provider.require_parameters,true);assert.equal(p.provider.allow_fallbacks,true);return calls===1?Response.json({error:{message:'private request echo',code:503}},{status:503}):Response.json({choices:[{message:{content:'{"ok":true}'}}]});});assert.deepEqual(await a.ai('synthetic',{}),{ok:true});assert.equal(calls,2);});
+test('AI authentication, balance, routing and quota errors never retry or expose upstream text',async()=>{for(const status of [401,402,403,404,422,429]){let calls=0;const a=new LegalApi(env,async()=>{calls++;return Response.json({error:{message:'private echo must not be shown',code:status,metadata:{raw:'private prompt'}}},{status});});await assert.rejects(a.ai('synthetic',{}),error=>error.message.includes(String(status))&&!error.message.includes('private'));assert.equal(calls,1);}});
+test('AI privacy routing and long input failures are actionable without exposing raw provider data',async()=>{for(const [status,message,expected]of [[404,'No endpoints for data policy private-echo',/개인정보 보호/],[400,'context length exceeded private-echo',/항목이나 설명을 줄여/]]){const a=new LegalApi(env,async()=>Response.json({error:{message}},{status}));await assert.rejects(a.ai('synthetic',{}),e=>expected.test(e.message)&&!e.message.includes('private-echo'));}});
+test('AI repeated transient failures stop after two attempts; HTTP-200 error envelopes are handled too',async()=>{for(const httpStatus of [503,200]){let calls=0;const a=new LegalApi(env,async()=>{calls++;return Response.json({error:{code:503,message:'sensitive echo'}},{status:httpStatus});});await assert.rejects(a.ai('synthetic',{}),e=>e.upstreamStatus===503&&!e.message.includes('sensitive'));assert.equal(calls,2);}});
+test('AI parameter compatibility retries keep model, privacy, prompts and token limit',async()=>{for(const parameter of ['response_format','reasoning','temperature',null]){let calls=0;const bodies=[];const a=new LegalApi(env,async(_url,options)=>{const body=JSON.parse(options.body);bodies.push(body);calls++;if(calls===1)return Response.json({error:{message:'Provider returned error',metadata:{raw:JSON.stringify({error:{message:parameter?parameter+' unsupported; private-echo':'unsupported optional settings private-echo'}})}}},{status:400});return Response.json({choices:[{message:{content:'{"ok":true}'}}]});});assert.deepEqual(await a.ai('synthetic prompt',{fixture:true}),{ok:true});assert.equal(calls,2);assert.equal(bodies[1].model,bodies[0].model);assert.equal(bodies[1].max_tokens,bodies[0].max_tokens);assert.deepEqual(bodies[1].messages,bodies[0].messages);assert.equal(bodies[1].provider.data_collection,'deny');assert.equal(bodies[1].provider.require_parameters,true);if(parameter)assert.equal(parameter in bodies[1],false);else for(const key of ['response_format','reasoning','temperature'])assert.equal(key in bodies[1],false);}});
+test('AI compatibility never bypasses context, moderation, auth or balance rejections',async()=>{for(const message of ['context length exceeded','content policy violation','invalid API key','insufficient credits']){let calls=0;const a=new LegalApi(env,async()=>{calls++;return Response.json({error:{message:message+' private-echo'}},{status:400});});await assert.rejects(a.ai('synthetic',{}),e=>e.upstreamStatus===400&&!e.message.includes('private-echo'));assert.equal(calls,1);}});
+test('OSS requests use stable JSON-capable provider preferences and rotate after failure',async()=>{let calls=0;const orders=[];const a=new LegalApi(env,async(_url,options)=>{const p=JSON.parse(options.body);orders.push(p.provider.order);assert.equal(p.provider.data_collection,'deny');calls++;return calls===1?Response.json({error:{code:503}},{status:503}):Response.json({choices:[{finish_reason:'stop',message:{content:'{"ok":true}'}}]});});await a.ai('synthetic',{});assert.deepEqual(orders,[['deepinfra','groq','cerebras'],['groq','cerebras','deepinfra']]);});
+test('HTTP 200 with empty or malformed JSON retries once; truncated and filtered replies do not retry',async()=>{for(const value of ['', 'not JSON']){let calls=0;const a=new LegalApi(env,async()=>{calls++;return Response.json({choices:[{finish_reason:'stop',message:{content:calls===1?value:'{"ok":true}'}}]});});assert.deepEqual(await a.ai('synthetic',{}),{ok:true});assert.equal(calls,2);}for(const finish_reason of ['length','content_filter']){let calls=0;const a=new LegalApi(env,async()=>{calls++;return Response.json({choices:[{finish_reason,message:{content:'{"incomplete":true}'}}]});});await assert.rejects(a.ai('synthetic',{}));assert.equal(calls,1);}});
+test('custom models do not inherit OSS-only provider preferences',async()=>{const a=new LegalApi({...env,OPENROUTER_MODEL:'synthetic/other-model'},async(_url,options)=>{const p=JSON.parse(options.body);assert.equal(p.provider.order,undefined);assert.equal(p.provider.sort,'latency');return Response.json({choices:[{message:{content:'{"ok":true}'}}]});});await a.ai('synthetic',{});});
+
+test('AI diagnostics distinguish HTTP rejection from HTTP-200 error envelope without exposing input',async()=>{for(const transport of [200,400]){const a=new LegalApi(env,async()=>Response.json({error:{code:400,message:'context length exceeded private echo'}},{status:transport}));await assert.rejects(a.ai('synthetic',{}),e=>e.message.includes('AI-'+transport+'-400-')&&!e.message.includes('private echo'));}});
+
+test('non-JSON AI rejections identify the response format and avoid useless parameter retries',async()=>{for(const [body,format] of [['<html>private echo</html>','html'],['private echo','text'],['','empty']]){let calls=0;const a=new LegalApi(env,async()=>{calls++;return new Response(body,{status:400});});await assert.rejects(a.ai('synthetic',{}),e=>e.message.includes(format+'/')&&!e.message.includes('private echo'));assert.equal(calls,1);}});
+test('AI reads alternate JSON error shapes without exposing or logging raw text',async()=>{const saved=console.warn,logs=[];console.warn=value=>logs.push(value);try{for(const body of [{message:'temperature unsupported private echo'},{error:'temperature unsupported private echo'},{error:{metadata:{raw:{message:'temperature unsupported private echo'}}}}]){const a=new LegalApi(env,async()=>Response.json(body,{status:400}));await assert.rejects(a.ai('synthetic',{}),e=>e.parameter==='temperature'&&e.message.includes('json/temperature')&&!e.message.includes('private echo'));}assert.ok(logs.every(value=>!value.includes('private echo')&&value.includes('parameter=temperature')));}finally{console.warn=saved;}});
+
+test('nested and validation-array AI errors are inspected through bounded known fields only',()=>{
+ const cases=[
+  [{errors:[{code:10000,message:'authentication error private secret'}]},'auth'],
+  [{detail:[{loc:['body','messages'],msg:'untrusted',type:'missing required field'}]},'messages'],
+  [{error:{data:{error:{message:'unsupported response_format private secret'}}}},'response_format'],
+  [{error:{metadata:{raw:JSON.stringify({errors:[{message:'country not supported'}]})}}},'region'],
+  [{error:{message:'Provider returned error',metadata:{raw:'unsupported optional settings'}}},'unrecognized_error'],
+  [{success:false},'missing_error_message']
+ ];
+ for(const [body,reason]of cases){const result=inspectAiError(body);assert.equal(result.reason,reason);assert.ok(!result.shape.includes('private'));}
+ const result=inspectAiError({errors:[{code:10000,message:'authentication error'}],request:{api_key:'secret',messages:['secret']}});assert.deepEqual(result.codes,[10000]);assert.ok(!result.message.includes('secret'));
+});
+test('AI display and logs never include arbitrary provider text or arbitrary field names',async()=>{
+ const logs=[],save=console.warn;console.warn=x=>logs.push(x);
+ try{const api=new LegalApi(env,async()=>Response.json({errors:[{code:10000,message:'authentication error sk-private customer@example.test'}],secret_field:'private'},{status:400}));await assert.rejects(api.ai('synthetic',{}),e=>e.message.includes('json/auth')&&e.message.includes('10000')&&!/sk-private|customer@|secret_field/.test(e.message));assert.ok(logs.every(x=>!/sk-private|customer@|secret_field/.test(x)));}finally{console.warn=save;}
+});
+
+test('interrupted AI response bodies retry once and never parse partial output',async()=>{for(const recover of [true,false]){let calls=0;const a=new LegalApi(env,async()=>{calls++;if(calls===2&&recover)return Response.json({choices:[{message:{content:'{"ok":true}'}}]});return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('{"choices":'));controller.error(new Error('synthetic disconnect'));}}));});if(recover)assert.deepEqual(await a.ai('synthetic',{}),{ok:true});else await assert.rejects(a.ai('synthetic',{}),e=>e.requestKind==='stream');assert.equal(calls,2);}});
+test('incomplete AI law candidates are explained as missing AI output, without asking the user to enter a law',async()=>{const a=new LegalApi(env);a.research=async()=>({report:'합성 자료',sources:[]});a.discover=async()=>({candidates:[{law:'',article:'15'},{law:'검증용법',article:''}]});const result=await a.search({items:[item()]});assert.equal(result.candidates.length,0);assert.equal(result.rejected.length,2);assert.ok(result.rejected.every(r=>r.message.includes('AI 제안')&&!r.message.includes('입력하세요')));});
+
+test('deleted article bodies and selected deleted paragraphs or clauses cannot be adopted',()=>{
+ for(const marker of ['삭제 <2025. 1. 1.>','전문 삭제 <2025. 1. 1.>']){const root=parseXml(`<법령><조문단위><조문여부>조문</조문여부><조문번호>10</조문번호><조문제목>옛 제목</조문제목><조문내용>제10조(옛 제목) ${marker.replaceAll('<','&lt;').replaceAll('>','&gt;')}</조문내용></조문단위></법령>`);assert.throws(()=>articleNode(root,'10'),/현행|삭제/);}
+ const root=parseXml('<법령><조문단위><조문여부>조문</조문여부><조문번호>10</조문번호><조문제목>처리</조문제목><조문내용>제10조(처리)</조문내용><항><항번호>①</항번호><항내용>① 처리할 수 있다.</항내용><호><호번호>1.</호번호><호내용>1. 삭제 &lt;2025. 1. 1.&gt;</호내용></호></항><항><항번호>②</항번호><항내용>② 삭제</항내용></항></조문단위></법령>');
+ assert.ok(articleNode(root,'10','1'));assert.throws(()=>articleNode(root,'10','2'),/삭제/);assert.throws(()=>articleNode(root,'10','1','1'),/삭제/);
+});
+
+test('unrecognized AI errors expose only unordered fixed diagnostic terms, never excerpts or arbitrary values',async()=>{
+ const parsed=inspectAiError({error:{message:'Provider returned error: private-customer sk-or-private api-person@example.test 010-1234-5678'}});
+ assert.equal(parsed.reason,'unrecognized_error');assert.deepEqual(parsed.keywords,['error','provider','returned']);
+ const logs=[],save=console.warn;console.warn=x=>logs.push(x);try{const a=new LegalApi(env,async()=>Response.json({error:{code:400,message:'Provider returned error: sk-or-private private-customer'}},{status:400}));await assert.rejects(a.ai('synthetic',{}),e=>e.message.includes('단서: error,provider,returned')&&!/private-customer|sk-or-private/.test(e.message));assert.ok(logs.every(x=>!/private-customer|sk-or-private/.test(x)));}finally{console.warn=save;}
+ assert.equal(inspectAiError({error:{message:'This model is not supported'}}).reason,'model');
+ assert.equal(inspectAiError({error:{message:'Requests are denied from your location'}}).reason,'region');
+});
+
+test('support diagnostics are encrypted and known credentials are removed before encryption',async()=>{
+ const pair=await crypto.subtle.generateKey({name:'RSA-OAEP',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['encrypt','decrypt']);const pub=await crypto.subtle.exportKey('jwk',pair.publicKey);
+ const code=await sealSupportText('Request refused abc-secret sk-or-test person@example.test 010-1234-5678',['abc-secret'],pub);
+ assert.match(code,/^D1\.[A-Za-z0-9_-]+$/);assert.ok(!code.includes('Request'));
+ const encoded=code.slice(3).replaceAll('-','+').replaceAll('_','/');const raw=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));
+ const text=new TextDecoder().decode(await crypto.subtle.decrypt({name:'RSA-OAEP'},pair.privateKey,raw));assert.ok(text.startsWith('Request refused'));assert.ok(!/abc-secret|sk-or-test|person@|010-/.test(text));
+ const long=await sealSupportText('x'.repeat(4000),[],pub);assert.equal(long.length,code.length);
+ assert.equal(redactSupportText('Bearer arbitrary-secret'), 'Bearer [redacted]');
+});
+test('unrecognized API failures include an encrypted support code without exposing provider messages',async()=>{const a=new LegalApi(env,async()=>Response.json({error:{code:400,message:'Request refused test-sensitive-value'}},{status:400}));await assert.rejects(a.ai('synthetic',{}),e=>e.message.includes('지원 코드: D1.')&&!e.message.includes('test-sensitive-value'));});
+
+test('relay-path rejection retries the identical request once without stripping generation options or changing privacy',async()=>{
+ let calls=0;const requests=[];const api=new LegalApi(env,async(url,options)=>{calls++;requests.push({url,headers:options.headers,body:options.body});return calls===1?Response.json({error:{code:400,message:'Request path cannot be relayed'}},{status:400}):Response.json({choices:[{message:{content:'{"ok":true}'}}]});});
+ assert.deepEqual(await api.ai('synthetic',{}),{ok:true});assert.equal(calls,2);assert.deepEqual(requests[1],requests[0]);
+ const payload=JSON.parse(requests[1].body);assert.ok(payload.response_format);assert.ok(payload.reasoning);assert.equal(payload.provider.data_collection,'deny');
+ let failedCalls=0;const failed=new LegalApi(env,async()=>{failedCalls++;return Response.json({error:{code:400,message:'Request path cannot be relayed'}},{status:400});});
+ await assert.rejects(failed.ai('synthetic',{}),e=>e.requestKind==='relay_path'&&e.message.includes('중계 경로')&&!e.message.includes('지원 코드'));assert.equal(failedCalls,2);
+});
+
+
+test('search rejects unrelated official articles and never promotes uncertain items',async()=>{
+ aiReply={candidates:[{law:'법령검증용법',article:'10',basisCode:'statutory',type:'collect',itemNames:['성명']}]};
+ const a=api();let checked=false;
+ a.reviewEvidence=async(candidate,items)=>{assert.equal(candidate.verified,true);assert.ok(candidate.excerpt);checked=true;return {review:{summary:'업무와 무관함',items:items.map(i=>({...i,verdict:'not_supported',explanation:'업무와 무관함',checks:[]}))}};};
+ const excluded=await a.search({items:[item()]});assert.ok(checked);assert.equal(excluded.candidates.length,0);assert.match(excluded.rejected[0].message,/뒷받침하지 않는/);
+ a.reviewEvidence=async(candidate,items)=>({review:{summary:'사실 확인 필요',items:items.map(i=>({...i,verdict:'needs_information',explanation:'지급 주체 확인 필요',checks:['지급 주체 확인']}))}});
+ const uncertain=await a.search({items:[item()]});assert.equal(uncertain.candidates.length,1);assert.equal(uncertain.candidates[0].itemReviews[0].suggested,false);assert.match(uncertain.candidates[0].itemReviews[0].reason,/지급 주체 확인/);
+});
+
+test('candidate schema is retried once and never converted to unverified success',async()=>{
+ const a=api();let calls=0;a.ai=async(_prompt,data)=>{if(!data.evidencePool)return {laws:[]};return ++calls===1?{items:[]}:{candidates:[]};};
+ assert.equal((await a.search({items:[item()]})).candidates.length,0);assert.equal(calls,2);
+ calls=0;a.ai=async(_prompt,data)=>{if(!data.evidencePool)return {laws:[]};calls++;return {items:[]};};
+ await assert.rejects(()=>a.search({items:[item()]}),/후보 목록/);assert.equal(calls,2);
+});
+test('AI search verifies all returned proposals without a five-candidate cap',async()=>{
+ const a=new LegalApi(env),checked=[];a.research=async()=>({report:'합성 자료',sources:[]});a.reviewEvidence=async(c,items)=>({review:{items:items.map(i=>({...i,verdict:'possible',explanation:'합성 검토',checks:[]}))}});a.discover=async()=>{return {candidates:Array.from({length:7},(_,n)=>({law:'검증용법',article:String(n+1),type:'collect',basisCode:'statutory'}))};};a.verify=async c=>{checked.push(c.article);return {...c,verified:true};};
+ const result=await a.search({items:[item()]});assert.deepEqual(checked,['1','2','3','4','5','6','7']);assert.equal(result.candidates.length,7);assert.equal(result.limit,null);assert.equal(result.limited,false);assert.equal(result.counts.checked,7);
+});
+test('search distinguishes no proposals, unverified suggestions, unavailable services and partial success',async()=>{
+ for(const mode of ['none','invalid','timeout','partial']){const a=new LegalApi(env);a.research=async()=>({report:'합성 자료',sources:[]});a.reviewEvidence=async(c,items)=>({review:{items:items.map(i=>({...i,verdict:'possible',explanation:'합성 검토',checks:[]}))}});a.discover=async()=>({candidates:mode==='none'?[]:[{law:'검증용법',article:'10',type:'collect',basisCode:'statutory'},...(mode==='partial'?[{law:'검증용법',article:'11',type:'collect',basisCode:'statutory'}]:[])]});a.verify=async c=>{if(mode==='partial'&&c.article==='10')return {...c,verified:true};throw new ApiError('synthetic verification failure',mode==='invalid'?422:504);};const result=await a.search({items:[item()]});assert.equal(result.outcome,{none:'no_candidates',invalid:'unverified',timeout:'unavailable',partial:'partial'}[mode]);if(mode==='none')assert.match(result.summary,/同意|동의만 받으면 된다는 뜻은 아닙니다/);if(mode==='timeout')assert.equal(result.rejected[0].reason,'timeout');if(mode==='partial')assert.deepEqual(result.counts,{checked:2,verified:1,unavailable:1,excluded:0});}
+});
+test('official memory cache expires metadata after five minutes and versioned bodies after an hour',async()=>{
+ const original=Date.now;let clock=Date.parse('2026-11-25T12:00:00Z');Date.now=()=>clock;
+ const e={...env,LAW_API_OC:'cache-ttl-'+crypto.randomUUID()};let calls=0;const fetcher=async()=>{calls++;return new Response('<법령><기본정보><법령명_한글>검증용법</법령명_한글></기본정보></법령>');};
+ try{await new LegalApi(e,fetcher).law('lawSearch.do',{query:'검증용법'});await new LegalApi(e,fetcher).law('lawSearch.do',{query:'검증용법'});assert.equal(calls,1);clock+=301000;await new LegalApi(e,fetcher).law('lawSearch.do',{query:'검증용법'});assert.equal(calls,2);
+ await new LegalApi(e,fetcher).law('lawService.do',{MST:'123',JO:'001000'});clock+=301000;await new LegalApi(e,fetcher).law('lawService.do',{MST:'123',JO:'001000'});assert.equal(calls,3);clock+=3300000;await new LegalApi(e,fetcher).law('lawService.do',{MST:'123',JO:'001000'});assert.equal(calls,4);
+ const fresh=new LegalApi(e,fetcher);fresh.forceFresh=true;await fresh.law('lawService.do',{MST:'123',JO:'001000'});assert.equal(calls,5);
+ }finally{Date.now=original;}
+});
+test('edge cache is credential-hashed, shared across module instances, and bypassed for fresh verification',async()=>{
+ const descriptor=Object.getOwnPropertyDescriptor(globalThis,'caches'),stored=new Map();Object.defineProperty(globalThis,'caches',{configurable:true,value:{default:{match:async request=>stored.get(request.url)?.clone(),put:async(request,response)=>{stored.set(request.url,response.clone());}}}});
+ let calls=0;const fetcher=async()=>{calls++;return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');};const e={...env,LAW_API_OC:'private-oc-'+crypto.randomUUID()};
+ try{await new LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'});assert.equal(stored.size,1);for(const [key,value]of stored){assert.ok(!key.includes(e.LAW_API_OC)&&!key.includes('공식법령'));assert.equal(value.headers.get('Cache-Control'),'public, max-age=300');}
+ const isolated=await import('../cloudflare/legal.mjs?edge='+crypto.randomUUID());await new isolated.LegalApi(e,fetcher).law('lawSearch.do',{query:'공식법령'});assert.equal(calls,1);
+ await new isolated.LegalApi({...e,LAW_API_OC:'other-'+crypto.randomUUID()},fetcher).law('lawSearch.do',{query:'공식법령'});assert.equal(calls,2);
+ const fresh=new isolated.LegalApi(e,fetcher);fresh.forceFresh=true;await fresh.law('lawSearch.do',{query:'공식법령'});assert.equal(calls,3);
+ }finally{if(descriptor)Object.defineProperty(globalThis,'caches',descriptor);else delete globalThis.caches;}
+});
+test('concurrent official lookups coalesce but upstream failures are not cached',async()=>{
+ let calls=0;const e={...env,LAW_API_OC:'inflight-'+crypto.randomUUID()};const fetcher=async()=>{calls++;await new Promise(r=>setTimeout(r,15));return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');};const scoped=new LegalApi(e,fetcher);await Promise.all([scoped.law('lawSearch.do',{query:'공식법령'}),scoped.law('lawSearch.do',{query:'공식법령'})]);assert.equal(calls,1);await Promise.all([new LegalApi(e,fetcher).law('lawSearch.do',{query:'다른법령'}),new LegalApi(e,fetcher).law('lawSearch.do',{query:'다른법령'})]);assert.equal(calls,3);
+ let failed=0;const f={...env,LAW_API_OC:'failure-'+crypto.randomUUID()},failure=async()=>{failed++;return new Response('unavailable',{status:503});};for(let n=0;n<2;n++)await assert.rejects(new LegalApi(f,failure).law('lawSearch.do',{query:'공식법령'}));assert.equal(failed,2);
+});
+
+test('Korean midnight invalidates public-law cache even before TTL expires',async()=>{const original=Date.now;let clock=Date.parse('2026-11-25T14:59:59Z');Date.now=()=>clock;let calls=0;const e={...env,LAW_API_OC:'midnight-'+crypto.randomUUID()},fetcher=async()=>{calls++;return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');};try{await new LegalApi(e,fetcher).law('lawSearch.do',{query:'시험법'});clock+=2000;await new LegalApi(e,fetcher).law('lawSearch.do',{query:'시험법'});assert.equal(calls,2);}finally{Date.now=original;}});
+
+test('expired edge entries and cache storage failures never replace current official data',async()=>{const descriptor=Object.getOwnPropertyDescriptor(globalThis,'caches');let puts=0,calls=0;Object.defineProperty(globalThis,'caches',{configurable:true,value:{default:{match:async()=>new Response('<LawSearch><totalCnt>99</totalCnt></LawSearch>',{headers:{'X-Law-Expires':String(Date.now()-1)}}),put:()=>{puts++;throw Error('synthetic cache failure');}}}});try{const e={...env,LAW_API_OC:'stale-edge-'+crypto.randomUUID()},api=new LegalApi(e,async()=>{calls++;return new Response('<LawSearch><totalCnt>0</totalCnt></LawSearch>');});const root=await api.law('lawSearch.do',{query:'공식법령'});assert.equal(calls,1);assert.equal(puts,1);assert.ok(root);const bad=new LegalApi({...e,LAW_API_OC:'malformed-'+crypto.randomUUID()},async()=>Response.json({error:'upstream failed'}));await assert.rejects(bad.law('lawSearch.do',{query:'공식법령'}),e=>e.status===502);assert.equal(puts,1);}finally{if(descriptor)Object.defineProperty(globalThis,'caches',descriptor);else delete globalThis.caches;}});
+
+test('catalog includes statutes, decrees and ministerial regulations and never switches to administrative rules',async()=>{const a=new LegalApi(env);const kinds=['법률','대통령령','총리령','부령','조례','행정규칙'];const xml='<LawSearch><totalCnt>6</totalCnt>'+kinds.map((kind,n)=>`<law><법령명한글>법령${n}</법령명한글><법령구분명>${kind}</법령구분명><법령일련번호>${100+n}</법령일련번호><시행일자>20200101</시행일자></law>`).join('')+'</LawSearch>';a.law=async(_endpoint,params)=>{assert.notEqual(params.target,'admrul');return parseXml(xml);};const result=await a.catalog({query:'법령',includeAdmin:true});assert.deepEqual(result.laws.map(l=>l.kind),kinds.slice(0,4));assert.equal(result.hasNext,false);assert.equal((await a.catalog({query:'법령',includeAdmin:true},true)).count,4);assert.equal((await a.resolve('법령3')).mst,'103');await assert.rejects(a.resolve('법령4'));await assert.rejects(a.catalog({query:'법령',target:'admrul'}),e=>e.status===400);await assert.rejects(a.articles({law:'행정규칙',mst:'123',target:'admrul'}),e=>e.status===400);});
+test('ministerial rules can be selected but cannot substitute for resident-number or statute-reserved grounds',async()=>{const a=new LegalApi(env);a.citation=async()=>({law:'시험법 시행규칙',kind:'부령',verified:true});a.basis=async()=>({});assert.equal((await a.verify({law:'시험법 시행규칙',basisCode:'statutory'})).kind,'부령');await assert.rejects(a.verify({law:'시험법 시행규칙',basisCode:'residentLaw'}),/주민등록번호/);await assert.rejects(a.verify({law:'시험법 시행규칙',basisCode:'extraLaw'}),/법률/);await assert.rejects(a.verify({law:'시험규정',target:'admrul',basisCode:'contract'}),e=>e.status===400);});
+
+test('official department-specific ministerial kind labels remain searchable without including ordinances',()=>{const a=new LegalApi(env);for(const kind of ['기획재정부령','보건복지부령','국무총리령']){const root=parseXml(`<LawSearch><law><법령일련번호>123</법령일련번호><시행일자>20200101</시행일자><법령구분명>${kind}</법령구분명></law></LawSearch>`);assert.equal(a.eligible(root.children[0].children[0],'law'),true);}for(const kind of ['조례','헌법재판소규칙','고시']){const root=parseXml(`<LawSearch><law><법령일련번호>123</법령일련번호><시행일자>20200101</시행일자><법령구분명>${kind}</법령구분명></law></LawSearch>`);assert.equal(a.eligible(root.children[0].children[0],'law'),false);}});
+
+test('web research uses bounded server search and accepts official citation annotations only',async()=>{
+ const payload=searchPayload('synthetic-model',{items:[item()]});assert.equal(payload.tools[0].type,'openrouter:web_search');assert.equal(payload.tools[0].parameters.engine,'exa');assert.equal(payload.max_tool_calls,3);assert.equal(payload.provider.data_collection,'deny');assert.ok(payload.tools[0].parameters.allowed_domains.includes('nts.go.kr'));
+ const response={status:'completed',output:[{type:'message',content:[{type:'output_text',text:'합성 검색 자료',annotations:[{type:'url_citation',url:'https://www.nts.go.kr/synthetic',title:'합성 출처',content:'합성 발췌'},{type:'url_citation',url:'https://www.nts.go.kr/synthetic'},{type:'url_citation',url:'https://nts.go.kr.attacker.invalid/page'},{type:'url_citation',url:'javascript:alert(1)'}]}]}]};
+ const parsed=parseSearchResponse(response);assert.equal(parsed.sources.length,1);assert.equal(parsed.sources[0].excerpt,'합성 발췌');assert.equal(officialSearchUrl('https://key@nts.go.kr/'),'');assert.equal(officialSearchUrl('https://nts.go.kr:9000/'),'');
+ for(const bad of [{status:'incomplete',output:response.output},{output:[{type:'message',content:[{type:'output_text',text:'기억 기반 답변',annotations:[]}]}]}])assert.throws(()=>parseSearchResponse(bad));
+ const a=new LegalApi(env,async()=>Response.json({output:[]}));let generated=false;a.ai=async()=>{generated=true;return {candidates:[]};};await assert.rejects(a.search({items:[item()]}),/출처/);assert.equal(generated,false);
+});
+test('web research evidence precedes candidate generation without returning unused excerpts to the UI',async()=>{
+ const a=api();const calls=[];const original=a.ai.bind(a);a.ai=async(prompt,data,...rest)=>{calls.push(data);return original(prompt,data,...rest);};
+ aiReply={candidates:[]};const result=await a.search({items:[item()]});assert.equal(calls.length,2);assert.deepEqual(calls[1].evidencePool,[]);assert.match(calls[0].research.report,/합성 검색 자료/);assert.equal(calls[0].research.sources[0].url,'https://www.law.go.kr/synthetic');assert.equal(result.searchSources,undefined);
+});
+
+test('verified summary counts displayed grounds separately from rejected proposals',()=>{
+ const result=searchOutcome([{}, {}, {}],[{reason:'not_verified'},{reason:'not_verified'}],5);
+ assert.equal(result.summary,'검토한 근거 후보는 총 5개입니다. 이 중 적합한 근거 후보로 판단된 것은 3개입니다. 0개는 조회를 완료하지 못했고, 2개는 검증을 통과하지 못했습니다.');assert.equal(result.counts.checked,5);assert.equal(result.counts.verified,3);
+});
+
+test('duplicate proposals do not repeat paid relevance checks or generate unused search tokens',async()=>{
+ const c={law:'법령검증용법',article:'10',basisCode:'statutory',type:'collect'};aiReply={candidates:[c,{...c,law:'법령검증용 법',target:'law'}]};const a=api();let reviews=0;const review=a.reviewEvidence.bind(a);a.reviewEvidence=async(...args)=>{reviews++;assert.equal(args[2],false);const result=await review(...args);assert.equal(result.review.token,undefined);return result;};
+ const result=await a.search({items:[item()]});assert.equal(result.candidates.length,1);assert.equal(reviews,1);assert.equal(result.counts.checked,1);
+});
+test('review evidence keeps selected text and full legal conditions without duplicated UI metadata',()=>{
+ const source={law:'합성법',cite:'합성법 제10조',excerpt:'선택한 호',articleExcerpt:'조건이 포함된 전체 조문',paragraphSegments:Array(100).fill('duplicate'),verifiedAt:'timestamp',pipa:{excerpt:'연결 근거',articleExcerpt:'연결 근거',paragraphSegments:Array(100).fill('duplicate')}};
+ const result=reviewEvidenceFor(source);assert.equal(result.articleExcerpt,source.articleExcerpt);assert.equal(result.pipa.excerpt,'연결 근거');assert.equal(result.pipa.articleExcerpt,undefined);assert.ok(!JSON.stringify(result).includes('paragraphSegments'));assert.ok(JSON.stringify(result).length<JSON.stringify(source).length/2);
+});
+
+test('AI research retries only a known output limit once and preserves tool restrictions',async()=>{
+ const bodies=[];const a=new LegalApi(env,async(url,opts)=>{bodies.push(JSON.parse(opts.body));return bodies.length===1?Response.json({status:'incomplete',incomplete_details:{reason:'max_output_tokens'}}):upstream(url,opts);});
+ assert.ok((await a.research({items:[item()]})).sources.length);assert.deepEqual(bodies.map(b=>b.max_output_tokens),[8000,12000]);assert.deepEqual(bodies[0].tools,bodies[1].tools);assert.equal(bodies[1].provider.data_collection,'deny');assert.equal(bodies[0].reasoning.effort,'low');
+ let calls=0;const bad=new LegalApi(env,async()=>{calls++;return Response.json({status:'failed',error:{code:'synthetic-private-code',message:'synthetic-private-key'}});});await assert.rejects(bad.research({items:[item()]}),e=>e.message.includes('ai-search/service')&&!e.message.includes('private'));assert.equal(calls,1);
+});
+
+test('branched legal clauses remain distinct and use correct Korean citation labels',async()=>{
+ assert.equal(leadingNumber('3의6.'),'3의6');const root=parseXml('<법령>'+article('10',['1']).replace('<호번호>1.</호번호>','<호번호>3의6.</호번호>')+'</법령>');assert.equal(articleNode(root,'10','1','3의6').tag,'호');
+ const a=api();a.resolve=async()=>({row:parseXml('<law><법령명한글>법령검증용법</법령명한글><법령구분명>법률</법령구분명></law>').children[0],mst:'branch-test'});a.law=async()=>root;const result=await a.citation({law:'법령검증용법',article:'10',paragraph:'1',clause:'3의6'});assert.match(result.cite,/제3호의6$/);
+});
+test('unexpected Worker diagnostics exclude error text and URL credentials',()=>{
+ const error=new TypeError('synthetic-private-key');error.stack='TypeError: synthetic-private-key\n    at citation (https://example.invalid/?OC=secret:120:8)';const result=failureDiagnostics(error);assert.equal(result.type,'TypeError');assert.deepEqual(result.frames,[{fn:'citation',line:120,column:8}]);assert.doesNotMatch(JSON.stringify(result),/private-key|secret|example/);
+});
+
+test('DRF JSON legal body order and branched clause labels survive separate number fields',async()=>{
+ const a=new LegalApi({...env,LAW_API_OC:'branch-json-'+crypto.randomUUID()},async url=>{const u=new URL(url);if(u.pathname.endsWith('lawSearch.do'))return Response.json({LawSearch:{law:{법령명한글:'합성법',법령일련번호:'8811',시행일자:'20200101',법령구분명:'대통령령'}}});return Response.json({법령:{조문:{조문단위:{호:[{호내용:'3의6. [합성] 진료기록 기록 사무',호번호:'3.',호가지번호:'6'},{호내용:'3의7. [합성] 인증 사무',호번호:'3.'}],조문여부:'조문',조문번호:'42',조문가지번호:'2',조문내용:'[합성] 민감정보 처리 요건과 주체'}}}});});
+ const cite=await a.citation({law:'합성법',article:'42의2',clause:'3의6'});assert.match(cite.cite,/제3호의6$/);assert.match(cite.excerpt,/진료기록/);assert.ok(cite.articleExcerpt.startsWith('[합성] 민감정보 처리 요건과 주체'));
+ const doc=await a.articles({law:'합성법',mst:'8811'});assert.deepEqual(doc.articles[0].clauses.map(c=>c.value),['3의6','3의7']);
+});
+
+test('discovery ranks real source articles and constrains selections to supplied IDs',()=>{
+ const scope=discoveryScope({items:[{...item(),purpose:'강사료 지급 및 원천징수'}]});assert.ok(scope.laws.includes('소득세법'));
+ const pool=rankEvidence([{value:'145',title:'기타소득 원천징수',text:'[합성] 지급 원천징수'},{value:'112',title:'양도소득세',text:'[합성] 다른 업무'}],scope.terms,'소득세법','123',0);
+ assert.equal(pool[0].article,'145');assert.ok(!pool.some(e=>e.article==='112'));
+ const result=groundSelections([{evidenceId:pool[0].id,article:'999',law:'가짜',basisCode:'statutory'},{evidenceId:'invented',law:'가짜',article:'1',basisCode:'statutory'}],pool,rules);
+ assert.equal(result[0].article,'145');assert.equal(result[0].law,'소득세법');assert.ok(result[1].discoveryError);
+ const mapped=groundSelections([{evidenceId:pool[0].id,permission:'general',type:'collect'},{evidenceId:pool[0].id,permission:'rnn',type:'collect'}],pool,rules);assert.equal(mapped[0].basisCode,'statutory');assert.equal(mapped[1].basisCode,'residentLaw');
+ assert.equal(normalizeLawName('보건복지부령(의료법 시행령)'),'의료법 시행령');
+});
+test('clinical discovery includes identifier permission sources separately from medical records',()=>{
+ const scope=discoveryScope({items:[{...item('rnn'),purpose:'환자 진료기록부 작성'}]});
+ const pool=rankEvidence([{value:'22',title:'진료기록부',text:'[합성] 진료기록부 작성'},{value:'42의2',title:'민감정보 및 고유식별정보의 처리',text:'[합성] 주민등록번호 진료기록 사무'}],scope.terms,'의료법 시행령','123',1);
+ assert.equal(pool.length,2);assert.ok(pool.some(e=>e.article==='42의2'));
+ assert.ok(!JSON.stringify(discoveryConfig).includes('145'));
+});
+
+test('general tax duties do not substitute for explicit identifier permission',()=>{
+ assert.equal(hasPermissionText({basisCode:'residentLaw',articleExcerpt:'[합성] 세액을 원천징수한다.'}),false);
+ assert.equal(hasPermissionText({basisCode:'residentLaw',articleExcerpt:'[합성] 주민등록번호를 처리할 수 있다.'}),true);
+ assert.equal(hasPermissionText({basisCode:'sensitiveLaw',articleExcerpt:'[합성] 민감정보를 처리할 수 있다.'}),true);
+ assert.equal(hasPermissionText({basisCode:'statutory',articleExcerpt:'[합성] 원천징수한다.'}),true);
+});
+
+test('GPT-6 Luna routing omits unsupported temperature while keeping privacy and JSON requirements',async()=>{
+ const a=new LegalApi({...env,OPENROUTER_MODEL:'openai/gpt-6-luna'},async(_url,options)=>{const p=JSON.parse(options.body);assert.equal(p.temperature,undefined);assert.equal(p.reasoning.effort,'low');assert.equal(p.provider.data_collection,'deny');assert.equal(p.provider.require_parameters,true);assert.equal(p.response_format.type,'json_object');return Response.json({choices:[{message:{content:'{"ok":true}'}}]});});
+ assert.deepEqual(await a.ai('합성 검증',{}),{ok:true});assert.equal(searchPayload('openai/gpt-6-luna',{}).reasoning.effort,'low');
+});
+
+test('discovery reserves item, identifier and retention articles despite crowded duty matches',()=>{
+ const scope=discoveryScope({items:[{...item('rnn'),purpose:'강사료 원천징수 지급명세서'}]},['보존','기재사항']);
+ const articles=Array.from({length:15},(_,i)=>({value:String(i+1),title:'기타소득 원천징수 지급명세서',text:'원천징수 지급명세서'}));
+ articles.push({value:'101',title:'장부 보존',text:'증거서류를 5년간 보존한다.'},{value:'102',title:'기재사항',text:'성명을 적어야 한다.'},{value:'103',title:'고유식별정보 처리',text:'주민등록번호를 처리한다.'});
+ const pool=rankEvidence(articles,scope.terms,'합성법','123',0);
+ assert.equal(pool.length,discoveryConfig.articlesPerLaw);
+ for(const id of ['101','102','103'])assert.ok(pool.some(a=>a.article===id));
+});
+test('initial research reserves explicit payment item and record-retention search axes',()=>{const payload=searchPayload('openai/gpt-6-luna',{items:[item()]});const input=JSON.parse(payload.input);assert.equal(input.researchPlan.length,3);assert.ok(input.researchPlan.some(p=>p.category==='보존기간'&&p.queryHint.includes('지출증빙')));for(const domain of ['archives.go.kr','mois.go.kr','moef.go.kr'])assert.ok(payload.tools[0].parameters.allowed_domains.includes(domain));});
+test('assistant law planning fetches retention law before lower-priority additional duty laws',async()=>{const a=new LegalApi(env),seen=[];let current='';a.ai=async(_prompt,d)=>d.evidencePool?{candidates:[]}:{laws:['소득세법 시행규칙','추가업무법','국세기본법'],retentionLaws:['국세기본법']};a.resolve=async name=>{current=name;seen.push(name);return {row:parseXml('<law><법령명한글>'+name+'</법령명한글></law>').children[0],mst:'123'};};a.law=async()=>parseXml('<법령><기본정보><법령명_한글>'+current+'</법령명_한글></기본정보></법령>');await a.discover({items:[{...item(),purpose:'공공기관 강사료 지급'}]}, {},{assistant:true});assert.deepEqual(seen.slice(0,3),['소득세법','소득세법 시행령','국세기본법']);});
+test('apply uses a proof this server signed today without refetching, and refetches when the proof or request differs',async()=>{const {signProof}=await import('../cloudflare/legal.mjs');const data={law:'법령검증용법',article:'10',paragraph:'1',basisCode:'statutory',type:'collect',items:[item()]};const proof=await api().verify(data);const proofToken=await signProof(env.OPENROUTER_API_KEY,proof);let calls=0;const counting=new LegalApi(env,async(...x)=>{calls++;return upstream(...x);});const fast=await counting.apply({...data,proof:{...proof,proofToken},proofToken});assert.equal(calls,0,'signed proof needs no official refetch');assert.equal(fast.cite,proof.cite);assert.equal(fast.proofToken,undefined);await counting.apply({...data,proof:{...proof,excerpt:proof.excerpt+' 변조'},proofToken});assert.ok(calls>0,'tampered proof is refetched');calls=0;await counting.apply({...data,paragraph:'2',proof,proofToken}).catch(()=>{});assert.ok(calls>0,'a different article is refetched');calls=0;await counting.apply({...data,proof,proofToken:proofToken.replace(/.$/,c=>c==='0'?'1':'0')});assert.ok(calls>0,'a forged token is refetched');});
+
+test('official proof shortcuts require a configured signing key',async()=>{
+ const {signProof}=await import('../cloudflare/legal.mjs');
+ const data={law:'법령검증용법',article:'10',paragraph:'1',basisCode:'statutory',type:'collect',items:[item()]};
+ const proof=await api().verify(data);
+ const proofToken=await signProof(env.OPENROUTER_API_KEY,proof);
+ for(const key of [undefined,'','   ']){
+  assert.equal(await signProof(key,proof),undefined);
+  let calls=0;
+  const unsigned=new LegalApi({...env,OPENROUTER_API_KEY:key},async(...args)=>{calls++;return upstream(...args);});
+  const result=await unsigned.apply({...data,proof,proofToken});
+  assert.equal(result.cite,proof.cite);
+  assert.ok(calls>0,'manual application refetches official text when no signing key is configured');
+ }
+});
