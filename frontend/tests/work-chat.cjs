@@ -13,6 +13,9 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3055';
  }
  await p.setViewportSize({width:1440,height:1000});await fs.mkdir('.test-output',{recursive:true});await p.screenshot({path:'.test-output/work-chat.png',fullPage:true});
  assert.equal(await p.locator('[data-work-continue]').innerText(),'이 내용으로 동의서 만들기');
+ const divider=p.locator('.work-manual-divider + .work-manual');
+ assert.equal(await divider.count(),1);
+ assert.equal(await p.locator('.work-manual-divider').isVisible(),true);
  const manual=p.locator('.work-manual');await manual.locator('summary').click();
  assert.match(await manual.locator('summary').innerText(),/닫기/);
  const manualActions=await manual.locator('.work-manual-actions').boundingBox();

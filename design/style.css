@@ -638,6 +638,7 @@ footer {display:block;max-width:none;padding:0;background:var(--site-dark);color
 .work-message {background:var(--soft);border-radius:10px}
 .work-message.user {background:var(--site-dark);border-color:var(--site-dark);color:var(--site-on-dark)}
 .work-message.user strong {color:inherit}
+.work-manual-divider {width:100%;margin:0;border:0;border-top:1px solid var(--line)}
 .work-manual {border:1px solid var(--line);border-radius:var(--radius);background:var(--soft);overflow:hidden}
 .work-manual summary {padding:12px 16px;color:var(--ink)}
 .work-manual summary:hover {background:var(--wash)}
