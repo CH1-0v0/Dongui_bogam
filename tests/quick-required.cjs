@@ -12,8 +12,11 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3055';
   const feeItems=['성명','주민등록번호','은행명','계좌번호','예금주명'];
   page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/api/status',route=>route.fulfill({json:{app:'dongui',apiVersion:8,aiConfigured:true,lawConfigured:true,csrfToken:'synthetic'}}));
-  await page.route('**/api/work/plan',route=>{
+  await page.route('**/api/work/plan',async route=>{
    calls++;
+   const waiting=page.locator('.quick-create-form [type=submit][aria-busy=true]');
+   assert.equal(await waiting.locator('.review-spinner').isVisible(),true);
+   assert.equal(await waiting.isDisabled(),true);
    const data=route.request().postDataJSON();
    assert.ok(feeItems.every(name=>data.manual.items.split(', ').includes(name)));
    assert.equal(data.manual.period,'5년');

@@ -672,3 +672,8 @@ dialog::backdrop {background:color-mix(in srgb,var(--site-dark),transparent 36%)
  --line:#dce5f2;
  --wash:#eaf2ff;
 }
+
+.law-picker [aria-invalid="true"] {
+ border-color:var(--warn);
+ background:var(--warn-bg);
+}
