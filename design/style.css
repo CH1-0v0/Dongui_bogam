@@ -557,3 +557,125 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .work-ai-note-icon{flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--warn);color:#fff;font-weight:800;font-size:14px}
 .work-choice-detail{margin-top:10px}
 .work-choice-detail textarea{min-height:56px}
+
+.bulk-required>strong{margin-right:auto}
+.item-add-actions{justify-content:space-between}
+.item-add-actions>[data-add]{margin-left:auto}
+.item-risk{color:var(--warn);font-weight:700}
+.application-scope .scope-option{min-height:36px;padding-block:5px;gap:8px}
+.application-scope .scope-option>span{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:8px}
+.application-scope .scope-option small{display:inline}
+.doc [data-document-field]{min-width:2ch}
+.doc [data-document-field]:empty{display:inline-block}
+
+/* Site surfaces and navigation. The document canvas retains its print styles. */
+:root {
+ --ink: #171814;
+ --muted: #555950;
+ --blue: #303c2c;
+ --blue-dark: #212c1e;
+ --line: #dedfd7;
+ --soft: #f6f6f1;
+ --wash: #eef0e8;
+ --white: #fff;
+ --warn: #815018;
+ --warn-bg: #fff3df;
+ --radius: 12px;
+ --site-bg: #fdfdfa;
+ --site-dark: #171b16;
+ --site-on-dark: #f7f8f0;
+ --site-on-dark-muted: #b8bfb1;
+ --site-primary: #191c17;
+ --site-primary-hover: #343b30;
+ --site-focus: #4f6946;
+ --site-space: clamp(18px, 3vw, 34px);
+ --site-measure: 1240px;
+}
+body {background:var(--site-bg); color:var(--ink)}
+main {max-width:var(--site-measure); padding:var(--site-space) var(--site-space) 64px}
+header {background:var(--site-bg);border-color:var(--line)}
+.head {max-width:var(--site-measure); min-height:72px; padding:8px var(--site-space); gap:16px}
+.head .brand {padding:0; font-size:20px; letter-spacing:-.055em; white-space:nowrap; gap:8px}
+.brandicon {border-radius:7px; width:32px; height:32px; background:var(--site-primary); font-size:19px}
+.brand-ai {color:var(--muted);font-size:13px;letter-spacing:0}
+.head nav {gap:4px}
+.head nav button {padding-inline:12px;white-space:nowrap;color:var(--muted);font-size:14px}
+.head nav button:hover,.head nav button[aria-current] {background:var(--wash);color:var(--ink)}
+.head .ministry-logo {width:88px}
+button {font-weight:650; transition:background-color .15s,border-color .15s}
+button.primary {background:var(--site-primary); border-color:var(--site-primary); color:var(--white)}
+button.primary:hover {background:var(--site-primary-hover);border-color:var(--site-primary-hover)}
+button:disabled {cursor:not-allowed}
+:is(button,a,input,textarea,select,summary,[tabindex]):focus-visible {outline:2px solid var(--site-focus);outline-offset:3px}
+footer {display:block;max-width:none;padding:0;background:var(--site-dark);color:var(--site-on-dark);border:0}
+.footer-inner {max-width:var(--site-measure);margin:auto;padding:32px var(--site-space);display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.footer-brand {display:grid;gap:5px}
+.footer-brand strong {font-size:17px}
+.footer-brand span {margin:0;display:block;color:var(--site-on-dark-muted)}
+.footer-links {display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.footer-links a,.footer-links button {color:var(--site-on-dark)}
+.footer-links button:hover {background:var(--site-primary-hover)}
+
+.home-hero {padding:24px 0 36px}
+.home-kicker {font-weight:700;color:var(--blue);font-size:14px;margin:0 0 12px}
+.home-intro h1 {font-size:clamp(43px,6.6vw,84px);line-height:1.1;letter-spacing:-.075em;margin:0;font-weight:760;word-break:keep-all}
+.home-description {margin:20px 0 24px;max-width:33ch;font-size:clamp(16px,1.6vw,20px);line-height:1.65;color:var(--muted);word-break:keep-all}
+.home-actions {display:flex;gap:8px;flex-wrap:wrap}
+.home-actions button {min-height:48px;padding:10px 18px;display:inline-flex;align-items:center;gap:16px}
+.home-formats {font-size:13px;color:var(--muted);margin:14px 0 0}
+.work-home.panel {margin:0 0 clamp(40px,7vw,84px);padding:clamp(20px,4vw,42px);background:var(--soft);border:1px solid var(--line);box-shadow:none}
+.work-home h2,.home-process h2 {font-size:clamp(25px,3vw,36px);letter-spacing:-.055em;line-height:1.22;margin:0 0 9px}
+.work-home form .actions button[type="submit"] {margin-inline-start:auto}
+.work-home form textarea {background:var(--white);min-height:98px}
+.home-process ol {list-style:none;display:grid;padding:0;margin:22px 0 0;gap:12px;counter-reset:process}
+.home-process li {padding:14px 0;border-top:1px solid var(--line);counter-increment:process}
+.home-process li::before {content:counter(process,decimal-leading-zero);font:600 13px/1.5 ui-monospace,monospace;color:var(--blue)}
+.home-process h3 {margin:6px 0;font-size:17px}
+.home-process p {margin:0;color:var(--muted);word-break:keep-all}
+
+.trail {color:var(--muted);margin-bottom:10px}
+.title h1,.final-title h1 {font-size:clamp(29px,4vw,46px);line-height:1.16;font-weight:760;letter-spacing:-.06em}
+.title>p {color:var(--muted);margin-top:8px}
+.panel,.side,dialog,.output-setting,.output-settings>.auto-draft-fields {border-color:var(--line);border-radius:var(--radius);box-shadow:none}
+.workspace>.stack>.panel,.side,.output-settings>.panel,.final-layout>.panel {padding:clamp(16px,2.4vw,26px)}
+.stepper {gap:6px;margin:24px 0}
+.stepper button {padding:10px;min-height:50px;border-radius:8px;background:var(--site-bg);font-weight:650}
+.stepper button[aria-current] {background:var(--site-primary);color:var(--white);border-color:var(--site-primary)}
+.stepnum {font:600 12px/1 ui-monospace,monospace}
+.side,.output-settings>.panel {background:var(--soft)}
+.work-chat,.work-summary {border-color:var(--line)}
+.work-message {background:var(--soft);border-radius:10px}
+.work-message.user {background:var(--wash);border-color:var(--line)}
+.work-choice-buttons button[aria-pressed="true"] {background:var(--wash);border-color:var(--blue);color:var(--blue-dark);box-shadow:inset 0 0 0 1px var(--blue)}
+.law-excerpt,.catalog-window,.search-summary {background:var(--soft);border-color:var(--line)}
+.search-summary.search-incomplete {background:var(--warn-bg)}
+.application-scope fieldset,.review-confirmations,.ai-review-panel,.class-card {border-color:var(--line)}
+.a4-document-frame {background:var(--wash);border-color:var(--line)}
+dialog::backdrop {background:color-mix(in srgb,var(--site-dark),transparent 36%)}
+:is(.field input,.field textarea,.field select,.item-picker>[data-item-menu]) {border-color:var(--line)}
+@media(min-width:640px) {
+ .home-process ol {grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+}
+@media(min-width:820px) {
+ .home-hero {padding:46px 0 56px}
+ .home-process ol {grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media(max-width:570px) {
+ .head {flex-wrap:wrap;justify-content:space-between;gap:0 8px}
+ .head nav {order:3;flex-basis:100%}
+ .head nav button {padding-inline:10px}
+ .head .ministry-logo {width:75px}
+ .home-intro h1 {font-size:clamp(39px,11vw,62px)}
+ .work-home .primary {width:auto}
+ .work-home form .actions {gap:10px}
+}
+@media(prefers-reduced-motion:reduce) {button {transition:none}}
+
+.document-source:not([hidden]) {background:var(--wash)}
+.doc {
+ --ink:#152743;
+ --blue:#2154c7;
+ --blue-dark:#153b93;
+ --line:#dce5f2;
+ --wash:#eaf2ff;
+}

@@ -20,6 +20,7 @@ text=lambda n:''.join(n.itertext()).strip()
 children=list(body)
 title=next(i for i,p in enumerate(children) if text(p)=='작성지침 반영 검증 문서')
 assert not text(children[title+1]);assert not text(children[title+3])
+assert text(children[title+2])=='미리보기에서 수정한 수집 안내문입니다.'
 guardian=next(i for i,p in enumerate(children) if text(p)=='만 14세 미만 아동의 법정대리인 동의')
 assert not text(children[guardian-1])
 agency=next(i for i,p in enumerate(children) if text(p)=='지침 검증 기관 귀중')
@@ -41,6 +42,7 @@ print('PASS HWPX blue consistency, black 0.12mm borders, paragraph spacing, sign
 if shutil.which('pdftotext'):
     pdf=subprocess.check_output(['pdftotext','-raw',str(out/'guideline-output.pdf'),'-'],text=True)
     normalized=''.join(pdf.split())
+    assert '미리보기에서수정한수집안내문입니다.' in normalized
     assert normalized.count('건강정보')==1 and normalized.count('주민등록번호')==1
     assert '고지사항' in normalized and normalized.index('고지사항')<normalized.index('법정대리인:')
     print('PASS PDF preserves separate notice before date/signatures and batches special fields once')

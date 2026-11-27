@@ -1,7 +1,7 @@
 const {chromium}=require('playwright');const assert=require('node:assert/strict');const rules=require('../frontend/law-basis.js').rules;
 const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3008';
 (async()=>{const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});try{
- const page=await browser.newPage({viewport:{width:1280,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const page=await browser.newPage({viewport:{width:1280,height:1000},reducedMotion:'reduce'});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/api/privacy/classify',r=>r.fulfill({json:{items:r.request().postDataJSON().items.map(i=>({...i,verdict:'high',included:['건강']}))}}));
  const start=async()=>{await page.goto(base);await page.locator('[data-quick-create]').click();await page.locator('[name=template]').selectOption('1');await page.locator('.quick-create-form [type=submit]').click();await require('./educational-fixture.cjs')(page);await page.evaluate(v=>{state.agency=v;},'시험 기관');};
  const names=()=>page.locator('[data-item-menu]').allTextContents().then(xs=>xs.map(x=>x.replace('⌄','').trim()));
@@ -37,11 +37,11 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:3008';
  const proof=()=>{const r=rules.contract,pipa={law:'개인정보 보호법',article:r.article,paragraph:r.paragraph,clause:r.clause,cite:r.pipa,excerpt:'테스트 근거'};return {...pipa,pipa,pipaVerified:true,verified:true,supportVerified:true};};
  for(const path of ['basis','apply'])await page.route('**/api/law/'+path,r=>r.fulfill({json:proof()}));
  await page.locator('[data-add-ground]').click();await page.locator('[data-basis-code]').selectOption('contract');await page.waitForFunction(()=>!document.querySelector('[data-basis-code]').disabled);await page.locator('[data-scope-all]').check();await page.locator('[data-adopt-ground]').click();await page.locator('[data-adopt-ground]').waitFor({state:'detached'});await page.locator('[data-next]').click();
- assert.equal(await page.locator('[data-chat],[data-path="!chat"]').count(),0);assert.equal(await page.locator('[data-finish]').count(),2);assert.equal(await page.locator('[data-path^="refusals."]').count(),0);
+ assert.equal(await page.locator('[data-chat],[data-path="!chat"]').count(),0);assert.equal(await page.locator('[data-finish]').count(),1);assert.equal(await page.locator('[data-path^="refusals."]').count(),0);
  assert.equal(await page.locator('.not-applicable').innerText(),'동의를 받아 개인정보를 수집하지 않기 때문에 해당사항 없습니다.');assert.equal(await page.locator('[data-intro]').count(),0);
- assert.match(await page.locator('[data-path=intro]').inputValue(),/별도의 동의를 받지 않습니다/);
+ assert.match(await page.locator('.doc-intro').textContent(),/별도의 동의를 받지 않습니다/);
  await page.locator('[data-finish]').last().click();assert.equal(await page.locator('.doc-choice').count(),0);assert.match(await page.locator('.doc h1').innerText(),/고지서/);
  await start();await page.locator('[data-item-preset]').first().selectOption('custom');await page.locator('[data-name]').fill('이름');await page.locator('[data-next]').click();await page.locator('.classification-section').first().waitFor();assert.match(await page.locator('[data-class-group=collect]').innerText(),/성명/);
  await page.locator('[data-go="1"]').first().click();await page.locator('[data-add=collect]').click();await page.locator('[data-next]').click();assert.ok(await page.locator('.basic-error').count()>0);assert.equal(await page.evaluate(()=>document.activeElement.hasAttribute('data-item-menu')),true);await page.keyboard.press('Enter');await page.keyboard.press('ArrowDown');await page.keyboard.press('Enter');await page.locator('[data-next]').click();await page.locator('.classification-section').first().waitFor();
- assert.deepEqual(errors,[]);console.log('PASS notice-only settings, candidate intro, no consent-refusal inputs and bottom finish action');
+ assert.deepEqual(errors,[]);console.log('PASS notice-only settings, candidate intro, no consent-refusal inputs and single finish action');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exit(1)});
