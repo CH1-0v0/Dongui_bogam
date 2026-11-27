@@ -14,7 +14,8 @@ class WorkAssistantTests(unittest.TestCase):
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':'synthetic','LAW_API_OC':'synthetic'}),patch.object(server,'ai_candidates',return_value={'candidates':[REF]}) as search,patch.object(server,'verify_with_basis',return_value={**REF,'cite':'합성법 제10조','articleExcerpt':SOURCE,'excerpt':SOURCE}),patch.object(server,'discovery_json',side_effect=ai),patch.object(server,'ai_application_review',side_effect=lambda proof,items:{'items':[dict(i,verdict='possible') for i in items]}):
             result=work_plan(data,server)
             again=work_plan({**data,'evidenceRefs':result['evidenceRefs'],'evidenceFacts':result['evidenceFacts'],'evidenceToken':result['evidenceToken']},server)
-            self.assertEqual(search.call_count,2)
+            self.assertEqual(search.call_count,1)
+            self.assertEqual(again['evidenceRefs'],result['evidenceRefs'])
             with self.assertRaises(server.ApiError):work_plan({**data,'business':'다른 업무입니다','evidenceRefs':result['evidenceRefs'],'evidenceFacts':result['evidenceFacts'],'evidenceToken':result['evidenceToken']},server)
             return result
     def test_official_facts_and_reusable_source_binding(self):

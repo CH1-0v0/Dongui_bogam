@@ -6,6 +6,19 @@ import policy from './assistant-policy.json' with {type:'json'};
 const clean=(v,n=500)=>typeof v==='string'?v.trim().slice(0,n):'';
 const norm=v=>String(v||'').normalize('NFKC').replace(/\s+/g,'');
 const classification=value=>{const name=norm(value);return /주민등록번호|주민번호/.test(name)?'rnn':/여권|운전면허|외국인등록/.test(name)?'unique':/종교|사상|신념|성생활|정치|노동조합|정당|건강|진료|유전|범죄|병력|진단|질병|장애|상담|생체|인종|민족|복약|심리|지문|안면|증상|치료|처방|수술|투약|처치|입원|외래|의학|검사결과|맥박|혈압|체온|의료|신체|혈액|가족력/.test(name)?'sensitive':'general';};
+const rediscoverySignals=policy.rediscoverySignals.map(pattern=>new RegExp(pattern,'g'));
+const answerText=text=>text.split('\n').filter(line=>!/^질문\s*:/.test(line.trim())).join(' ');
+function needsNewWorkResearch(business,messages){
+ if(messages.at(-1)?.role!=='user')return false;
+ const latest=answerText(messages.at(-1).content);
+ if(/근거|법령|제\s*\d+\s*조|수집.*가능/.test(latest)&&/[?？]|나요|가요|까요|습니까|정말|궁금|확인해|알려|찾아|검색해/.test(latest))return true;
+ const prior=norm([business,...messages.slice(0,-1).filter(m=>m.role==='user').map(m=>answerText(m.content))].join(' ')).replaceAll('주민번호','주민등록번호');
+ const current=norm(latest).replaceAll('주민번호','주민등록번호');
+ return rediscoverySignals.some(signal=>{
+  const known=new Set(prior.match(signal)||[]);
+  return (current.match(signal)||[]).some(value=>!known.has(value));
+ });
+}
 const digest=async value=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value))))].map(v=>v.toString(16).padStart(2,'0')).join('');
 export function workDraft(answer,business='',userText=''){
  const draft=answer?.draft||{},seen=new Set();
@@ -100,7 +113,7 @@ export async function workPlan(api,data){
  }
  // consent: event-like work with no specific law, no law search. profile: known laws, no web search or AI law plan.
  const searchMode=discoveryMode(userText,context),started=Date.now(),timings={};let lap=started;const mark=name=>{const now=Date.now();timings[name]=now-lap;lap=now;};
- if(searchMode!=='consent'&&(!refs.length||data.refresh===true||messages.at(-1)?.role==='user')){
+ if(searchMode!=='consent'&&(!refs.length||data.refresh===true||needsNewWorkResearch(business,messages))){
   const research=searchMode==='profile'?{report:'',sources:[]}:await api.research(context);mark('research');
   const planned=await api.discover(context,research,{assistant:true,fast:searchMode==='profile'});mark('discover');
   researchMaterial=searchMode==='profile'?null:{report:clean(research.report,6000),sources:(research.sources||[]).slice(0,8).map(s=>({url:s.url,title:clean(s.title,200),excerpt:clean(s.excerpt,500)}))};

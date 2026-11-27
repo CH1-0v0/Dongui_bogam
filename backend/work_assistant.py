@@ -12,6 +12,18 @@ def clean(value, limit=500):
 def norm(value):
     import unicodedata
     return re.sub(r'\s+', '', unicodedata.normalize('NFKC', str(value or '')))
+def needs_new_work_research(business, messages):
+    if not messages or messages[-1]['role'] != 'user':
+        return False
+    def answer_text(text):
+        return ' '.join(line for line in text.splitlines() if not re.match(r'질문\s*:',line.strip()))
+    latest = answer_text(messages[-1]['content'])
+    if re.search(r'근거|법령|제\s*\d+\s*조|수집.*가능',latest) and re.search(r'[?？]|나요|가요|까요|습니까|정말|궁금|확인해|알려|찾아|검색해',latest):
+        return True
+    prior = norm(' '.join([business] + [answer_text(m['content']) for m in messages[:-1] if m['role']=='user'])).replace('주민번호','주민등록번호')
+    current = norm(latest).replace('주민번호','주민등록번호')
+    return any(set(re.findall(signal,current))-set(re.findall(signal,prior)) for signal in POLICY['rediscoverySignals'])
+
 def classification(value):
     name = norm(value)
     return 'rnn' if re.search('주민등록번호|주민번호', name) else 'unique' if re.search('여권|운전면허|외국인등록', name) else 'sensitive' if re.search('종교|사상|신념|성생활|정치|노동조합|정당|건강|진료|유전|범죄|병력|진단|질병|장애|상담|생체|인종|민족|복약|심리|지문|안면|증상|치료|처방|수술|투약|처치|입원|외래|의학|검사결과|맥박|혈압|체온|의료|신체|혈액|가족력', name) else 'general'
@@ -224,7 +236,7 @@ def work_plan(data, api):
         refs = []
     research_material = None
     search_mode = discovery_mode(user_text, context)
-    if search_mode != 'consent' and (not refs or data.get('refresh') is True or (messages and messages[-1]['role']=='user')):
+    if search_mode != 'consent' and (not refs or data.get('refresh') is True or needs_new_work_research(business, messages)):
         planned = api.ai_candidates(context, {'assistant':True,'fast':search_mode=='profile'})
         research = planned.get('research') or {}
         research_material = {'report':clean(research.get('report'),6000),'sources':[{'url':s.get('url'),'title':clean(s.get('title'),200),'excerpt':clean(s.get('excerpt'),500)} for s in research.get('sources',[])[:8]]}
