@@ -3,6 +3,26 @@
     "allow": [
       "Bash(npm run deploy)",
       "Bash(git push origin HEAD:main)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -fd:*)",
+      "Bash(rm -rf:*)",
+      "Bash(wrangler delete:*)",
+      "Bash(npx wrangler delete:*)",
+      "Bash(wrangler secret delete:*)",
+      "Bash(npx wrangler secret delete:*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./.dev.vars)",
+      "Read(./.dev.vars.*)",
+      "Bash(sudo:*)",
+      "Bash(chmod 777:*)",
+      "Bash(chmod -R 777:*)",
+      "Bash(ssh:*)"
     ]
   }
 }
