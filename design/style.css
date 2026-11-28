@@ -118,7 +118,7 @@
 
 #quick-create { width: min(520px, calc(100% - 32px)); }
 .quick-create-form select { width: 100%; }
-.quick-create-form > .actions { display: flex; justify-content: flex-end; }
+.quick-create-form > .actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 #quick-preview { margin: 12px 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
 #quick-preview dt { font-weight: 700; }
 #quick-preview dd { margin: 4px 0 12px; }
@@ -530,7 +530,7 @@ body{word-break:keep-all;overflow-wrap:break-word}.doc-table td,.doc-table th{wo
 .work-chat form .actions>[type=submit]{margin-inline-start:auto}
 .work-dots{display:inline-flex;gap:5px;vertical-align:middle;margin-right:6px}.work-dots i{width:7px;height:7px;background:var(--blue);border-radius:50%;animation:work-dot 1.2s ease-in-out infinite}.work-dots i:nth-child(2){animation-delay:.15s}.work-dots i:nth-child(3){animation-delay:.3s}@keyframes work-dot{0%,70%,100%{opacity:.3;transform:translateY(0)}35%{opacity:1;transform:translateY(-4px)}}
 .work-wait{border:1px solid var(--line)}.work-wait #work-wait-note{font-size:13px;color:var(--muted)}.work-chat textarea:disabled{background:var(--soft);border-style:dashed;cursor:wait}.work-chat button:disabled{cursor:wait}.work-questions{list-style:none;padding:0;margin:16px 0 0;display:grid;gap:16px}.work-questions li{border-top:1px solid var(--line);padding-top:12px}.work-questions li>strong{font-size:15px;color:var(--blue-dark)}.work-questions li p{margin:5px 0 0}.work-resident{padding-top:14px;margin-top:16px;border-top:1px solid var(--line)}
-#quick-preview{display:grid;gap:14px}#quick-preview[hidden]{display:none}#quick-preview textarea{min-height:70px}.quick-create-form{max-height:80vh;overflow:auto;padding-right:6px}
+#quick-preview{display:grid;gap:14px}#quick-preview[hidden]{display:none}#quick-preview textarea{min-height:70px}.quick-create-form{max-height:80vh;overflow:auto;padding:6px}
 @media(prefers-reduced-motion:reduce){.work-dots i{animation:none;opacity:.8}}
 
 .work-item-details summary,.work-proposal summary{cursor:pointer;font-weight:700;padding:10px 0}.work-proposal[open]{display:grid;gap:12px}.output-setting{border:1px solid var(--line);border-radius:16px;padding:24px}.output-setting h2{margin:0 0 12px}.output-settings>.auto-draft-fields{padding:20px;border:1px solid var(--line);border-radius:16px;background:white}
