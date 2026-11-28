@@ -189,8 +189,8 @@ function home(){
      <h1 id="home-title">개인정보 동의서,<br>업무에 맞게.</h1>
      <p class="home-description">수집 항목과 법적 근거를 검토하고, 기관에서 바로 사용할 수 있는 동의서를 만드세요.</p>
      <div class="actions home-actions">
-      <button data-start>동의서 생성 <span aria-hidden="true">→</span></button>
       <button class="primary" data-quick-create>빠른 생성 <span aria-hidden="true">↗</span></button>
+      <button data-start>동의서 생성 <span aria-hidden="true">→</span></button>
      </div>
     </div>
    </section>
